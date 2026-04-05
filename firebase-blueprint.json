@@ -1,0 +1,287 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the laundry service (customer or staff).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string", "description": "User's name" },
+        "email": { "type": "string", "format": "email", "description": "User's email" },
+        "phone": { "type": "string", "description": "User's phone number" },
+        "userType": { "type": "string", "enum": ["guest", "subscriber", "admin"], "description": "Type of user" },
+        "role": { "type": "string", "enum": ["user", "admin"], "description": "User's role" },
+        "adminRole": { "type": "string", "enum": ["super_admin", "store_manager", "store_staff", "delivery_staff"], "description": "Specific administrative role" },
+        "storeId": { "type": "string", "description": "Assigned store ID for managers and staff" },
+        "employeeId": { "type": "string", "description": "Auto-generated employee ID" },
+        "address": { "type": "string", "description": "User's address" },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Staff status" },
+        "points": { "type": "integer", "description": "User's loyalty points" },
+        "studentId": { "type": "string", "description": "User's student ID" },
+        "isRegistered": { "type": "boolean", "description": "Whether the user is registered" },
+        "xp": { "type": "integer", "description": "User's experience points" },
+        "level": { "type": "string", "enum": ["Bronze", "Silver", "Gold", "Platinum"], "description": "User's level" },
+        "streak": { "type": "integer", "description": "User's weekly streak" },
+        "riskScore": { "type": "integer", "description": "User's anti-abuse risk score" },
+        "referralCode": { "type": "string", "description": "User's unique referral code" },
+        "totalReferrals": { "type": "integer", "description": "Total successful referrals" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation timestamp" },
+        "lastLogin": { "type": "string", "format": "date-time", "description": "Last login timestamp" }
+      },
+      "required": ["uid", "name", "email", "userType"]
+    },
+    "Slot": {
+      "title": "Slot",
+      "description": "Availability of machines for a specific time slot on a specific date.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "description": "ISO date string (YYYY-MM-DD)" },
+        "timeSlot": { "type": "string", "description": "Hourly slot (e.g., 09:00-10:00)" },
+        "machines": {
+          "type": "object",
+          "description": "Map of machine IDs to user UIDs"
+        }
+      },
+      "required": ["date", "timeSlot", "machines"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A specific laundry booking record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user" },
+        "userName": { "type": "string", "description": "Name of the user" },
+        "date": { "type": "string", "description": "ISO date string (YYYY-MM-DD)" },
+        "timeSlot": { "type": "string", "description": "Hourly slot" },
+        "machineNumber": { "type": "integer", "description": "Assigned machine number (1-4)" },
+        "pickupDrop": { "type": "boolean", "description": "Whether pickup and drop is requested" },
+        "address": { "type": "string", "description": "Pickup/Delivery address" },
+        "phone": { "type": "string", "description": "Contact phone number" },
+        "latitude": { "type": "number", "description": "User's latitude" },
+        "longitude": { "type": "number", "description": "User's longitude" },
+        "deliveryFee": { "type": "number", "description": "Calculated delivery fee" },
+        "storeId": { "type": "string", "description": "ID of the store handling the booking" },
+        "staffId": { "type": "string", "description": "ID of the store staff assigned to this booking" },
+        "deliveryStaffId": { "type": "string", "description": "ID of the delivery staff assigned to this booking" },
+        "serviceType": { "type": "string", "enum": ["Wash & Fold", "Express Wash", "Instant Booking", "Subscription"], "description": "Type of service" },
+        "approxLoad": { "type": "string", "enum": ["1-2 kg", "3-4 kg", "5-6 kg"], "description": "Approximate load" },
+        "price": { "type": "number", "description": "Total price in INR" },
+        "pointsEarned": { "type": "integer", "description": "Points earned from this booking" },
+        "pointsRedeemed": { "type": "integer", "description": "Points redeemed for this booking" },
+        "status": { "type": "string", "enum": ["pending", "paid", "completed", "rejected", "rescheduled", "In Wash", "In Drier", "Ready to collect", "Ready to deliver", "Ready for pick up", "Washing completed", "Out for delivery"], "description": "Booking status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Booking creation timestamp" }
+      },
+      "required": ["userId", "date", "timeSlot", "machineNumber", "price", "status"]
+    },
+    "Store": {
+      "title": "Store",
+      "description": "A laundry store location.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Store ID" },
+        "name": { "type": "string", "description": "Store name" },
+        "address": { "type": "string", "description": "Store physical address" },
+        "latitude": { "type": "number", "description": "Store latitude" },
+        "longitude": { "type": "number", "description": "Store longitude" },
+        "isActive": { "type": "boolean", "description": "Whether the store is active" }
+      },
+      "required": ["name", "latitude", "longitude"]
+    },
+    "Machine": {
+      "title": "Machine",
+      "description": "A laundry machine in a store.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Machine ID" },
+        "storeId": { "type": "string", "description": "Store ID" },
+        "number": { "type": "integer", "description": "Machine number" },
+        "type": { "type": "string", "enum": ["washer", "dryer"], "description": "Machine type" },
+        "status": { "type": "string", "enum": ["idle", "running", "maintenance"], "description": "Machine status" },
+        "currentBookingId": { "type": "string", "description": "ID of the current booking" },
+        "timeRemaining": { "type": "integer", "description": "Time remaining in minutes" }
+      },
+      "required": ["storeId", "number", "type", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "A notification sent to a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user" },
+        "email": { "type": "string", "format": "email", "description": "User's email" },
+        "type": { "type": "string", "enum": ["booking_confirmed", "booking_rejected", "booking_rescheduled"], "description": "Notification type" },
+        "title": { "type": "string", "description": "Notification title" },
+        "message": { "type": "string", "description": "Notification message" },
+        "bookingId": { "type": "string", "description": "Related booking ID" },
+        "isRead": { "type": "boolean", "description": "Whether the notification is read" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Notification creation timestamp" }
+      },
+      "required": ["userId", "email", "type", "title", "message", "isRead", "createdAt"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global application settings (pricing, promos, etc.)",
+      "type": "object",
+      "properties": {
+        "pricing": {
+          "type": "object",
+          "properties": {
+            "washFold": { "type": "number" },
+            "expressWash": { "type": "number" },
+            "instantBooking": { "type": "number" },
+            "minCharge": { "type": "number" },
+            "pricePerKg": { "type": "number" }
+          }
+        },
+        "discounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "type": { "type": "string", "enum": ["percentage", "fixed"] },
+              "value": { "type": "number" },
+              "active": { "type": "boolean" }
+            }
+          }
+        },
+        "promos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "code": { "type": "string" },
+              "description": { "type": "string" },
+              "discountType": { "type": "string", "enum": ["percentage", "fixed"] },
+              "discountValue": { "type": "number" },
+              "expiryDate": { "type": "string", "format": "date" },
+              "active": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "RolePermissions": {
+      "title": "RolePermissions",
+      "description": "Permissions assigned to each administrative role.",
+      "type": "object",
+      "properties": {
+        "view_orders": { "type": "boolean" },
+        "update_status": { "type": "boolean" },
+        "assign_tasks": { "type": "boolean" },
+        "access_logistics": { "type": "boolean" },
+        "manage_inventory": { "type": "boolean" },
+        "view_reports": { "type": "boolean" }
+      }
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "An entry in the global or weekly leaderboard.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "totalScore": { "type": "integer" },
+        "weeklyScore": { "type": "integer" },
+        "lastUpdated": { "type": "string", "format": "date-time" },
+        "hostel": { "type": "string" }
+      }
+    },
+    "Referral": {
+      "title": "Referral",
+      "description": "A referral record tracking the invitee and inviter.",
+      "type": "object",
+      "properties": {
+        "referrerId": { "type": "string" },
+        "referredUserId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "completed", "flagged"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Mission": {
+      "title": "Mission",
+      "description": "A mission or challenge for users to complete.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "rewardXP": { "type": "integer" },
+        "rewardPoints": { "type": "integer" },
+        "type": { "type": "string", "enum": ["daily", "weekly", "one-time"] },
+        "requirement": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["orders", "referrals", "spend", "streak"] },
+            "value": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "UserMission": {
+      "title": "UserMission",
+      "description": "A user's progress on a specific mission.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "missionId": { "type": "string" },
+        "progress": { "type": "integer" },
+        "status": { "type": "string", "enum": ["in-progress", "completed", "claimed"] },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/slots/{slotId}": {
+      "schema": "Slot",
+      "description": "Machine availability per slot"
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Laundry bookings"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User notifications"
+    },
+    "/stores/{storeId}": {
+      "schema": "Store",
+      "description": "Laundry store locations"
+    },
+    "/machines/{machineId}": {
+      "schema": "Machine",
+      "description": "Laundry machines per store"
+    },
+    "/settings/{settingId}": {
+      "schema": "Settings",
+      "description": "Global application settings"
+    },
+    "/role_permissions/{roleId}": {
+      "schema": "RolePermissions",
+      "description": "Permissions assigned to each administrative role"
+    },
+    "/leaderboard/{userId}": {
+      "schema": "LeaderboardEntry",
+      "description": "Leaderboard entries"
+    },
+    "/referrals/{referralId}": {
+      "schema": "Referral",
+      "description": "Referral records"
+    },
+    "/missions/{missionId}": {
+      "schema": "Mission",
+      "description": "Available missions"
+    },
+    "/userMissions/{userMissionId}": {
+      "schema": "UserMission",
+      "description": "User mission progress"
+    }
+  }
+}

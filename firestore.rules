@@ -1,0 +1,238 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - name: string (required)
+    //   - email: string (required)
+    //   - userType: string (required, guest/subscriber)
+    //   - package: string (optional, for subscribers)
+    //   - createdAt: timestamp (optional)
+    //   - termsAccepted: bool (optional)
+    //
+    // Collection: slots
+    // Document ID: {slotId} (e.g., 2026-03-27_09:00-10:00)
+    // Fields:
+    //   - date: string (required)
+    //   - timeSlot: string (required)
+    //   - machines: map (required)
+    //     - 1: string (uid or empty)
+    //     - 2: string (uid or empty)
+    //     - 3: string (uid or empty)
+    //     - 4: string (uid or empty)
+    //
+    // Collection: bookings
+    // Document ID: {bookingId}
+    // Fields:
+    //   - userId: string (required)
+    //   - userName: string (required)
+    //   - date: string (required)
+    //   - timeSlot: string (required)
+    //   - machineNumber: int (required)
+    //   - pickupDrop: bool (required)
+    //   - serviceType: string (required, Wash & Fold/Express Wash/Instant Booking/Subscription)
+    //   - approxLoad: string (required)
+    //   - price: number (required)
+    //   - status: string (required)
+    //   - createdAt: timestamp (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email == "ashwinchuttipara@gmail.com" && request.auth.token.get('email_verified', false) == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin') ||
+        (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)))
+      );
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email == "ashwinchuttipara@gmail.com" && request.auth.token.get('email_verified', false) == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin') ||
+        (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)) &&
+         get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') == 'super_admin')
+      );
+    }
+
+    function getAdminRole() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') : '';
+    }
+
+    function getStoreId() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('storeId', '') : '';
+    }
+
+    function isStoreManager() {
+      return isAuthenticated() && getAdminRole() == 'store_manager';
+    }
+
+    function isStoreStaff() {
+      return isAuthenticated() && getAdminRole() == 'store_staff';
+    }
+
+    function isDeliveryStaff() {
+      return isAuthenticated() && getAdminRole() == 'delivery_staff';
+    }
+
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() > 0 &&
+             data.name is string && data.name.size() > 0 &&
+             data.email is string &&
+             data.userType in ['guest', 'subscriber', 'admin'];
+    }
+
+    function isValidSlot(data) {
+      return data.date is string && 
+             data.timeSlot is string && 
+             data.machines is map;
+    }
+
+    function isValidBooking(data) {
+      return data.userId is string && 
+             data.userName is string &&
+             data.date is string && 
+             data.timeSlot is string &&
+             (data.machineNumber is number || data.machineNumber is int) &&
+             data.pickupDrop is bool &&
+             data.price is number &&
+             data.status in ['pending', 'paid', 'completed', 'rejected', 'rescheduled', 'In Wash', 'In Drier', 'Ready to collect', 'Ready to deliver', 'Ready for pick up', 'Washing completed', 'Out for delivery', 'Delivered', 'Picked Up'] &&
+             (!('serviceType' in data) || data.serviceType is string) &&
+             (!('approxLoad' in data) || data.approxLoad is string) &&
+             (!('createdAt' in data) || data.createdAt is string || data.createdAt is timestamp) &&
+             (!('pointsEarned' in data) || data.pointsEarned is number) &&
+             (!('pointsRedeemed' in data) || data.pointsRedeemed is number) &&
+             (!('latitude' in data) || data.latitude is number) &&
+             (!('longitude' in data) || data.longitude is number) &&
+             (!('deliveryFee' in data) || data.deliveryFee is number) &&
+             (!('address' in data) || data.address is string) &&
+             (!('phone' in data) || data.phone is string) &&
+             (!('storeId' in data) || data.storeId is string) &&
+             (!('staffId' in data) || data.staffId is string) &&
+             (!('deliveryStaffId' in data) || data.deliveryStaffId is string) &&
+             (!('rejectionReason' in data) || data.rejectionReason is string);
+    }
+
+    function isValidStore(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.latitude is number &&
+             data.longitude is number &&
+             (!('address' in data) || data.address is string) &&
+             (!('isActive' in data) || data.isActive is bool) &&
+             (!('storeCode' in data) || data.storeCode is string);
+    }
+
+    function canAccessBooking(bookingData) {
+      return isOwner(bookingData.userId) || 
+             isSuperAdmin() || 
+             (isStoreManager() && bookingData.get('storeId', '') == getStoreId()) ||
+             (isStoreStaff() && bookingData.get('staffId', '') == request.auth.uid) ||
+             (isDeliveryStaff() && bookingData.get('deliveryStaffId', '') == request.auth.uid);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()));
+      allow create: if isAuthenticated() && (isOwner(userId) || isSuperAdmin()) && isValidUser(request.resource.data);
+      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId())) && isValidUser(request.resource.data);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /slots/{slotId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidSlot(request.resource.data);
+      allow update: if isAuthenticated() && isValidSlot(request.resource.data);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if isAuthenticated() && canAccessBooking(resource.data);
+      allow create: if isAuthenticated() && isValidBooking(request.resource.data) && (isOwner(request.resource.data.userId) || isSuperAdmin() || isStoreManager());
+      allow update: if isAuthenticated() && isValidBooking(request.resource.data) && canAccessBooking(resource.data);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isSuperAdmin());
+      allow create: if isAuthenticated(); 
+      allow update: if isAuthenticated() && (isOwner(resource.data.userId) || isSuperAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    match /stores/{storeId} {
+      allow read: if true; 
+      allow create: if isSuperAdmin() && isValidStore(request.resource.data);
+      allow update: if (isSuperAdmin() || (isStoreManager() && storeId == getStoreId())) && isValidStore(request.resource.data);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /machines/{machineId} {
+      allow read: if isAuthenticated() && (isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()) || (isStoreStaff() && resource.data.get('storeId', '') == getStoreId()));
+      allow write: if isAuthenticated() && (isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()) || (isStoreStaff() && resource.data.get('storeId', '') == getStoreId()));
+    }
+
+    match /admin_roles/{email} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+
+    match /role_permissions/{roleId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+
+    // ===============================================================
+    // Gamification Rules
+    // ===============================================================
+
+    match /leaderboard/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    match /referrals/{referralId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.referrerId) || isOwner(resource.data.referredUserId) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(request.resource.data.referrerId);
+      allow update: if isAdmin();
+    }
+
+    match /missions/{missionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /userMissions/{userMissionId} {
+      allow read: if isAuthenticated() && isOwner(resource.data.userId);
+      allow write: if isAuthenticated() && isOwner(request.resource.data.userId);
+    }
+  }
+}

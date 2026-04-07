@@ -18,6 +18,9 @@ app.use(express.json());
 // Load Firebase Config
 const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
 
+console.log("Environment Project ID (GOOGLE_CLOUD_PROJECT):", process.env.GOOGLE_CLOUD_PROJECT);
+console.log("Environment Project ID (PROJECT_ID):", process.env.PROJECT_ID);
+
 // Explicitly set project ID in environment to ensure Admin SDK uses the correct project
 process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
 process.env.GCLOUD_PROJECT = firebaseConfig.projectId;
@@ -29,11 +32,10 @@ if (!admin.apps.length) {
   
   try {
     admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
       projectId: firebaseConfig.projectId,
-      // In this environment, we should not need to provide credentials explicitly
-      // as they are provided by the platform, but we MUST ensure the project ID is correct.
     });
-    console.log("Firebase Admin initialized.");
+    console.log("Firebase Admin initialized with ADC.");
   } catch (e) {
     console.error("Failed to initialize Firebase Admin:", e);
   }
@@ -52,6 +54,7 @@ const authAdmin = getAuth(adminApp);
 (async () => {
   try {
     console.log("Testing Firestore connection...");
+    console.log(`Using database: ${firebaseConfig.firestoreDatabaseId || "(default)"}`);
     const testSnapshot = await dbAdmin.collection("users").limit(1).get();
     console.log("Firestore connection test successful. Found docs:", testSnapshot.size);
     
@@ -60,8 +63,25 @@ const authAdmin = getAuth(adminApp);
     
     // Initialize Mission Progress Listeners
     setupMissionTriggers();
-  } catch (err) {
-    console.error("Firestore connection test FAILED:", err);
+  } catch (err: any) {
+    console.error("Firestore connection test FAILED with named database:", err);
+    if (firebaseConfig.firestoreDatabaseId) {
+      console.log("Attempting to connect to the (default) database instead...");
+      try {
+        const defaultDb = getFirestore(adminApp);
+        const defaultSnapshot = await defaultDb.collection("users").limit(1).get();
+        console.log("Firestore connection test successful with (default) database. Found docs:", defaultSnapshot.size);
+        // If this works, we might need to update the config or use the default DB.
+      } catch (defaultErr) {
+        console.error("Firestore connection test FAILED with (default) database too:", defaultErr);
+      }
+    }
+    
+    if (err.code === 7 || err.message?.includes("PERMISSION_DENIED")) {
+      console.error("This is a permission error. Check if the service account has access to the database.");
+      console.error("Project ID:", firebaseConfig.projectId);
+      console.error("Database ID:", firebaseConfig.firestoreDatabaseId);
+    }
   }
 })();
 
@@ -100,6 +120,30 @@ function setupMissionTriggers() {
     });
   }, (error) => {
     console.error("Referral Mission Listener Error:", error);
+  });
+
+  // 3. Listen for paid subscriptions
+  dbAdmin.collection("bookings").onSnapshot((snapshot) => {
+    snapshot.docChanges().forEach(async (change) => {
+      if (change.type === "modified" || change.type === "added") {
+        const bookingData = change.doc.data();
+        if (bookingData.status === "paid" && bookingData.serviceType === "Subscription" && !bookingData.subscriptionProcessed) {
+          console.log(`Processing subscription activation for booking: ${change.doc.id}`);
+          try {
+            await dbAdmin.collection("users").doc(bookingData.userId).update({
+              subscriptionPaid: true,
+              subscriptionStartDate: new Date().toISOString(),
+              package: bookingData.packageId || "basic"
+            });
+            await change.doc.ref.update({ subscriptionProcessed: true });
+          } catch (err) {
+            console.error("Error activating subscription:", err);
+          }
+        }
+      }
+    });
+  }, (error) => {
+    console.error("Subscription Payment Listener Error:", error);
   });
 }
 
@@ -222,23 +266,25 @@ app.post("/api/auth/create-staff", async (req, res) => {
       });
     }
 
-    console.log(`Saving to Firestore for UID: ${userRecord.uid}...`);
-    const userData = {
-      ...staffData,
-      uid: userRecord.uid,
-      password: hashedPassword, // Stored hashed
-      isFirstLogin: true,
-      createdAt: FieldValue.serverTimestamp(),
-    };
-
     try {
+      console.log(`Saving to Firestore for UID: ${userRecord.uid} in database: ${firebaseConfig.firestoreDatabaseId || '(default)'}...`);
+      const userData = {
+        ...staffData,
+        uid: userRecord.uid,
+        password: hashedPassword, // Stored hashed
+        isFirstLogin: true,
+        createdAt: FieldValue.serverTimestamp(),
+      };
+
       await dbAdmin.collection("users").doc(userRecord.uid).set(userData);
       console.log(`Staff document saved successfully`);
-    } catch (dbErr) {
+    } catch (dbErr: any) {
       console.error("Firestore Set Doc Error:", dbErr);
+      console.error("Error Code:", dbErr.code);
+      console.error("Error Details:", dbErr.details);
       return res.status(500).json({ 
         success: false, 
-        error: "Firestore Error: " + (dbErr instanceof Error ? dbErr.message : String(dbErr)) 
+        error: `Firestore Error (${dbErr.code}): ` + (dbErr.message || String(dbErr)) 
       });
     }
 
@@ -298,6 +344,49 @@ app.post("/api/auth/change-password", async (req, res) => {
   } catch (err) {
     console.error("Change Password Error:", err);
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/api/auth/delete-user", async (req, res) => {
+  const { uid } = req.body;
+
+  if (!uid) {
+    return res.status(400).json({ success: false, error: "User UID is required" });
+  }
+
+  try {
+    console.log(`Attempting to delete user: ${uid}`);
+    
+    // Delete from Firebase Auth
+    try {
+      await authAdmin.deleteUser(uid);
+      console.log(`Auth user ${uid} deleted successfully`);
+    } catch (authErr: any) {
+      // If user doesn't exist in Auth, we might still want to delete from Firestore
+      if (authErr.code === 'auth/user-not-found') {
+        console.warn(`Auth user ${uid} not found, proceeding to Firestore deletion`);
+      } else {
+        console.error("Auth Delete User Error:", authErr);
+        throw authErr;
+      }
+    }
+
+    // Delete from Firestore
+    try {
+      await dbAdmin.collection("users").doc(uid).delete();
+      console.log(`Firestore document for ${uid} deleted successfully`);
+    } catch (dbErr: any) {
+      console.error("Firestore Delete Doc Error:", dbErr);
+      throw dbErr;
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("Delete User Error:", err);
+    res.status(500).json({ 
+      success: false, 
+      error: err.message || String(err) 
+    });
   }
 });
 

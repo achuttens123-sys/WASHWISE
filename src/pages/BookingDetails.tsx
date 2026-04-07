@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Check, Package, Truck, Weight, Info, MapPin, Phone, AlertTriangle, Home } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { StoreService, Store } from '../services/StoreService';
+import { StoreService } from '../services/StoreService';
+import { Store } from '../types';
 
 const BookingDetails: React.FC = () => {
   const [searchParams] = useSearchParams();

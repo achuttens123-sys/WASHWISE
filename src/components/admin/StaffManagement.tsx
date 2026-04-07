@@ -47,6 +47,7 @@ import {
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { User, Store, AdminRole } from '../../types';
 import { format } from 'date-fns';
+import ConfirmModal from '../ConfirmModal';
 
 interface StaffManagementProps {
   stores: Store[];
@@ -83,6 +84,19 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createdCredentials, setCreatedCredentials] = useState<{ staffId: string; password: string } | null>(null);
+
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    variant: 'danger' | 'warning' | 'info';
+  }>({
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    variant: 'danger'
+  });
 
   useEffect(() => {
     // Fetch all staff (users with adminRole)
@@ -191,13 +205,29 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
   };
 
   const handleDeleteStaff = async (uid: string) => {
-    if (window.confirm('Are you sure you want to remove this staff member?')) {
-      try {
-        await deleteDoc(doc(db, 'users', uid));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `users/${uid}`);
-      }
-    }
+    setConfirmConfig({
+      title: 'Remove Staff Member',
+      message: 'Are you sure you want to remove this staff member? This will delete their user account from Firebase Authentication and their data from Firestore.',
+      onConfirm: async () => {
+        try {
+          const response = await fetch('/api/auth/delete-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid })
+          });
+          
+          const result = await response.json();
+          if (!result.success) {
+            throw new Error(result.error || 'Failed to delete staff member');
+          }
+        } catch (error: any) {
+          console.error('Error deleting staff:', error);
+          alert(`Error: ${error.message}`);
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
   };
 
   const resetForm = () => {
@@ -794,6 +824,15 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
           </div>
         )}
       </AnimatePresence>
+
+      <ConfirmModal
+        isOpen={isConfirmModalOpen}
+        onClose={() => setIsConfirmModalOpen(false)}
+        onConfirm={confirmConfig.onConfirm}
+        title={confirmConfig.title}
+        message={confirmConfig.message}
+        variant={confirmConfig.variant}
+      />
     </div>
   );
 };

@@ -143,7 +143,7 @@ const Leaderboard: React.FC = () => {
                   <p className={`text-sm font-black truncate w-full text-center ${pos === 1 ? 'text-white' : 'text-gray-800 dark:text-gray-100'}`}>
                     {entry.userName}
                   </p>
-                  <p className={`text-[10px] font-black uppercase tracking-widest ${pos === 1 ? 'text-blue-200' : 'text-gray-400'}`}>
+                  <p className={`text-[10px] font-black uppercase tracking-widest ${pos === 1 ? 'text-blue-200' : 'text-gray-400 dark:text-gray-500'}`}>
                     {activeTab === 'weekly' ? entry.weeklyScore : entry.totalScore} PTS
                   </p>
                 </motion.div>
@@ -162,7 +162,7 @@ const Leaderboard: React.FC = () => {
               >
                 <div className="flex items-center gap-4">
                   <div className="w-8 text-center">
-                    <span className="text-sm font-black text-gray-400">#{entry.rank}</span>
+                    <span className="text-sm font-black text-gray-400 dark:text-gray-500">#{entry.rank}</span>
                   </div>
                   <div className="w-10 h-10 rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800">
                     <img 
@@ -182,7 +182,7 @@ const Leaderboard: React.FC = () => {
                   <p className="text-sm font-black text-blue-600 dark:text-blue-400">
                     {activeTab === 'weekly' ? entry.weeklyScore : entry.totalScore}
                   </p>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Points</p>
+                  <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Points</p>
                 </div>
               </div>
             ))}

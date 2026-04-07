@@ -153,12 +153,17 @@ const Billing: React.FC = () => {
     if (!user) return;
     
     if (isSubscription && paymentMethod === 'wallet') {
+      if ((user.walletBalance || 0) < discountedPrice) {
+        setError('Insufficient wallet balance.');
+        return;
+      }
       setLoading(true);
       try {
         // For wallet subscription, we just update the user's status (instant)
         await updateDoc(doc(db, 'users', user.uid), {
           subscriptionPaid: true,
-          subscriptionStartDate: new Date().toISOString()
+          subscriptionStartDate: new Date().toISOString(),
+          walletBalance: (user.walletBalance || 0) - discountedPrice
         });
         navigate('/dashboard');
       } catch (err: any) {
@@ -246,6 +251,7 @@ const Billing: React.FC = () => {
         storeId: bookingInfo.storeId,
         serviceType: isSubscription ? 'Subscription' : bookingInfo.serviceType as any,
         approxLoad: isSubscription ? '1-2 kg' : bookingInfo.approxLoad as any,
+        packageId: isSubscription ? packageId || undefined : undefined,
         price: discountedPrice,
         status: 'pending',
         pointsEarned: isSubscription ? 0 : pointsEarned,
@@ -295,11 +301,16 @@ const Billing: React.FC = () => {
         transaction.update(slotRef, { machines: updatedMachines });
       }
 
-      // Update User Points
-      const currentPoints = userDoc.exists() ? (userDoc.data().points || 0) : 0;
+      // Update User Points and Wallet
+      const userData = userDoc.exists() ? userDoc.data() : {};
+      const currentPoints = userData.points || 0;
+      const currentWallet = userData.walletBalance || 0;
       
       if (isPointsPayment) {
         transaction.update(userRef, { points: currentPoints - pointsRequired });
+      } else if (paymentMethod === 'wallet') {
+        if (currentWallet < discountedPrice) throw new Error('Insufficient wallet balance.');
+        transaction.update(userRef, { walletBalance: currentWallet - discountedPrice });
       }
       // Points earning moved to AdminDashboard (on completion)
 
@@ -356,28 +367,28 @@ const Billing: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-4xl mx-auto px-4 py-4 sm:py-8">
       <button 
         onClick={() => navigate(-1)}
-        className="flex items-center text-gray-500 hover:text-blue-600 mb-8 transition-colors"
+        className="flex items-center text-gray-500 hover:text-blue-600 mb-6 sm:mb-8 transition-colors text-sm"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back
       </button>
 
       {isSubscription && !selectedPackage ? (
-        <div className="space-y-8">
-          <div className="text-center mb-12">
-            <h1 className="text-4xl font-black text-gray-900 dark:text-white tracking-tight uppercase mb-4">Select Your Plan</h1>
-            <p className="text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-sm">Choose the perfect subscription for your laundry needs</p>
+        <div className="space-y-6 sm:space-y-8">
+          <div className="text-center mb-8 sm:mb-12">
+            <h1 className="text-2xl sm:text-4xl font-black text-gray-900 dark:text-white tracking-tight uppercase mb-2 sm:mb-4">Select Your Plan</h1>
+            <p className="text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-[10px] sm:text-sm">Choose the perfect subscription for your laundry needs</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
             {(settings?.subscriptionPlans || []).map((plan) => (
               <motion.div
                 key={plan.id}
                 whileHover={{ y: -8 }}
-                className="bg-white dark:bg-gray-900 p-8 rounded-[3rem] border-2 border-gray-100 dark:border-gray-800 shadow-xl hover:border-blue-500 transition-all flex flex-col"
+                className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-[3rem] border-2 border-gray-100 dark:border-gray-800 shadow-xl hover:border-blue-500 transition-all flex flex-col"
               >
                 <div className="mb-8">
                   <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight uppercase mb-2">{plan.name}</h3>
@@ -416,12 +427,12 @@ const Billing: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-        <div className="md:col-span-8 space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8">
+        <div className="md:col-span-8 space-y-4 sm:space-y-6">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="bg-white dark:bg-gray-900 p-8 rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
+            className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
           >
             <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-6 flex items-center">
               <CreditCard className="w-6 h-6 mr-2 text-blue-600 dark:text-blue-400" /> Payment Method
@@ -472,7 +483,7 @@ const Billing: React.FC = () => {
                   </div>
                   <div className="text-left">
                     <p className="font-bold text-gray-800 dark:text-gray-100">Student Wallet</p>
-                    <p className={`text-xs font-medium ${paymentMethod === 'wallet' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Balance: ₹1,240.00</p>
+                    <p className={`text-xs font-medium ${paymentMethod === 'wallet' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Balance: ₹{(user?.walletBalance || 0).toFixed(2)}</p>
                   </div>
                 </div>
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'wallet' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
@@ -632,7 +643,7 @@ const Billing: React.FC = () => {
                 whileTap={{ scale: 0.98 }}
                 onClick={handlePayment}
                 disabled={loading}
-                className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center"
+                className="w-full py-3 sm:py-4 bg-blue-600 text-white font-bold rounded-xl sm:rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center"
               >
                 {loading ? (
                   <Loader2 className="w-6 h-6 animate-spin" />
@@ -650,7 +661,7 @@ const Billing: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="bg-gray-50 dark:bg-gray-900 p-6 rounded-3xl border border-gray-100 dark:border-gray-800 sticky top-8 min-w-[280px] w-full"
+            className="bg-gray-50 dark:bg-gray-900 p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-gray-100 dark:border-gray-800 sticky top-8 min-w-[280px] w-full"
           >
             <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4">Summary</h3>
             <div className="space-y-3 pb-4 border-b border-gray-200 dark:border-gray-700">

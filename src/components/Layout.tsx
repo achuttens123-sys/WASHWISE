@@ -26,19 +26,19 @@ const Layout: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 transition-colors duration-300 flex flex-col">
       {/* Header */}
-      <header className="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 sticky top-0 z-50">
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 sticky top-0 z-50 w-full overflow-x-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-20">
+          <div className="flex justify-between items-center h-16 sm:h-20">
             <motion.div 
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="flex items-center cursor-pointer" 
+              className="flex items-center cursor-pointer shrink-0" 
               onClick={() => navigate(user ? '/dashboard' : '/')}
             >
-              <div className="bg-blue-600 p-2 rounded-xl mr-3 shadow-lg shadow-blue-200 dark:shadow-blue-900/20">
-                <div className="w-6 h-6 border-2 border-white rounded-md" />
+              <div className="bg-blue-600 p-1.5 sm:p-2 rounded-lg sm:rounded-xl mr-2 sm:mr-3 shadow-lg shadow-blue-200 dark:shadow-blue-900/20">
+                <div className="w-4 h-4 sm:w-6 sm:h-6 border-2 border-white rounded-md" />
               </div>
-              <span className="text-2xl font-black text-gray-800 dark:text-white tracking-tight">WASHWISE</span>
+              <span className="text-xl sm:text-2xl font-black text-gray-800 dark:text-white tracking-tight">WASHWISE</span>
             </motion.div>
 
             {/* Desktop Nav */}
@@ -208,7 +208,7 @@ const Layout: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-grow w-full overflow-x-hidden">
         <Outlet />
       </main>
 

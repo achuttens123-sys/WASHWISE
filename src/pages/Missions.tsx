@@ -132,12 +132,12 @@ const Missions: React.FC = () => {
               </div>
 
               <h3 className="text-lg font-black text-gray-800 dark:text-gray-100 mb-2">{mission.title}</h3>
-              <p className="text-xs text-gray-500 font-bold mb-6">{mission.description}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 font-bold mb-6">{mission.description}</p>
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest">
-                  <span className="text-gray-400">Progress</span>
-                  <span className="text-blue-600">{progress} / {mission.requirement.value}</span>
+                  <span className="text-gray-400 dark:text-gray-500">Progress</span>
+                  <span className="text-blue-600 dark:text-blue-400">{progress} / {mission.requirement.value}</span>
                 </div>
                 <div className="h-3 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
                   <motion.div 

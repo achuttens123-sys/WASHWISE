@@ -31,11 +31,13 @@ import { Booking, TIME_SLOTS, Slot, AdminRole, User as AppUser } from '../types'
 import { useSettings } from '../context/SettingsContext';
 import { format, addDays } from 'date-fns';
 import { sendNotification } from '../services/NotificationService';
-import { StoreService, Store } from '../services/StoreService';
+import { StoreService } from '../services/StoreService';
+import { Store } from '../types';
 import { useAuth } from '../context/AuthContext';
 
 import { Notification } from '../services/NotificationService';
 import LoadingScreen from '../components/LoadingScreen';
+import ConfirmModal from '../components/ConfirmModal';
 
 // Initialize secondary app for user creation
 const secondaryApp = initializeApp(firebaseConfig, 'Secondary');
@@ -53,6 +55,18 @@ const AdminDashboard: React.FC = () => {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    variant: 'danger' | 'warning' | 'info';
+  }>({
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    variant: 'danger'
+  });
   const [userFormData, setUserFormData] = useState<Partial<AppUser>>({
     name: '',
     email: '',
@@ -62,6 +76,7 @@ const AdminDashboard: React.FC = () => {
     points: 0
   });
   const [userPassword, setUserPassword] = useState('');
+  const [isResettingWallets, setIsResettingWallets] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
@@ -83,10 +98,12 @@ const AdminDashboard: React.FC = () => {
   const [editingStore, setEditingStore] = useState<Store | null>(null);
   const [storeFormData, setStoreFormData] = useState<Partial<Store>>({
     name: '',
+    location: '',
     address: '',
+    phone: '',
     latitude: 9.575086702360185,
     longitude: 76.62057146585084,
-    isActive: true
+    active: true
   });
 
   useEffect(() => {
@@ -186,12 +203,31 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleRemoveTeamMember = async (email: string) => {
-    if (!confirm(`Are you sure you want to remove ${email} from the team?`)) return;
-    try {
-      await deleteDoc(doc(db, 'admin_roles', email));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `admin_roles/${email}`);
-    }
+    setConfirmConfig({
+      title: 'Remove Team Member',
+      message: `Are you sure you want to remove ${email} from the team? This will revoke their administrative access.`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'admin_roles', email));
+          
+          // Also update the user document if it exists
+          const userQuery = query(collection(db, 'users'), where('email', '==', email.toLowerCase()));
+          const userSnap = await getDocs(userQuery);
+          if (!userSnap.empty) {
+            const userDoc = userSnap.docs[0];
+            await updateDoc(doc(db, 'users', userDoc.id), {
+              role: 'user',
+              adminRole: null,
+              storeId: null
+            });
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, `admin_roles/${email}`);
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
   };
 
   const handleSaveStore = async () => {
@@ -207,10 +243,12 @@ const AdminDashboard: React.FC = () => {
       setEditingStore(null);
       setStoreFormData({
         name: '',
+        location: '',
         address: '',
+        phone: '',
         latitude: 9.575086702360185,
         longitude: 76.62057146585084,
-        isActive: true
+        active: true
       });
     } catch (error) {
       console.error(error);
@@ -220,17 +258,24 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleDeleteStore = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this store?')) return;
-    try {
-      await StoreService.deleteStore(id);
-    } catch (error) {
-      console.error(error);
-    }
+    setConfirmConfig({
+      title: 'Delete Store',
+      message: 'Are you sure you want to delete this store? This will remove it from the system.',
+      onConfirm: async () => {
+        try {
+          await StoreService.deleteStore(id);
+        } catch (error) {
+          console.error(error);
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
   };
 
   const toggleStoreStatus = async (store: Store) => {
     try {
-      await StoreService.updateStore(store.id, { isActive: !store.isActive });
+      await StoreService.updateStore(store.id, { active: !store.active });
     } catch (error) {
       console.error(error);
     }
@@ -285,19 +330,23 @@ const AdminDashboard: React.FC = () => {
       setUserPassword('');
     } catch (error: any) {
       console.error('Error adding user:', error);
-      alert('Error adding user: ' + error.message);
     }
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!window.confirm('Are you sure you want to delete this user? This will remove their data from the database.')) return;
-
-    try {
-      await deleteDoc(doc(db, 'users', userId));
-    } catch (error: any) {
-      console.error('Error deleting user:', error);
-      alert('Error deleting user: ' + error.message);
-    }
+    setConfirmConfig({
+      title: 'Delete User Account',
+      message: 'Are you sure you want to delete this user? This will remove their data from the database. This action cannot be undone.',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'users', userId));
+        } catch (error: any) {
+          console.error('Error deleting user:', error);
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
   };
 
   const handleToggleSuspension = async (userId: string, currentStatus: boolean) => {
@@ -307,8 +356,35 @@ const AdminDashboard: React.FC = () => {
       });
     } catch (error: any) {
       console.error('Error toggling suspension:', error);
-      alert('Error toggling suspension: ' + error.message);
     }
+  };
+
+  const handleResetAllWallets = async () => {
+    setConfirmConfig({
+      title: 'Reset All Wallets',
+      message: 'Are you sure you want to reset ALL student wallets to ₹0.00? This action cannot be undone.',
+      onConfirm: async () => {
+        setIsResettingWallets(true);
+        try {
+          const usersSnap = await getDocs(collection(db, 'users'));
+          const batch = [];
+          
+          for (const userDoc of usersSnap.docs) {
+            batch.push(updateDoc(doc(db, 'users', userDoc.id), {
+              walletBalance: 0
+            }));
+          }
+          
+          await Promise.all(batch);
+        } catch (error: any) {
+          console.error('Error resetting wallets:', error);
+        } finally {
+          setIsResettingWallets(false);
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
   };
 
   const filteredBookings = bookings.filter(booking => {
@@ -346,6 +422,11 @@ const AdminDashboard: React.FC = () => {
             const pointsToAdd = bookingData.pointsEarned || 0;
             transaction.update(userRef, { points: currentPoints + pointsToAdd });
           }
+          
+          // Referral & Gamification logic
+          const { GamificationService } = await import('../services/GamificationService');
+          await GamificationService.awardOrderRewards(bookingData.userId, { ...bookingData, id: bookingId });
+          await GamificationService.validateReferral(bookingData.userId, { ...bookingData, id: bookingId });
         }
       });
     } catch (error) {
@@ -503,22 +584,22 @@ const AdminDashboard: React.FC = () => {
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight uppercase">ADMIN DASHBOARD</h1>
-          <p className="text-gray-500 dark:text-gray-400 font-medium">
-            <span className="text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider text-xs mr-2">
+          <h1 className="text-2xl sm:text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight uppercase">ADMIN DASHBOARD</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">
+            <span className="text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider text-[10px] sm:text-xs mr-2">
               {isSuperAdmin ? 'Super Admin' : isStoreManager ? 'Store Manager' : 'Administrator'}
             </span>
             • Manage all laundry bookings and machine assignments.
           </p>
         </div>
-        <button className="flex items-center px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl text-sm font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all shadow-sm">
+        <button className="flex items-center px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl text-sm font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all shadow-sm w-fit">
           <Download className="w-4 h-4 mr-2" />
           Export Report
         </button>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         {[
           { label: 'Total Bookings', value: stats.total, color: 'blue' },
           { label: 'Pending', value: stats.pending, color: 'yellow' },
@@ -531,16 +612,16 @@ const AdminDashboard: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1 }}
             whileHover={{ y: -5, transition: { duration: 0.2 } }}
-            className="bg-white dark:bg-gray-900 p-6 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm"
+            className="bg-white dark:bg-gray-900 p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm"
           >
-            <p className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">{stat.label}</p>
-            <p className={`text-2xl font-black text-${stat.color}-600 dark:text-${stat.color}-400 tracking-tight`}>{stat.value}</p>
+            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">{stat.label}</p>
+            <p className={`text-lg sm:text-2xl font-black text-${stat.color}-600 dark:text-${stat.color}-400 tracking-tight`}>{stat.value}</p>
           </motion.div>
         ))}
       </div>
 
       {/* Tabs */}
-      <div className="flex space-x-4 border-b border-gray-100 dark:border-gray-800">
+      <div className="flex space-x-4 border-b border-gray-100 dark:border-gray-800 overflow-x-auto pb-px scrollbar-hide">
         {isAdmin && (
           <button
             onClick={() => setActiveTab('bookings')}
@@ -920,13 +1001,23 @@ const AdminDashboard: React.FC = () => {
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">User Management</h3>
-            <button 
-              onClick={() => setIsUserModalOpen(true)}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add New User
-            </button>
+            <div className="flex gap-3">
+              <button 
+                onClick={handleResetAllWallets}
+                disabled={isResettingWallets || users.length === 0}
+                className="flex items-center px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-xl text-sm font-bold hover:bg-red-100 transition-all disabled:opacity-50"
+              >
+                {isResettingWallets ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                Reset All Wallets
+              </button>
+              <button 
+                onClick={() => setIsUserModalOpen(true)}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add New User
+              </button>
+            </div>
           </div>
 
           <div className="bg-white dark:bg-gray-900 p-4 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm">
@@ -1036,10 +1127,12 @@ const AdminDashboard: React.FC = () => {
                 setEditingStore(null);
                 setStoreFormData({
                   name: '',
+                  location: '',
                   address: '',
+                  phone: '',
                   latitude: 9.575086702360185,
                   longitude: 76.62057146585084,
-                  isActive: true
+                  active: true
                 });
                 setIsStoreModalOpen(true);
               }}
@@ -1065,7 +1158,15 @@ const AdminDashboard: React.FC = () => {
                     <button 
                       onClick={() => {
                         setEditingStore(store);
-                        setStoreFormData(store);
+                        setStoreFormData({
+                          name: store.name || '',
+                          location: store.location || '',
+                          address: store.address || '',
+                          phone: store.phone || '',
+                          latitude: store.latitude || 9.575086702360185,
+                          longitude: store.longitude || 76.62057146585084,
+                          active: store.active ?? true
+                        });
                         setIsStoreModalOpen(true);
                       }}
                       className="p-2 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all"
@@ -1091,12 +1192,12 @@ const AdminDashboard: React.FC = () => {
                   <button 
                     onClick={() => toggleStoreStatus(store)}
                     className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${
-                      store.isActive 
+                      store.active 
                         ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
                         : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
                     }`}
                   >
-                    {store.isActive ? (
+                    {store.active ? (
                       <><ToggleRight className="w-4 h-4" /> Active</>
                     ) : (
                       <><ToggleLeft className="w-4 h-4" /> Inactive</>
@@ -1399,7 +1500,17 @@ const AdminDashboard: React.FC = () => {
                   type="text"
                   value={storeFormData.name}
                   onChange={(e) => setStoreFormData({ ...storeFormData, name: e.target.value })}
-                  placeholder="e.g., Main Office, Downtown Branch"
+                  placeholder="e.g., Main Office"
+                  className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1 block">Location (Area)</label>
+                <input
+                  type="text"
+                  value={storeFormData.location}
+                  onChange={(e) => setStoreFormData({ ...storeFormData, location: e.target.value })}
+                  placeholder="e.g., Downtown, North Side"
                   className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-100"
                 />
               </div>
@@ -1410,6 +1521,16 @@ const AdminDashboard: React.FC = () => {
                   onChange={(e) => setStoreFormData({ ...storeFormData, address: e.target.value })}
                   placeholder="Full address of the store"
                   className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 h-20 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1 block">Phone Number</label>
+                <input
+                  type="tel"
+                  value={storeFormData.phone}
+                  onChange={(e) => setStoreFormData({ ...storeFormData, phone: e.target.value })}
+                  placeholder="Store contact number"
+                  className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-100"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -1437,12 +1558,12 @@ const AdminDashboard: React.FC = () => {
               <div className="flex items-center gap-3">
                 <input
                   type="checkbox"
-                  id="isActive"
-                  checked={storeFormData.isActive}
-                  onChange={(e) => setStoreFormData({ ...storeFormData, isActive: e.target.checked })}
+                  id="active"
+                  checked={storeFormData.active}
+                  onChange={(e) => setStoreFormData({ ...storeFormData, active: e.target.checked })}
                   className="w-5 h-5 rounded border-gray-300 dark:border-gray-700 text-blue-600 focus:ring-blue-500 dark:bg-gray-800"
                 />
-                <label htmlFor="isActive" className="text-sm font-bold text-gray-700 dark:text-gray-300">Store is Active</label>
+                <label htmlFor="active" className="text-sm font-bold text-gray-700 dark:text-gray-300">Store is Active</label>
               </div>
             </div>
             
@@ -1464,6 +1585,15 @@ const AdminDashboard: React.FC = () => {
           </motion.div>
         </div>
       )}
+      {/* Confirm Modal */}
+      <ConfirmModal
+        isOpen={isConfirmModalOpen}
+        onClose={() => setIsConfirmModalOpen(false)}
+        onConfirm={confirmConfig.onConfirm}
+        title={confirmConfig.title}
+        message={confirmConfig.message}
+        variant={confirmConfig.variant}
+      />
     </div>
   );
 };

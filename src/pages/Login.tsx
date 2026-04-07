@@ -31,6 +31,7 @@ const Login: React.FC = () => {
     confirmPassword: '',
     fullName: '',
     studentId: '',
+    referralCode: '',
     selectedPackage: settings?.subscriptionPlans[0]?.id || 'basic'
   });
   const [tempUser, setTempUser] = useState<any>(null);
@@ -74,8 +75,20 @@ const Login: React.FC = () => {
       }
     } else {
       // New user
+      const deviceId = localStorage.getItem('deviceId') || `dev-${Math.random().toString(36).substring(2, 15)}`;
+      localStorage.setItem('deviceId', deviceId);
+      
+      let ipAddress = 'unknown';
+      try {
+        const ipRes = await fetch('https://api.ipify.org?format=json');
+        const ipData = await ipRes.json();
+        ipAddress = ipData.ip;
+      } catch (e) {
+        console.error('Failed to fetch IP:', e);
+      }
+
       if (isSubscriber) {
-        setTempUser(fbUser);
+        setTempUser({ ...fbUser, deviceId, ipAddress });
         setStep('register');
       } else {
         const userData = {
@@ -87,7 +100,10 @@ const Login: React.FC = () => {
           adminRole: adminRoleData?.role || (isAdminEmail ? 'super_admin' : null),
           isRegistered: true,
           createdAt: new Date().toISOString(),
-          termsAccepted: false // Will be set to true after modal
+          termsAccepted: false,
+          deviceId,
+          ipAddress,
+          referredBy: formData.referralCode || null
         };
         setPendingUserData(userData);
         setShowTerms(true);
@@ -101,6 +117,13 @@ const Login: React.FC = () => {
     try {
       const finalData = { ...pendingUserData, termsAccepted: true };
       await login(finalData);
+      
+      // Handle referral if code was provided
+      if (finalData.referredBy) {
+        const { GamificationService } = await import('../services/GamificationService');
+        await GamificationService.handleReferral(finalData.referredBy, finalData.uid);
+      }
+
       setShowTerms(false);
       if (finalData.adminRole) {
         navigate('/admin');
@@ -131,7 +154,9 @@ const Login: React.FC = () => {
       if (err.code === 'auth/popup-blocked') {
         setError('Popup blocked! Please allow popups for this site.');
       } else if (err.code === 'auth/popup-closed-by-user') {
-        setError('Login cancelled. Please try again.');
+        // User closed the popup, don't show a scary error
+        setLoading(false);
+        return;
       } else if (err.code === 'auth/cancelled-popup-request') {
         return;
       } else {
@@ -261,7 +286,10 @@ const Login: React.FC = () => {
         package: formData.selectedPackage,
         isRegistered: true,
         createdAt: new Date().toISOString(),
-        termsAccepted: false
+        termsAccepted: false,
+        deviceId: tempUser.deviceId,
+        ipAddress: tempUser.ipAddress,
+        referredBy: formData.referralCode || null
       };
       
       setPendingUserData(userData);
@@ -275,10 +303,10 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto px-4 py-8">
+    <div className="max-w-md mx-auto px-4 py-4 sm:py-8">
       <button 
         onClick={() => navigate('/')}
-        className="flex items-center text-gray-500 hover:text-blue-600 mb-8 transition-colors"
+        className="flex items-center text-gray-500 hover:text-blue-600 mb-6 sm:mb-8 transition-colors text-sm"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Home
@@ -287,7 +315,7 @@ const Login: React.FC = () => {
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white dark:bg-gray-900 p-8 rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
+        className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
       >
         <AnimatePresence mode="wait">
           {step === 'login' ? (
@@ -297,13 +325,13 @@ const Login: React.FC = () => {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
             >
-              <div className="text-center mb-8">
-                <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
+              <div className="text-center mb-6 sm:mb-8">
+                <h2 className="text-xl sm:text-2xl font-bold text-gray-800 dark:text-gray-100">
                   {isSubscriber ? (isSignup ? 'Subscriber Signup' : 'Subscriber Login') : 'Guest Login'}
                 </h2>
-                <p className="text-gray-500 dark:text-gray-400 mt-2">
+                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-2">
                   {isSubscriber 
-                    ? (isSignup ? 'Create an account to start your subscription' : 'Sign in to access your subscription')
+                    ? (isSignup ? 'Create account to start subscription' : 'Sign in to access subscription')
                     : 'Sign in with your account to continue'}
                 </p>
               </div>
@@ -349,7 +377,7 @@ const Login: React.FC = () => {
                   <button
                     onClick={handleGoogleLogin}
                     disabled={loading}
-                    className="w-full py-4 bg-white dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all flex items-center justify-center shadow-sm hover:shadow-md"
+                    className="w-full py-3 sm:py-4 bg-white dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all flex items-center justify-center shadow-sm hover:shadow-md"
                   >
                     {loading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -408,10 +436,26 @@ const Login: React.FC = () => {
                       </div>
                     </div>
 
+                    {isSignup && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Referral Code (Optional)</label>
+                        <div className="relative">
+                          <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                          <input
+                            type="text"
+                            value={formData.referralCode}
+                            onChange={(e) => setFormData({ ...formData, referralCode: e.target.value.toUpperCase() })}
+                            placeholder="Have a referral code? Enter to get rewards"
+                            className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none"
+                      className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none"
                     >
                       {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isSignup ? 'Create Account' : 'Sign In')}
                     </button>
@@ -459,7 +503,7 @@ const Login: React.FC = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none"
+                      className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none"
                     >
                       {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Staff Login'}
                     </button>
@@ -518,6 +562,20 @@ const Login: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Referral Code (Optional)</label>
+                  <div className="relative">
+                    <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                    <input
+                      type="text"
+                      value={formData.referralCode}
+                      onChange={(e) => setFormData({ ...formData, referralCode: e.target.value.toUpperCase() })}
+                      placeholder="Have a referral code? Enter to get rewards"
+                      className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Select Package</label>
                   <div className="grid grid-cols-1 gap-3">
                     {(settings?.subscriptionPlans || []).map((pkg) => {
@@ -555,7 +613,7 @@ const Login: React.FC = () => {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none"
+                  className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none"
                 >
                   {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Complete Registration'}
                 </button>
@@ -580,7 +638,7 @@ const Login: React.FC = () => {
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-white dark:bg-gray-900 w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden p-8"
+              className="bg-white dark:bg-gray-900 w-full max-w-md rounded-2xl sm:rounded-[3rem] shadow-2xl overflow-hidden p-6 sm:p-8"
             >
               <div className="text-center mb-8">
                 <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center text-blue-600 mx-auto mb-4">
@@ -626,7 +684,7 @@ const Login: React.FC = () => {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none mt-4"
+                  className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none mt-4"
                 >
                   {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Update Password & Login'}
                 </button>

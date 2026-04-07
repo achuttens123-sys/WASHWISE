@@ -30,10 +30,14 @@ export interface User {
   subscriptionPaid?: boolean;
   subscriptionStartDate?: string;
   isSuspended?: boolean;
+  walletBalance?: number;
   photoURL?: string;
   createdAt?: any;
   termsAccepted?: boolean;
   deviceIds?: string[];
+  deviceId?: string;
+  ipAddress?: string;
+  firstOrderRewarded?: boolean;
 }
 
 export interface LeaderboardEntry {
@@ -86,6 +90,8 @@ export interface Store {
   address: string;
   phone: string;
   storeCode?: string;
+  latitude?: number;
+  longitude?: number;
   active: boolean;
   createdAt: any;
 }
@@ -145,6 +151,7 @@ export interface Booking {
   status: 'pending' | 'paid' | 'completed' | 'rejected' | 'rescheduled' | 'In Wash' | 'In Drier' | 'Ready to collect' | 'Ready to deliver' | 'Ready for pick up' | 'Washing completed' | 'Out for delivery';
   pointsEarned?: number;
   pointsRedeemed?: number;
+  packageId?: string;
   createdAt?: any;
   rejectionReason?: string;
   rescheduledTo?: string; // ID of the new booking if this was rejected and rescheduled

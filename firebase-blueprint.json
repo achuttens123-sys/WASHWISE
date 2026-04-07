@@ -25,8 +25,13 @@
         "riskScore": { "type": "integer", "description": "User's anti-abuse risk score" },
         "referralCode": { "type": "string", "description": "User's unique referral code" },
         "totalReferrals": { "type": "integer", "description": "Total successful referrals" },
+        "deviceId": { "type": "string", "description": "Device identifier for fraud prevention" },
+        "ipAddress": { "type": "string", "description": "IP address for fraud prevention" },
+        "firstOrderRewarded": { "type": "boolean", "description": "Whether the user has been rewarded for their first order" },
+        "referredBy": { "type": "string", "description": "Referral code of the user who referred this user" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Account creation timestamp" },
-        "lastLogin": { "type": "string", "format": "date-time", "description": "Last login timestamp" }
+        "lastLogin": { "type": "string", "format": "date-time", "description": "Last login timestamp" },
+        "walletBalance": { "type": "number", "description": "User's current wallet balance in INR" }
       },
       "required": ["uid", "name", "email", "userType"]
     },
@@ -78,14 +83,18 @@
       "description": "A laundry store location.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Store ID" },
+        "id": { "type": "string", "description": "Store ID (WW####)" },
         "name": { "type": "string", "description": "Store name" },
+        "location": { "type": "string", "description": "Store location (City/Area)" },
         "address": { "type": "string", "description": "Store physical address" },
+        "phone": { "type": "string", "description": "Store phone number" },
+        "storeCode": { "type": "string", "description": "Store short code (e.g. KOT)" },
         "latitude": { "type": "number", "description": "Store latitude" },
         "longitude": { "type": "number", "description": "Store longitude" },
-        "isActive": { "type": "boolean", "description": "Whether the store is active" }
+        "active": { "type": "boolean", "description": "Whether the store is active" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
       },
-      "required": ["name", "latitude", "longitude"]
+      "required": ["name", "active"]
     },
     "Machine": {
       "title": "Machine",
@@ -198,8 +207,10 @@
         "referrerId": { "type": "string" },
         "referredUserId": { "type": "string" },
         "status": { "type": "string", "enum": ["pending", "completed", "flagged"] },
+        "riskReason": { "type": "string", "description": "Reason for flagging as fraud" },
         "createdAt": { "type": "string", "format": "date-time" },
-        "completedAt": { "type": "string", "format": "date-time" }
+        "completedAt": { "type": "string", "format": "date-time" },
+        "flaggedAt": { "type": "string", "format": "date-time" }
       }
     },
     "Mission": {

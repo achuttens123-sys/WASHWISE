@@ -79,13 +79,15 @@ export const GamificationService = {
     await this.updateLeaderboardScore(userId);
   },
 
-  async handleReferral(referrerId: string, referredUserId: string) {
-    // Referral signup → +50 XP for referrer
-    const referrerRef = doc(db, 'users', referrerId);
-    await updateDoc(referrerRef, {
-      xp: increment(50)
-    });
+  async handleReferral(referrerCode: string, referredUserId: string) {
+    // Find referrer by code
+    const usersQuery = query(collection(db, 'users'), where('referralCode', '==', referrerCode), limit(1));
+    const usersSnap = await getDocs(usersQuery);
+    
+    if (usersSnap.empty) return;
+    const referrerId = usersSnap.docs[0].id;
 
+    // Create pending referral record
     await addDoc(collection(db, 'referrals'), {
       referrerId,
       referredUserId,
@@ -93,11 +95,20 @@ export const GamificationService = {
       createdAt: serverTimestamp()
     });
 
+    // XP reward removed from signup per requirements
     await this.updateLeaderboardScore(referrerId);
   },
 
   async validateReferral(referredUserId: string, firstOrder: Booking) {
-    if (firstOrder.price < 150) return;
+    // Requirements: status == "completed", value >= ₹150
+    if (firstOrder.status !== 'completed' || firstOrder.price < 150) return;
+
+    // Check if user already rewarded for first order
+    const referredUserRef = doc(db, 'users', referredUserId);
+    const referredUserSnap = await getDoc(referredUserRef);
+    if (!referredUserSnap.exists()) return;
+    const referredUserData = referredUserSnap.data() as User;
+    if (referredUserData.firstOrderRewarded) return;
 
     const referralQuery = query(
       collection(db, 'referrals'),
@@ -110,12 +121,64 @@ export const GamificationService = {
       const referralDoc = referralSnap.docs[0];
       const referralData = referralDoc.data() as Referral;
       const referrerId = referralData.referrerId;
-
-      // Referral first completed order → +100 XP for referrer
       const referrerRef = doc(db, 'users', referrerId);
+      const referrerSnap = await getDoc(referrerRef);
+      
+      if (!referrerSnap.exists()) return;
+      const referrerData = referrerSnap.data() as User;
+
+      // Fraud Detection
+      let isFraud = false;
+      let riskReason = '';
+
+      // 1. Multiple accounts from same device
+      if (referredUserData.deviceId && referrerData.deviceId && referredUserData.deviceId === referrerData.deviceId) {
+        isFraud = true;
+        riskReason = 'multi-account';
+      }
+
+      // 2. Repeated referrals from same IP cluster
+      if (referredUserData.ipAddress && referrerData.ipAddress && referredUserData.ipAddress === referrerData.ipAddress) {
+        isFraud = true;
+        riskReason = 'same-ip';
+      }
+
+      // 3. Abnormal referral frequency (>3/hour)
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const recentReferralsQuery = query(
+        collection(db, 'referrals'),
+        where('referrerId', '==', referrerId),
+        where('createdAt', '>=', Timestamp.fromDate(oneHourAgo))
+      );
+      const recentReferralsSnap = await getDocs(recentReferralsQuery);
+      if (recentReferralsSnap.size > 3) {
+        isFraud = true;
+        riskReason = 'spam-referral';
+      }
+
+      if (isFraud) {
+        await this.updateRiskScore(referrerId, 'spam-referral');
+        await updateDoc(doc(db, 'referrals', referralDoc.id), {
+          status: 'flagged',
+          riskReason,
+          flaggedAt: serverTimestamp()
+        });
+        // Per requirements: do not credit rewards or delay them. 
+        // Here we flag and don't credit.
+        return;
+      }
+
+      // Credit Referrer: ₹50 equivalent points (e.g. 50 points)
       await updateDoc(referrerRef, {
+        points: increment(50),
         xp: increment(100),
         totalReferrals: increment(1)
+      });
+
+      // Credit Referred User: ₹30 welcome bonus
+      await updateDoc(referredUserRef, {
+        points: increment(30),
+        firstOrderRewarded: true
       });
 
       await updateDoc(doc(db, 'referrals', referralDoc.id), {

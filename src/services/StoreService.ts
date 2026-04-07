@@ -1,14 +1,6 @@
 import { collection, getDocs, query, where, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-
-export interface Store {
-  id: string;
-  name: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-  isActive: boolean;
-}
+import { Store } from '../types';
 
 export const DEFAULT_BASE = {
   lat: 9.575086702360185,
@@ -48,7 +40,7 @@ export const getDeliveryFee = (distance: number): { fee: number; available: bool
 
 export const StoreService = {
   async getStores(): Promise<Store[]> {
-    const q = query(collection(db, 'stores'), where('isActive', '==', true));
+    const q = query(collection(db, 'stores'), where('active', '==', true));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Store));
   },
@@ -80,7 +72,7 @@ export const StoreService = {
       // Fallback to default if no stores in DB yet
       const distance = calculateDistance(lat, lng, DEFAULT_BASE.lat, DEFAULT_BASE.lng);
       return { 
-        store: { ...DEFAULT_BASE, id: 'default', latitude: DEFAULT_BASE.lat, longitude: DEFAULT_BASE.lng, isActive: true, address: 'Main Office' }, 
+        store: { ...DEFAULT_BASE, id: 'default', latitude: DEFAULT_BASE.lat, longitude: DEFAULT_BASE.lng, active: true, address: 'Main Office', location: 'Main Office', phone: '', createdAt: new Date().toISOString() }, 
         distance 
       };
     }
@@ -89,7 +81,7 @@ export const StoreService = {
     let minDistance = Infinity;
 
     for (const store of stores) {
-      const dist = calculateDistance(lat, lng, store.latitude, store.longitude);
+      const dist = calculateDistance(lat, lng, store.latitude || 0, store.longitude || 0);
       if (dist < minDistance) {
         minDistance = dist;
         nearest = store;

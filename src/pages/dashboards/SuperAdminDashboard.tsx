@@ -52,6 +52,7 @@ import { format, subDays, startOfDay, endOfDay, isWithinInterval, startOfMonth, 
 import { useAuth } from '../../context/AuthContext';
 import { StoreService } from '../../services/StoreService';
 import LoadingScreen from '../../components/LoadingScreen';
+import ConfirmModal from '../../components/ConfirmModal';
 import { 
   LineChart, 
   Line, 
@@ -86,13 +87,25 @@ const SuperAdminDashboard: React.FC = () => {
   // Store Management State
   const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
   const [editingStore, setEditingStore] = useState<Store | null>(null);
-  const [storeFormData, setStoreFormData] = useState({ name: '', location: '', address: '', storeCode: '', latitude: 0, longitude: 0, active: true });
+  const [storeFormData, setStoreFormData] = useState({ name: '', location: '', address: '', phone: '', storeCode: '', latitude: 0, longitude: 0, active: true });
   
   // User Management State
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [userFilterRole, setUserFilterRole] = useState<string>('all');
   const [userFilterStore, setUserFilterStore] = useState<string>('all');
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    variant: 'danger' | 'warning' | 'info';
+  }>({
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    variant: 'danger'
+  });
 
   useEffect(() => {
     // Global data fetching for Super Admin
@@ -253,23 +266,57 @@ const SuperAdminDashboard: React.FC = () => {
       }
       setIsStoreModalOpen(false);
       setEditingStore(null);
-      setStoreFormData({ name: '', location: '', address: '', storeCode: '', latitude: 0, longitude: 0, active: true });
+      setStoreFormData({ name: '', location: '', address: '', phone: '', storeCode: '', latitude: 0, longitude: 0, active: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'stores');
     }
   };
 
   const handleDeleteStore = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this store?')) {
-      try {
-        await deleteDoc(doc(db, 'stores', id));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, 'stores');
-      }
-    }
+    setConfirmConfig({
+      title: 'Delete Store',
+      message: 'Are you sure you want to delete this store? This will remove it from the system.',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'stores', id));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'stores');
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
   };
 
   // User Management Handlers
+  const handleDeleteUser = async (userId: string) => {
+    if (userId === currentUser?.uid) return;
+    
+    setConfirmConfig({
+      title: 'Delete User Account',
+      message: 'Are you sure you want to delete this user? This will remove their account from Firebase Authentication and their data from Firestore. This action cannot be undone.',
+      onConfirm: async () => {
+        try {
+          const response = await fetch('/api/auth/delete-user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: userId })
+          });
+          
+          const result = await response.json();
+          if (!result.success) {
+            throw new Error(result.error || 'Failed to delete user');
+          }
+        } catch (error: any) {
+          console.error('Error deleting user:', error);
+          alert(`Error: ${error.message}`);
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
+  };
+
   const handleUpdateUserRole = async (userId: string, role: string, adminRole?: string, storeId?: string) => {
     try {
       await updateDoc(doc(db, 'users', userId), {
@@ -322,32 +369,32 @@ const SuperAdminDashboard: React.FC = () => {
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight uppercase">SUPER ADMIN PANEL</h1>
-          <p className="text-gray-500 dark:text-gray-400 font-medium">
+          <h1 className="text-2xl sm:text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight uppercase">SUPER ADMIN PANEL</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">
             Full control over multi-store operations, pricing, and global logistics.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <button className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl text-sm font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-50 transition-all shadow-sm flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button className="px-3 sm:px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg sm:rounded-xl text-sm font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-50 transition-all shadow-sm flex items-center gap-2">
             <Download className="w-4 h-4" />
-            Report
+            <span className="hidden sm:inline">Report</span>
           </button>
           <button 
             onClick={() => {
               setEditingStore(null);
-              setStoreFormData({ name: '', location: '', address: '', storeCode: '', latitude: 0, longitude: 0, active: true });
+              setStoreFormData({ name: '', location: '', address: '', phone: '', storeCode: '', latitude: 0, longitude: 0, active: true });
               setIsStoreModalOpen(true);
             }}
-            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center gap-2"
+            className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg sm:rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
-            New Store
+            <span className="hidden sm:inline">New Store</span>
           </button>
         </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
         {[
           { label: 'Total Revenue', value: `₹${stats.revenue.toLocaleString()}`, icon: DollarSign, color: 'green' },
           { label: 'Orders Today', value: stats.ordersToday, icon: TrendingUp, color: 'blue' },
@@ -359,15 +406,15 @@ const SuperAdminDashboard: React.FC = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1 }}
-            className="bg-white dark:bg-gray-900 p-6 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm relative overflow-hidden group"
+            className="bg-white dark:bg-gray-900 p-4 sm:p-6 rounded-2xl sm:rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm relative overflow-hidden group"
           >
-            <div className={`absolute -right-4 -top-4 w-24 h-24 bg-${stat.color}-50 dark:bg-${stat.color}-900/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-500`} />
+            <div className={`absolute -right-4 -top-4 w-24 h-24 bg-${stat.color}-50 dark:bg-${stat.color}-900/10 rounded-full blur-2xl opacity-0 group-hover:opacity-100 group-hover:scale-150 transition-all duration-500`} />
             <div className="relative z-10">
-              <div className={`p-3 bg-${stat.color}-50 dark:bg-${stat.color}-900/20 rounded-2xl w-fit mb-4`}>
-                <stat.icon className={`w-6 h-6 text-${stat.color}-600`} />
+              <div className={`p-2 sm:p-3 bg-${stat.color}-50 dark:bg-${stat.color}-900/20 rounded-xl sm:rounded-2xl w-fit mb-3 sm:mb-4`}>
+                <stat.icon className={`w-5 h-5 sm:w-6 sm:h-6 text-${stat.color}-600`} />
               </div>
-              <p className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">{stat.label}</p>
-              <p className="text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight">{stat.value}</p>
+              <p className="text-[10px] sm:text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">{stat.label}</p>
+              <p className="text-2xl sm:text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight">{stat.value}</p>
             </div>
           </motion.div>
         ))}
@@ -413,16 +460,16 @@ const SuperAdminDashboard: React.FC = () => {
             exit={{ opacity: 0, y: -20 }}
             className="space-y-8"
           >
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 bg-white dark:bg-gray-900 p-8 rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-sm">
-                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Revenue & Orders</h3>
-                  <div className="flex bg-gray-50 dark:bg-gray-800 rounded-xl p-1">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
+              <div className="lg:col-span-2 bg-white dark:bg-gray-900 p-4 sm:p-8 rounded-2xl sm:rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 sm:mb-8 gap-4">
+                  <h3 className="text-lg sm:text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Revenue & Orders</h3>
+                  <div className="flex bg-gray-50 dark:bg-gray-800 rounded-xl p-1 w-fit">
                     {(['daily', 'weekly', 'monthly'] as const).map((range) => (
                       <button
                         key={range}
                         onClick={() => setTimeRange(range)}
-                        className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                        className={`px-3 sm:px-4 py-1.5 sm:py-2 text-[9px] sm:text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
                           timeRange === range 
                             ? 'bg-white dark:bg-gray-900 text-blue-600 shadow-sm' 
                             : 'text-gray-400 hover:text-gray-600'
@@ -433,7 +480,7 @@ const SuperAdminDashboard: React.FC = () => {
                     ))}
                   </div>
                 </div>
-                <div className="h-80 w-full">
+                <div className="h-64 sm:h-80 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData}>
                       <defs>
@@ -483,11 +530,11 @@ const SuperAdminDashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-indigo-600 dark:bg-indigo-700 p-8 rounded-[3rem] text-white shadow-xl shadow-indigo-200 dark:shadow-none relative overflow-hidden">
-                <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-white/10 rounded-full blur-3xl" />
+              <div className="bg-indigo-600 dark:bg-indigo-700 p-6 sm:p-8 rounded-2xl sm:rounded-[3rem] text-white shadow-xl shadow-indigo-200 dark:shadow-none relative overflow-hidden group">
+                <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-white/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                 <div className="relative z-10">
-                  <h3 className="text-xl font-black uppercase tracking-tight mb-6">Store Performance</h3>
-                  <div className="space-y-6">
+                  <h3 className="text-lg sm:text-xl font-black uppercase tracking-tight mb-6">Store Performance</h3>
+                  <div className="space-y-4 sm:space-y-6">
                     {stores.map((store, i) => {
                       const storeBookings = bookings.filter(b => b.storeId === store.id);
                       const performance = Math.min(100, Math.round((storeBookings.length / (bookings.length || 1)) * 100 * 2));
@@ -958,7 +1005,7 @@ const SuperAdminDashboard: React.FC = () => {
                 <button 
                   onClick={() => {
                     setEditingStore(null);
-                    setStoreFormData({ name: '', location: '', address: '', storeCode: '', latitude: 0, longitude: 0, active: true });
+                    setStoreFormData({ name: '', location: '', address: '', phone: '', storeCode: '', latitude: 0, longitude: 0, active: true });
                     setIsStoreModalOpen(true);
                   }}
                   className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center gap-2"
@@ -1018,13 +1065,14 @@ const SuperAdminDashboard: React.FC = () => {
                               onClick={() => {
                                 setEditingStore(store);
                                 setStoreFormData({ 
-                                  name: store.name, 
-                                  location: store.location, 
-                                  address: store.address, 
+                                  name: store.name || '', 
+                                  location: store.location || '', 
+                                  address: store.address || '', 
+                                  phone: store.phone || '',
                                   storeCode: store.storeCode || '',
                                   latitude: (store as any).latitude || 0, 
                                   longitude: (store as any).longitude || 0, 
-                                  active: store.active 
+                                  active: store.active ?? true 
                                 });
                                 setIsStoreModalOpen(true);
                               }}
@@ -1247,6 +1295,14 @@ const SuperAdminDashboard: React.FC = () => {
                             <button className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all">
                               <History className="w-5 h-5" />
                             </button>
+                            {user.uid !== currentUser?.uid && (
+                              <button 
+                                onClick={() => handleDeleteUser(user.uid)}
+                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                              >
+                                <Trash2 className="w-5 h-5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1402,6 +1458,16 @@ const SuperAdminDashboard: React.FC = () => {
                       placeholder="e.g. KOT"
                     />
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Phone Number</label>
+                    <input 
+                      type="tel"
+                      value={storeFormData.phone}
+                      onChange={(e) => setStoreFormData({ ...storeFormData, phone: e.target.value })}
+                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      placeholder="e.g. +91 9876543210"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Full Address</label>
@@ -1467,6 +1533,16 @@ const SuperAdminDashboard: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        isOpen={isConfirmModalOpen}
+        onClose={() => setIsConfirmModalOpen(false)}
+        onConfirm={confirmConfig.onConfirm}
+        title={confirmConfig.title}
+        message={confirmConfig.message}
+        variant={confirmConfig.variant}
+      />
     </div>
   );
 };

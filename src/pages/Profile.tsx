@@ -475,7 +475,7 @@ const Profile: React.FC = () => {
                       <div className="flex justify-between items-start mb-16">
                         <div>
                           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-500 mb-2">Available Balance</p>
-                          <h2 className="text-6xl font-black tracking-tighter italic">₹1,240<span className="text-2xl opacity-50">.00</span></h2>
+                          <h2 className="text-6xl font-black tracking-tighter italic">₹{user.walletBalance || 0}<span className="text-2xl opacity-50">.00</span></h2>
                         </div>
                         <div className="w-16 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg shadow-blue-500/20" />
                       </div>

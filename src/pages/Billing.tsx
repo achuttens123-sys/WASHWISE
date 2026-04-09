@@ -46,7 +46,8 @@ const Billing: React.FC = () => {
     latitude: parseFloat(searchParams.get('lat') || '0'),
     longitude: parseFloat(searchParams.get('lng') || '0'),
     deliveryFee: parseFloat(searchParams.get('fee') || '0'),
-    storeId: searchParams.get('storeId') || ''
+    storeId: searchParams.get('storeId') || '',
+    garmentInstructions: searchParams.get('garmentInstructions') || ''
   };
 
   // Fetch store name
@@ -249,6 +250,7 @@ const Billing: React.FC = () => {
         longitude: bookingInfo.longitude,
         deliveryFee: bookingInfo.deliveryFee,
         storeId: bookingInfo.storeId,
+        garmentInstructions: bookingInfo.garmentInstructions,
         serviceType: isSubscription ? 'Subscription' : bookingInfo.serviceType as any,
         approxLoad: isSubscription ? '1-2 kg' : bookingInfo.approxLoad as any,
         packageId: isSubscription ? packageId || undefined : undefined,
@@ -328,6 +330,7 @@ const Billing: React.FC = () => {
         longitude: bookingInfo.longitude,
         deliveryFee: bookingInfo.deliveryFee,
         storeId: bookingInfo.storeId,
+        garmentInstructions: bookingInfo.garmentInstructions,
         serviceType: bookingInfo.serviceType as any,
         approxLoad: bookingInfo.approxLoad as any,
         price: isPointsPayment ? 0 : discountedPrice,
@@ -418,7 +421,7 @@ const Billing: React.FC = () => {
 
                 <button
                   onClick={() => navigate(`/billing?type=subscription&packageId=${plan.id}`)}
-                  className="w-full py-4 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none"
+                  className="w-full py-4 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
                 >
                   Select {plan.name}
                 </button>
@@ -444,8 +447,8 @@ const Billing: React.FC = () => {
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
                 onClick={() => { setUsePoints(!usePoints); setError(''); }}
-                className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between ${
-                  usePoints ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-indigo-200 dark:hover:border-indigo-800'
+                className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback ${
+                  usePoints ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 glow-indigo' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-indigo-200 dark:hover:border-indigo-800'
                 }`}
               >
                 <div className="flex items-center">
@@ -473,8 +476,8 @@ const Billing: React.FC = () => {
                     whileHover={{ scale: 1.01 }}
                     whileTap={{ scale: 0.99 }}
                     onClick={() => { setPaymentMethod('wallet'); setError(''); }}
-                    className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between ${
-                      paymentMethod === 'wallet' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
+                    className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback ${
+                      paymentMethod === 'wallet' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
                     }`}
                   >
                 <div className="flex items-center">
@@ -499,8 +502,8 @@ const Billing: React.FC = () => {
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
                 onClick={() => { setPaymentMethod('upi'); setError(''); }}
-                className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between ${
-                  paymentMethod === 'upi' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
+                className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback ${
+                  paymentMethod === 'upi' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
                 }`}
               >
                 <div className="flex items-center">
@@ -597,7 +600,7 @@ const Billing: React.FC = () => {
                   )}
 
                   {upiStep === 'verify' && (
-                    <div className="bg-blue-50 dark:bg-blue-900/20 p-6 rounded-2xl text-center space-y-4">
+                    <div className="bg-blue-50 dark:bg-blue-900/20 p-6 rounded-2xl text-center space-y-4 animate-pulse-glow">
                       <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto shadow-sm">
                         <Smartphone className="w-8 h-8 text-blue-600 dark:text-blue-400 animate-bounce" />
                       </div>
@@ -643,7 +646,7 @@ const Billing: React.FC = () => {
                 whileTap={{ scale: 0.98 }}
                 onClick={handlePayment}
                 disabled={loading}
-                className="w-full py-3 sm:py-4 bg-blue-600 text-white font-bold rounded-xl sm:rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center"
+                className="w-full py-3 sm:py-4 bg-blue-600 text-white font-bold rounded-xl sm:rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center haptic-feedback glow-blue"
               >
                 {loading ? (
                   <Loader2 className="w-6 h-6 animate-spin" />
@@ -702,6 +705,12 @@ const Billing: React.FC = () => {
                     <div className="pt-2">
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Address</p>
                       <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">{bookingInfo.address}</p>
+                    </div>
+                  )}
+                  {bookingInfo.garmentInstructions && (
+                    <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-100 dark:border-amber-800/30">
+                      <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-1">Garment Instructions</p>
+                      <p className="text-xs text-amber-800 dark:text-amber-200 font-medium italic">"{bookingInfo.garmentInstructions}"</p>
                     </div>
                   )}
                 </>

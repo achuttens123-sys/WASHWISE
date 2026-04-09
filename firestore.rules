@@ -57,13 +57,15 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+             ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin') ||
               (request.auth.token.email == "ashwinchuttipara@gmail.com" && request.auth.token.email_verified == true));
     }
 
     function isSuperAdmin() {
       return isAuthenticated() && 
-             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.adminRole == 'super_admin' ||
+             ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin') ||
               (request.auth.token.email == "ashwinchuttipara@gmail.com" && request.auth.token.email_verified == true));
     }
 
@@ -233,7 +235,8 @@ service cloud.firestore {
 
     match /userMissions/{userMissionId} {
       allow read: if isAuthenticated() && isOwner(resource.data.userId);
-      allow write: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow write: if isAuthenticated() && (isOwner(request.resource.data.userId) || isSuperAdmin());
+      allow delete: if isSuperAdmin() || (isAuthenticated() && isOwner(resource.data.userId));
     }
   }
 }

@@ -91,8 +91,8 @@ const Missions: React.FC = () => {
             Complete tasks to earn XP and Points
           </p>
         </div>
-        <div className="p-4 bg-blue-600 rounded-3xl shadow-xl shadow-blue-200 dark:shadow-none">
-          <Target className="w-8 h-8 text-white" />
+        <div className="p-4 bg-blue-600 rounded-3xl shadow-xl shadow-blue-200 dark:shadow-none animate-pulse-glow glow-blue">
+          <Target className="w-8 h-8 text-white animate-bounce" />
         </div>
       </div>
 
@@ -108,10 +108,11 @@ const Missions: React.FC = () => {
               key={mission.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`p-6 rounded-[2.5rem] border ${
+              whileHover={{ y: -8, scale: 1.02 }}
+              className={`p-6 rounded-[2.5rem] border transition-all ${
                 status === 'claimed' 
                   ? 'bg-gray-50 dark:bg-gray-800/50 border-gray-100 dark:border-gray-800 opacity-60' 
-                  : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 shadow-sm'
+                  : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 shadow-sm hover:border-blue-200 dark:hover:border-blue-900/30'
               }`}
             >
               <div className="flex items-start justify-between mb-4">
@@ -151,7 +152,7 @@ const Missions: React.FC = () => {
                   <button
                     onClick={() => userMissionId && handleClaim(userMissionId)}
                     disabled={claiming === userMissionId}
-                    className="w-full py-3 bg-blue-600 text-white text-xs font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+                    className="w-full py-3 bg-blue-600 text-white text-xs font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 transition-all flex items-center justify-center gap-2 haptic-feedback glow-blue animate-pulse-glow"
                   >
                     {claiming === userMissionId ? (
                       <Loader2 className="w-4 h-4 animate-spin" />

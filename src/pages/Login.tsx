@@ -211,8 +211,8 @@ const Login: React.FC = () => {
 
       const result = await response.json();
       if (result.success) {
-        if (result.user.isFirstLogin) {
-          setLoggedInStaff(result.user);
+        if (result.isFirstLogin) {
+          setLoggedInStaff({ uid: result.uid, staffId: formData.staffId });
           setShowPasswordChange(true);
         } else {
           const { signInWithCustomToken } = await import('firebase/auth');
@@ -247,7 +247,7 @@ const Login: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          staffId: loggedInStaff.staffId, 
+          uid: loggedInStaff.uid, 
           newPassword: formData.newPassword 
         })
       });
@@ -455,7 +455,7 @@ const Login: React.FC = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none"
+                      className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
                     >
                       {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isSignup ? 'Create Account' : 'Sign In')}
                     </button>
@@ -471,7 +471,7 @@ const Login: React.FC = () => {
                 ) : (
                   <form onSubmit={handleStaffLogin} className="space-y-4">
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Staff ID</label>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Staff ID or Email</label>
                       <div className="relative">
                         <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
                         <input
@@ -479,7 +479,7 @@ const Login: React.FC = () => {
                           required
                           value={formData.staffId}
                           onChange={(e) => setFormData({ ...formData, staffId: e.target.value })}
-                          placeholder="e.g. WW-MGR-001"
+                          placeholder="e.g. ST-WW-001 or email@washwise.staff"
                           className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
                         />
                       </div>
@@ -503,7 +503,7 @@ const Login: React.FC = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none"
+                      className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
                     >
                       {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Staff Login'}
                     </button>
@@ -523,8 +523,8 @@ const Login: React.FC = () => {
               exit={{ opacity: 0, x: 20 }}
             >
               <div className="text-center mb-8">
-                <div className="bg-blue-50 dark:bg-blue-900/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <GraduationCap className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+                <div className="bg-blue-50 dark:bg-blue-900/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse-glow">
+                  <GraduationCap className="w-8 h-8 text-blue-600 dark:text-blue-400 animate-bounce" />
                 </div>
                 <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Complete Signup</h2>
                 <p className="text-gray-500 dark:text-gray-400 mt-2">Please provide your student details</p>
@@ -613,7 +613,7 @@ const Login: React.FC = () => {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none"
+                  className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
                 >
                   {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Complete Registration'}
                 </button>

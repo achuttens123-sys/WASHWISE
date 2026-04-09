@@ -152,6 +152,7 @@ export interface Booking {
   pointsEarned?: number;
   pointsRedeemed?: number;
   packageId?: string;
+  garmentInstructions?: string;
   createdAt?: any;
   rejectionReason?: string;
   rescheduledTo?: string; // ID of the new booking if this was rejected and rescheduled

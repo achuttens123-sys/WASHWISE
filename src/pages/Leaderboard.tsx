@@ -69,8 +69,8 @@ const Leaderboard: React.FC = () => {
             Compete with others and earn rewards
           </p>
         </div>
-        <div className="p-4 bg-yellow-500 rounded-3xl shadow-xl shadow-yellow-200 dark:shadow-none">
-          <Trophy className="w-8 h-8 text-white" />
+        <div className="p-4 bg-yellow-500 rounded-3xl shadow-xl shadow-yellow-200 dark:shadow-none animate-pulse-glow glow-amber">
+          <Trophy className="w-8 h-8 text-white animate-bounce" />
         </div>
       </div>
 
@@ -80,7 +80,7 @@ const Leaderboard: React.FC = () => {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-[1.8rem] transition-all relative ${
+            className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-[1.8rem] transition-all relative haptic-feedback ${
               activeTab === tab ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -124,9 +124,10 @@ const Leaderboard: React.FC = () => {
                   key={pos}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`flex flex-col items-center p-6 rounded-[2.5rem] relative ${
+                  whileHover={{ y: -12, scale: pos === 1 ? 1.15 : 1.05 }}
+                  className={`flex flex-col items-center p-6 rounded-[2.5rem] relative transition-all ${
                     pos === 1 
-                      ? 'bg-blue-600 text-white scale-110 z-10 shadow-2xl shadow-blue-200 dark:shadow-none' 
+                      ? 'bg-blue-600 text-white scale-110 z-10 shadow-2xl shadow-blue-200 dark:shadow-none glow-blue' 
                       : 'bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800'
                   }`}
                 >
@@ -195,7 +196,7 @@ const Leaderboard: React.FC = () => {
         <motion.div 
           initial={{ y: 100 }}
           animate={{ y: 0 }}
-          className="fixed bottom-24 left-4 right-4 max-w-4xl mx-auto bg-blue-600 text-white p-4 rounded-[2rem] shadow-2xl flex items-center justify-between z-50"
+          className="fixed bottom-24 left-4 right-4 max-w-4xl mx-auto bg-blue-600 text-white p-4 rounded-[2rem] shadow-2xl flex items-center justify-between z-50 animate-pulse-glow glow-blue"
         >
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center font-black">

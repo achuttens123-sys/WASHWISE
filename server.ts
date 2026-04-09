@@ -22,18 +22,19 @@ console.log("Environment Project ID (GOOGLE_CLOUD_PROJECT):", process.env.GOOGLE
 console.log("Environment Project ID (PROJECT_ID):", process.env.PROJECT_ID);
 
 // Explicitly set project ID in environment to ensure Admin SDK uses the correct project
-process.env.GOOGLE_CLOUD_PROJECT = firebaseConfig.projectId;
-process.env.GCLOUD_PROJECT = firebaseConfig.projectId;
+const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.PROJECT_ID || firebaseConfig.projectId;
+process.env.GOOGLE_CLOUD_PROJECT = projectId;
+process.env.GCLOUD_PROJECT = projectId;
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
   console.log("Initializing Firebase Admin...");
-  console.log("Config Project ID:", firebaseConfig.projectId);
+  console.log("Using Project ID:", projectId);
   
   try {
     admin.initializeApp({
       credential: admin.credential.applicationDefault(),
-      projectId: firebaseConfig.projectId,
+      projectId: projectId,
     });
     console.log("Firebase Admin initialized with ADC.");
   } catch (e) {
@@ -299,10 +300,16 @@ app.post("/api/auth/login", async (req, res) => {
   const { staffId, password } = req.body;
 
   try {
-    const snapshot = await dbAdmin.collection("users").where("staffId", "==", staffId).get();
+    // Search by staffId OR email
+    let snapshot = await dbAdmin.collection("users").where("staffId", "==", staffId).get();
     
     if (snapshot.empty) {
-      return res.status(401).json({ success: false, error: "Invalid Staff ID or Password" });
+      // Try searching by email
+      snapshot = await dbAdmin.collection("users").where("email", "==", staffId).get();
+    }
+    
+    if (snapshot.empty) {
+      return res.status(401).json({ success: false, error: "Invalid Credentials" });
     }
 
     const userData = snapshot.docs[0].data();
@@ -313,7 +320,7 @@ app.post("/api/auth/login", async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, userData.password);
     if (!isMatch) {
-      return res.status(401).json({ success: false, error: "Invalid Staff ID or Password" });
+      return res.status(401).json({ success: false, error: "Invalid Credentials" });
     }
 
     // Generate Custom Token for Firebase Auth
@@ -340,7 +347,11 @@ app.post("/api/auth/change-password", async (req, res) => {
       password: hashedPassword,
       isFirstLogin: false
     });
-    res.json({ success: true });
+    
+    // Generate new custom token
+    const customToken = await authAdmin.createCustomToken(uid);
+    
+    res.json({ success: true, token: customToken });
   } catch (err) {
     console.error("Change Password Error:", err);
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });

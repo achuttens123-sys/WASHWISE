@@ -135,6 +135,10 @@ const AnimatedRoutes: React.FC = () => {
 const AppContent: React.FC = () => {
   return (
     <Router>
+      <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-400/10 blur-[120px] animate-pulse-glow" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-400/10 blur-[120px] animate-pulse-glow" style={{ animationDelay: '1s' }} />
+      </div>
       <AnimatedRoutes />
     </Router>
   );

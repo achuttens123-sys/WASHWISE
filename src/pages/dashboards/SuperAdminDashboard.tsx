@@ -43,7 +43,8 @@ import {
   Briefcase,
   Map as MapIcon,
   Navigation,
-  History
+  History,
+  Database
 } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, updateDoc, doc, getDoc, runTransaction, where, limit, addDoc, deleteDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
@@ -77,7 +78,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'stores' | 'orders' | 'users' | 'staff' | 'pricing' | 'finance' | 'logistics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'stores' | 'orders' | 'users' | 'staff' | 'pricing' | 'finance' | 'logistics' | 'maintenance'>('overview');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [globalSettings, setGlobalSettings] = useState<any>(null);
@@ -138,9 +139,10 @@ const SuperAdminDashboard: React.FC = () => {
           const initialSettings = {
             pricing: { washFold: 0, expressWash: 44, instantBooking: 44, minCharge: 156, pricePerKg: 39, minLoad: 5 },
             subscriptionPlans: [
-              { id: 'basic', name: 'Basic', kgLimit: 15, price: 999, discount: 10 },
-              { id: 'pro', name: 'Pro', kgLimit: 30, price: 1899, discount: 15 },
-              { id: 'elite', name: 'Elite', kgLimit: 50, price: 2999, discount: 20 }
+              { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
+              { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
+              { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
+              { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
             ],
             discounts: [],
             promos: []
@@ -153,9 +155,10 @@ const SuperAdminDashboard: React.FC = () => {
         setGlobalSettings({
           pricing: { washFold: 0, expressWash: 44, instantBooking: 44, minCharge: 156, pricePerKg: 39, minLoad: 5 },
           subscriptionPlans: [
-            { id: 'basic', name: 'Basic', kgLimit: 15, price: 999, discount: 10 },
-            { id: 'pro', name: 'Pro', kgLimit: 30, price: 1899, discount: 15 },
-            { id: 'elite', name: 'Elite', kgLimit: 50, price: 2999, discount: 20 }
+            { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
+            { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
+            { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
+            { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
           ],
           discounts: [],
           promos: []
@@ -178,9 +181,10 @@ const SuperAdminDashboard: React.FC = () => {
             minLoad: 5
           },
           subscriptionPlans: [
-            { id: 'basic', name: 'Basic', kgLimit: 15, price: 999, discount: 10 },
-            { id: 'pro', name: 'Pro', kgLimit: 30, price: 1899, discount: 15 },
-            { id: 'elite', name: 'Elite', kgLimit: 50, price: 2999, discount: 20 }
+            { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
+            { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
+            { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
+            { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
           ],
           discounts: [],
           promos: []
@@ -196,9 +200,10 @@ const SuperAdminDashboard: React.FC = () => {
       const fallbackSettings = {
         pricing: { washFold: 0, expressWash: 44, instantBooking: 44, minCharge: 156, pricePerKg: 39, minLoad: 5 },
         subscriptionPlans: [
-          { id: 'basic', name: 'Basic', kgLimit: 15, price: 999, discount: 10 },
-          { id: 'pro', name: 'Pro', kgLimit: 30, price: 1899, discount: 15 },
-          { id: 'elite', name: 'Elite', kgLimit: 50, price: 2999, discount: 20 }
+          { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
+          { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
+          { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
+          { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
         ],
         discounts: [],
         promos: []
@@ -337,6 +342,73 @@ const SuperAdminDashboard: React.FC = () => {
     }
   };
 
+  const handleClearAllOrders = async () => {
+    setConfirmConfig({
+      title: 'Clear All Order History',
+      message: 'CRITICAL: This will permanently delete ALL bookings, machine slots, and mission progress from the entire system. This action cannot be undone. Are you absolutely sure?',
+      onConfirm: async () => {
+        setIsSaving(true);
+        try {
+          // 1. Clear Bookings
+          try {
+            const bookingsSnap = await getDocs(collection(db, 'bookings'));
+            await Promise.all(bookingsSnap.docs.map(d => deleteDoc(doc(db, 'bookings', d.id))));
+          } catch (e) {
+            handleFirestoreError(e, OperationType.DELETE, 'bookings');
+            throw e;
+          }
+          
+          // 2. Clear Slots (Machine assignments)
+          try {
+            const slotsSnap = await getDocs(collection(db, 'slots'));
+            await Promise.all(slotsSnap.docs.map(d => deleteDoc(doc(db, 'slots', d.id))));
+          } catch (e) {
+            handleFirestoreError(e, OperationType.DELETE, 'slots');
+            throw e;
+          }
+
+          // 3. Clear User Missions (Progress tied to orders)
+          try {
+            const missionsSnap = await getDocs(collection(db, 'userMissions'));
+            await Promise.all(missionsSnap.docs.map(d => deleteDoc(doc(db, 'userMissions', d.id))));
+          } catch (e) {
+            handleFirestoreError(e, OperationType.DELETE, 'userMissions');
+            throw e;
+          }
+
+          // 4. Clear Notifications (Mostly order related)
+          try {
+            const notificationsSnap = await getDocs(collection(db, 'notifications'));
+            await Promise.all(notificationsSnap.docs.map(d => deleteDoc(doc(db, 'notifications', d.id))));
+          } catch (e) {
+            handleFirestoreError(e, OperationType.DELETE, 'notifications');
+            throw e;
+          }
+
+          // 5. Reset User Stats (lastOrderDate, etc.)
+          try {
+            const usersSnap = await getDocs(collection(db, 'users'));
+            await Promise.all(usersSnap.docs.map(d => updateDoc(doc(db, 'users', d.id), {
+              lastOrderDate: null,
+              firstOrderRewarded: false
+            })));
+          } catch (e) {
+            handleFirestoreError(e, OperationType.UPDATE, 'users/stats');
+            throw e;
+          }
+          
+          alert('System reset successful. All order history has been cleared.');
+        } catch (error) {
+          console.error("Global Reset Error:", error);
+        } finally {
+          setIsSaving(false);
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
+  };
+
   // Data Visualization Logic
   const getChartData = () => {
     const days = timeRange === 'daily' ? 1 : timeRange === 'weekly' ? 7 : 30;
@@ -431,6 +503,7 @@ const SuperAdminDashboard: React.FC = () => {
           { id: 'pricing', label: 'Pricing Control', icon: DollarSign },
           { id: 'finance', label: 'Finance', icon: TrendingUp },
           { id: 'logistics', label: 'Logistics', icon: Truck },
+          { id: 'maintenance', label: 'Maintenance', icon: Database },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -625,9 +698,10 @@ const SuperAdminDashboard: React.FC = () => {
                 onClick={() => setGlobalSettings({
                   pricing: { washFold: 0, expressWash: 44, instantBooking: 44, minCharge: 156, pricePerKg: 39, minLoad: 5 },
                   subscriptionPlans: [
-                    { id: 'basic', name: 'Basic', kgLimit: 15, price: 999, discount: 10 },
-                    { id: 'pro', name: 'Pro', kgLimit: 30, price: 1899, discount: 15 },
-                    { id: 'elite', name: 'Elite', kgLimit: 50, price: 2999, discount: 20 }
+                    { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
+                    { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
+                    { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
+                    { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
                   ],
                   discounts: [],
                   promos: []
@@ -660,14 +734,31 @@ const SuperAdminDashboard: React.FC = () => {
                     <p className="text-sm text-gray-500 font-medium">Configure base rates for all laundry services.</p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => handleUpdateSettings(globalSettings)}
-                  disabled={isSaving}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all flex items-center gap-2 disabled:opacity-50"
-                >
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  Save Changes
-                </button>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => {
+                      const newPlans = [
+                        { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
+                        { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
+                        { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
+                        { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
+                      ];
+                      setGlobalSettings({ ...globalSettings, subscriptionPlans: newPlans });
+                    }}
+                    className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-amber-100 transition-all flex items-center gap-2"
+                  >
+                    <Percent className="w-4 h-4" />
+                    Apply New Plans
+                  </button>
+                  <button 
+                    onClick={() => handleUpdateSettings(globalSettings)}
+                    disabled={isSaving}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save Changes
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1158,6 +1249,11 @@ const SuperAdminDashboard: React.FC = () => {
                         </td>
                         <td className="py-6">
                           <span className="text-sm font-medium text-gray-600 dark:text-gray-400">{order.serviceType}</span>
+                          {order.garmentInstructions && (
+                            <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium italic mt-1 max-w-[150px] truncate" title={order.garmentInstructions}>
+                              Instr: {order.garmentInstructions}
+                            </p>
+                          )}
                         </td>
                         <td className="py-6">
                           <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
@@ -1403,6 +1499,61 @@ const SuperAdminDashboard: React.FC = () => {
                 <Navigation className="w-5 h-5" />
                 Launch Full Map
               </button>
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'maintenance' && (
+          <motion.div
+            key="maintenance"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="space-y-8"
+          >
+            <div className="bg-white dark:bg-gray-900 p-8 rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-sm">
+              <div className="flex items-center gap-4 mb-8">
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-2xl">
+                  <ShieldAlert className="w-6 h-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">System Maintenance</h3>
+                  <p className="text-sm text-gray-500 font-medium">Critical system operations and data management.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="p-8 bg-red-50 dark:bg-red-900/10 rounded-[2.5rem] border border-red-100 dark:border-red-900/20">
+                  <h4 className="text-lg font-black text-red-600 uppercase tracking-tight mb-4">Reset Order History</h4>
+                  <p className="text-sm text-red-700 dark:text-red-400 font-medium mb-6">
+                    This will delete all bookings, machine assignments, and order-related progress. 
+                    Users will see a completely fresh dashboard with no history.
+                  </p>
+                  <button 
+                    onClick={handleClearAllOrders}
+                    disabled={isSaving}
+                    className="px-8 py-4 bg-red-600 text-white rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-200 dark:shadow-none flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
+                    Clear All Orders & Reset History
+                  </button>
+                </div>
+
+                <div className="p-8 bg-blue-50 dark:bg-blue-900/10 rounded-[2.5rem] border border-blue-100 dark:border-blue-900/20">
+                  <h4 className="text-lg font-black text-blue-600 uppercase tracking-tight mb-4">System Health</h4>
+                  <p className="text-sm text-blue-700 dark:text-blue-400 font-medium mb-6">
+                    Current active bookings: {bookings.length}<br />
+                    Total registered users: {users.length}<br />
+                    Active stores: {stores.length}
+                  </p>
+                  <button 
+                    className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center gap-2"
+                  >
+                    <Activity className="w-5 h-5" />
+                    Run Diagnostics
+                  </button>
+                </div>
+              </div>
             </div>
           </motion.div>
         )}

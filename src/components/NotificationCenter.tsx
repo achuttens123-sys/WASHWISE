@@ -72,11 +72,11 @@ const NotificationCenter: React.FC = () => {
     <div className="relative">
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700"
+        className={`relative p-2 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 haptic-feedback ${unreadCount > 0 ? 'ring-2 ring-blue-500/20' : ''}`}
       >
-        <Bell className="w-6 h-6" />
+        <Bell className={`w-6 h-6 ${unreadCount > 0 ? 'animate-pulse-glow text-blue-600 dark:text-blue-400' : ''}`} />
         {unreadCount > 0 && (
-          <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-white dark:border-gray-900 transform translate-x-1 -translate-y-1">
+          <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-white dark:border-gray-900 transform translate-x-1 -translate-y-1 animate-bounce">
             {unreadCount}
           </span>
         )}
@@ -85,14 +85,14 @@ const NotificationCenter: React.FC = () => {
       <AnimatePresence>
         {isOpen && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+            <div className="fixed inset-0 z-40 bg-black/5 dark:bg-black/20 backdrop-blur-[2px]" onClick={() => setIsOpen(false)} />
             <motion.div
-              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              initial={{ opacity: 0, y: 10, scale: 0.95, transformOrigin: 'top right' }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 10, scale: 0.95 }}
-              className="absolute right-0 mt-4 w-80 bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-800 z-50 overflow-hidden"
+              className="absolute right-0 mt-4 w-[calc(100vw-2rem)] sm:w-96 bg-white dark:bg-gray-900 rounded-[2rem] shadow-2xl border border-gray-100 dark:border-gray-800 z-50 overflow-hidden"
             >
-              <div className="p-6 border-b border-gray-50 dark:border-gray-800 flex justify-between items-center">
+              <div className="p-6 border-b border-gray-50 dark:border-gray-800 flex justify-between items-center bg-white/50 dark:bg-gray-900/50 backdrop-blur-xl">
                 <h3 className="text-lg font-black text-gray-800 dark:text-gray-100 tracking-tight uppercase">Notifications</h3>
                 {unreadCount > 0 && (
                   <button 
@@ -104,7 +104,7 @@ const NotificationCenter: React.FC = () => {
                 )}
               </div>
 
-              <div className="max-h-96 overflow-y-auto scrollbar-hide">
+              <div className="max-h-[60vh] sm:max-h-96 overflow-y-auto scrollbar-hide">
                 {loading ? (
                   <div className="p-12 text-center">
                     <Loader2 className="w-6 h-6 animate-spin text-blue-600 mx-auto" />

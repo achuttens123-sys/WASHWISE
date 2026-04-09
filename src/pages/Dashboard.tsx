@@ -81,20 +81,20 @@ const Dashboard: React.FC = () => {
     if (!isSameDay(selectedDate, new Date())) return false;
     
     const [timeRange, period] = slot.split(' ');
-    const [startTime] = timeRange.split('-');
-    let [hours, minutes] = startTime.split(':').map(Number);
+    const [, endTime] = timeRange.split('-'); // Use end time instead of start time
+    let [hours, minutes] = endTime.split(':').map(Number);
     
     // Logic for the specific format in TIME_SLOTS: "HH:mm-HH:mm AM/PM"
     if (period === 'PM') {
-      if (hours < 11) hours += 12; // 12 PM stays 12, 1-10 PM becomes 13-22. 11 PM is not in our list but would stay 11 (AM) if it was 11:00-12:00 PM
+      if (hours < 12) hours += 12; // 12 PM stays 12, 1-11 PM becomes 13-23
     } else if (period === 'AM') {
       if (hours === 12) hours = 0;
     }
     
-    const slotTime = new Date();
-    slotTime.setHours(hours, minutes, 0, 0);
+    const slotEndTime = new Date();
+    slotEndTime.setHours(hours, minutes, 0, 0);
     
-    return slotTime < new Date();
+    return slotEndTime <= new Date();
   };
 
   const handleSlotSelect = (timeSlot: string) => {
@@ -222,19 +222,19 @@ const Dashboard: React.FC = () => {
         <div className="mb-10">
           <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 ml-1">Active Wash Status</h2>
           <div className="grid grid-cols-1 gap-6">
-            {activeBookings.map((booking) => {
+            {activeBookings.map((booking, index) => {
               const steps = booking.pickupDrop ? [
-                { label: 'Booking confirmed', statuses: ['paid', 'Ready for pick up', 'In Wash', 'In Drier', 'Washing completed', 'Out for delivery', 'completed'] },
-                { label: 'Ready for Pickup', statuses: ['Ready for pick up', 'In Wash', 'In Drier', 'Washing completed', 'Out for delivery', 'completed'] },
-                { label: 'In wash', statuses: ['In Wash', 'In Drier', 'Washing completed', 'Out for delivery', 'completed'] },
-                { label: 'In Drier', statuses: ['In Drier', 'Washing completed', 'Out for delivery', 'completed'] },
-                { label: 'Washing completed', statuses: ['Washing completed', 'Out for delivery', 'completed'] },
+                { label: 'Booking confirmed', statuses: ['paid'] },
+                { label: 'Ready for Pickup', statuses: ['Ready for pick up'] },
+                { label: 'In wash', statuses: ['In Wash'] },
+                { label: 'In Drier', statuses: ['In Drier'] },
+                { label: 'Washing completed', statuses: ['Washing completed', 'Ready to deliver'] },
                 { label: 'Out for delivery', statuses: ['Out for delivery', 'completed'] }
               ] : [
-                { label: 'Booking confirmed', statuses: ['paid', 'In Wash', 'In Drier', 'Washing completed', 'Ready to collect', 'completed'] },
-                { label: 'In wash', statuses: ['In Wash', 'In Drier', 'Washing completed', 'Ready to collect', 'completed'] },
-                { label: 'In Drier', statuses: ['In Drier', 'Washing completed', 'Ready to collect', 'completed'] },
-                { label: 'Washing Completed', statuses: ['Washing completed', 'Ready to collect', 'completed'] },
+                { label: 'Booking confirmed', statuses: ['paid'] },
+                { label: 'In wash', statuses: ['In Wash'] },
+                { label: 'In Drier', statuses: ['In Drier'] },
+                { label: 'Washing Completed', statuses: ['Washing completed'] },
                 { label: 'Ready for Pickup', statuses: ['Ready to collect', 'completed'] }
               ];
 
@@ -247,16 +247,39 @@ const Dashboard: React.FC = () => {
               }
               if (currentStepIndex === -1) currentStepIndex = 0;
 
+              // Show progress bar as complete for these specific statuses
+              const isEffectivelyComplete = ['Ready to collect', 'Ready to deliver', 'Out for delivery', 'completed'].includes(booking.status);
+              const displayStepIndex = isEffectivelyComplete ? steps.length : currentStepIndex;
+
+              const getStatusLabel = (status: string) => {
+                const labels: Record<string, string> = {
+                  'paid': 'Order confirmed',
+                  'Washing completed': 'Completed',
+                  'completed': 'Finalized',
+                  'Ready for pick up': 'Ready for pick up',
+                  'In Wash': 'In Wash',
+                  'In Drier': 'In Drier',
+                  'Ready to collect': 'Ready to collect',
+                  'Out for delivery': 'Out for delivery'
+                };
+                return (labels[status] || status).toUpperCase();
+              };
+
               return (
                 <motion.div
                   key={booking.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white dark:bg-gray-900 p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] border border-blue-50 dark:border-gray-800 shadow-xl shadow-blue-100/20 dark:shadow-none"
+                  initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ delay: index * 0.1 }}
+                  whileHover={{ y: -5, scale: 1.01 }}
+                  className={`bg-white dark:bg-gray-900 p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] border border-blue-50 dark:border-gray-800 shadow-xl shadow-blue-100/20 dark:shadow-none transition-all duration-300 ${
+                    ['In Wash', 'In Drier'].includes(booking.status) ? 'glow-blue ring-2 ring-blue-500/20' : 
+                    booking.status === 'Washing completed' ? 'glow-green ring-2 ring-green-500/20' : ''
+                  }`}
                 >
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 sm:mb-8">
                     <div className="flex items-center gap-3 sm:gap-4">
-                      <div className="p-2 sm:p-3 bg-blue-600 rounded-xl sm:rounded-2xl shadow-lg shadow-blue-200 dark:shadow-none">
+                      <div className={`p-2 sm:p-3 bg-blue-600 rounded-xl sm:rounded-2xl shadow-lg shadow-blue-200 dark:shadow-none ${['In Wash', 'In Drier'].includes(booking.status) ? 'animate-pulse' : ''}`}>
                         <Loader2 className={`w-5 h-5 sm:w-6 sm:h-6 text-white ${['In Wash', 'In Drier'].includes(booking.status) ? 'animate-spin' : ''}`} />
                       </div>
                       <div>
@@ -264,9 +287,15 @@ const Dashboard: React.FC = () => {
                           <p className="text-[10px] sm:text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">{booking.serviceType}</p>
                           <span className="text-[9px] sm:text-[10px] font-black text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-lg">M#{booking.machineNumber}</span>
                         </div>
-                        <h3 className="text-lg sm:text-xl font-black text-gray-800 dark:text-gray-100 tracking-tight">{booking.status.toUpperCase()}</h3>
+                        <h3 className="text-lg sm:text-xl font-black text-gray-800 dark:text-gray-100 tracking-tight">{getStatusLabel(booking.status)}</h3>
                       </div>
                     </div>
+                    {booking.garmentInstructions && (
+                      <div className="mb-6 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-100 dark:border-amber-800/30">
+                        <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-1">Your Instructions</p>
+                        <p className="text-xs text-amber-800 dark:text-amber-200 font-medium italic">"{booking.garmentInstructions}"</p>
+                      </div>
+                    )}
                     <div className="text-left md:text-right">
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Scheduled For</p>
                       <p className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">{booking.date} • {booking.timeSlot}</p>
@@ -279,15 +308,15 @@ const Dashboard: React.FC = () => {
                       <div className="absolute top-4 left-4 right-4 h-0.5 bg-gray-100 dark:bg-gray-800 -z-0" />
                       <motion.div 
                         initial={{ width: 0 }}
-                        animate={{ width: `${(currentStepIndex / (steps.length - 1)) * 100}%` }}
+                        animate={{ width: isEffectivelyComplete ? '100%' : `${(currentStepIndex / (steps.length - 1)) * 100}%` }}
                         className="absolute top-4 left-4 h-0.5 bg-blue-600 -z-0" 
                       />
 
                       <div className="flex justify-between relative z-10">
                         {steps.map((step, idx) => {
-                          const isCompleted = idx < currentStepIndex;
-                          const isCurrent = idx === currentStepIndex;
-                          const isPending = idx > currentStepIndex;
+                          const isCompleted = idx < displayStepIndex;
+                          const isCurrent = idx === currentStepIndex && !isEffectivelyComplete;
+                          const isPending = idx > displayStepIndex;
 
                           return (
                             <div key={idx} className="flex flex-col items-center group">

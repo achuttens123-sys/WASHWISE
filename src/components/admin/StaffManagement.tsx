@@ -19,6 +19,7 @@ import {
   Loader2,
   Save,
   X,
+  ShieldCheck,
   Activity,
   History,
   Briefcase,
@@ -72,6 +73,7 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
     name: '',
     email: '',
     phone: '',
+    staffId: '',
     adminRole: 'store_staff' as AdminRole,
     storeId: '',
     address: '',
@@ -83,7 +85,6 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
   const [rolePermissions, setRolePermissions] = useState<any>({});
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const [createdCredentials, setCreatedCredentials] = useState<{ staffId: string; password: string } | null>(null);
 
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [confirmConfig, setConfirmConfig] = useState<{
@@ -127,25 +128,6 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
     };
   }, []);
 
-  const generateStaffId = (role: AdminRole, storeId: string) => {
-    const store = stores.find(s => s.id === storeId);
-    const storeCode = store?.storeCode || 'WW';
-    let roleCode = 'STF';
-    if (role === 'store_manager') roleCode = 'MGR';
-    else if (role === 'delivery_staff') roleCode = 'DEL';
-    
-    const prefix = `${storeCode}-${roleCode}-`;
-    
-    // Find max number for this specific store and role
-    const existingIds = staff
-      .filter(s => s.staffId?.startsWith(prefix))
-      .map(s => parseInt(s.staffId?.split('-').pop() || '0'))
-      .filter(n => !isNaN(n));
-      
-    const nextNumber = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
-    return `${prefix}${nextNumber.toString().padStart(3, '0')}`;
-  };
-
   const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.storeId) {
@@ -155,13 +137,10 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
     
     setIsCreating(true);
     try {
-      const staffId = generateStaffId(formData.adminRole, formData.storeId);
-      const tempPassword = `Temp@${Math.floor(1000 + Math.random() * 9000)}`;
-      
       const staffData = {
         ...formData,
-        staffId,
-        role: 'admin',
+        role: formData.adminRole === 'store_manager' ? 'manager' : 'staff',
+        adminRole: formData.adminRole,
         userType: 'admin',
         isRegistered: true,
       };
@@ -171,12 +150,11 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
       const response = await fetch('/api/auth/create-staff', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staffData, password: tempPassword })
+        body: JSON.stringify({ staffData, password: formData.password })
       });
       
       const result = await response.json();
       if (result.success) {
-        setCreatedCredentials({ staffId, password: tempPassword });
         setIsAddModalOpen(false);
         resetForm();
       } else {
@@ -235,6 +213,7 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
       name: '',
       email: '',
       phone: '',
+      staffId: '',
       adminRole: 'store_staff',
       storeId: '',
       address: '',
@@ -440,6 +419,7 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
                               name: s.name,
                               email: s.email,
                               phone: s.phone || '',
+                              staffId: s.staffId || '',
                               adminRole: s.adminRole || 'store_staff',
                               storeId: s.storeId || '',
                               address: s.address || '',
@@ -518,6 +498,17 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
                     />
                   </div>
                   <div className="space-y-2">
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Staff ID Code</label>
+                    <input 
+                      required
+                      type="text"
+                      value={formData.staffId}
+                      onChange={(e) => setFormData({ ...formData, staffId: e.target.value })}
+                      placeholder="e.g. ST-WW-001"
+                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Role</label>
                     <select 
                       value={formData.adminRole}
@@ -565,12 +556,13 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
                 </div>
                 {isAddModalOpen && (
                   <div className="space-y-2">
-                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Initial Password</label>
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Password</label>
                     <input 
                       required
                       type="password"
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      placeholder="Enter initial password"
                       className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 font-bold outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
@@ -597,44 +589,6 @@ const StaffManagement: React.FC<StaffManagementProps> = ({ stores }) => {
                   </button>
                 </div>
               </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Credentials Modal */}
-      <AnimatePresence>
-        {createdCredentials && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-gray-900 w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden p-8 text-center"
-            >
-              <div className="w-20 h-20 bg-green-50 dark:bg-green-900/20 rounded-full flex items-center justify-center text-green-600 mx-auto mb-6">
-                <CheckCircle2 className="w-10 h-10" />
-              </div>
-              <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight mb-2">Staff Created!</h3>
-              <p className="text-gray-500 font-medium mb-8">Please share these credentials with the staff member. They will be forced to change their password on first login.</p>
-              
-              <div className="space-y-4 mb-8">
-                <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-800">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Staff ID</p>
-                  <p className="text-xl font-black text-blue-600 tracking-tight">{createdCredentials.staffId}</p>
-                </div>
-                <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-800">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Temporary Password</p>
-                  <p className="text-xl font-black text-blue-600 tracking-tight">{createdCredentials.password}</p>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => setCreatedCredentials(null)}
-                className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none"
-              >
-                Got it
-              </button>
             </motion.div>
           </div>
         )}

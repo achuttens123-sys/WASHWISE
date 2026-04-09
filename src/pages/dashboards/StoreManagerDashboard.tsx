@@ -134,17 +134,43 @@ const StoreManagerDashboard: React.FC = () => {
   };
 
   const statusOptions = [
-    { value: 'pending', label: 'Pending' },
+    { value: 'paid', label: 'Order confirmed' },
     { value: 'Ready for pick up', label: 'Ready for pick up' },
     { value: 'In Wash', label: 'In Wash' },
     { value: 'In Drier', label: 'In Drier' },
-    { value: 'Washing completed', label: 'Washing completed' },
+    { value: 'Washing completed', label: 'Completed' },
     { value: 'Ready to collect', label: 'Ready to collect' },
-    { value: 'Ready to deliver', label: 'Ready to deliver' },
     { value: 'Out for delivery', label: 'Out for delivery' },
-    { value: 'completed', label: 'Completed' },
+    { value: 'completed', label: 'Finalized' },
     { value: 'cancelled', label: 'Cancelled' }
   ];
+
+  if (!user?.storeId) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+        <div className="w-24 h-24 bg-amber-50 dark:bg-amber-900/20 rounded-[2.5rem] flex items-center justify-center mb-6">
+          <AlertCircle className="w-12 h-12 text-amber-600" />
+        </div>
+        <h2 className="text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight uppercase mb-2">Store Not Assigned</h2>
+        <p className="text-gray-500 dark:text-gray-400 font-medium max-w-md mx-auto">
+          Your account has not been assigned to a specific store yet. Please contact the Super Admin to assign you to a store location.
+        </p>
+        <div className="mt-8 p-6 bg-gray-50 dark:bg-gray-800 rounded-3xl border border-gray-100 dark:border-gray-700">
+          <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Your User ID</p>
+          <code className="text-sm font-mono text-blue-600 dark:text-blue-400">{user?.uid}</code>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
+        <p className="text-gray-500 font-black uppercase tracking-widest text-sm">Loading Dashboard...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">

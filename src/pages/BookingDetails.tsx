@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Check, Package, Truck, Weight, Info, MapPin, Phone, AlertTriangle, Home } from 'lucide-react';
+import { ArrowLeft, Check, Package, Truck, Weight, Info, MapPin, Phone, AlertTriangle, Home, Search, Store as StoreIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { StoreService } from '../services/StoreService';
@@ -25,11 +25,13 @@ const BookingDetails: React.FC = () => {
     latitude: 0,
     longitude: 0,
     deliveryFee: 0,
-    storeId: ''
+    storeId: '',
+    garmentInstructions: ''
   });
 
   const [stores, setStores] = useState<Store[]>([]);
   const [selectedStore, setSelectedStore] = useState<Store | null>(null);
+  const [storeSearch, setStoreSearch] = useState('');
 
   useEffect(() => {
     const fetchStores = async () => {
@@ -76,6 +78,10 @@ const BookingDetails: React.FC = () => {
       return;
     }
 
+    if (!bookingData.storeId) {
+      return;
+    }
+
     const price = calculatePrice();
     const isSubscriber = user?.userType === 'subscriber';
     const deliveryFee = (bookingData.pickupDrop && !isSubscriber) ? 30 : 0;
@@ -92,7 +98,8 @@ const BookingDetails: React.FC = () => {
       lat: "0",
       lng: "0",
       fee: deliveryFee.toString(),
-      storeId: bookingData.storeId
+      storeId: bookingData.storeId,
+      garmentInstructions: bookingData.garmentInstructions
     });
     navigate(`/billing?${params.toString()}`);
   };
@@ -165,7 +172,7 @@ const BookingDetails: React.FC = () => {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="space-y-6 overflow-hidden"
+                  className="space-y-6 overflow-hidden mb-6"
                 >
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Pickup Address</label>
@@ -181,25 +188,6 @@ const BookingDetails: React.FC = () => {
                       />
                     </div>
                   </div>
-
-                  {stores.length > 0 && (
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Select Store</label>
-                      <select
-                        value={bookingData.storeId}
-                        onChange={(e) => {
-                          const store = stores.find(s => s.id === e.target.value);
-                          setSelectedStore(store || null);
-                          setBookingData({ ...bookingData, storeId: e.target.value });
-                        }}
-                        className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100"
-                      >
-                        {stores.map(store => (
-                          <option key={store.id} value={store.id}>{store.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
 
                   <div className="p-4 rounded-2xl flex items-start gap-4 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200">
                     <Info className="w-5 h-5 mt-0.5" />
@@ -232,6 +220,69 @@ const BookingDetails: React.FC = () => {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Store Selection - Always Visible */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center">
+                <StoreIcon className="w-4 h-4 mr-2" /> Select Store
+              </h3>
+              
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input 
+                  type="text"
+                  placeholder="Search for a shop by name or location..."
+                  value={storeSearch}
+                  onChange={(e) => setStoreSearch(e.target.value)}
+                  className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 max-h-60 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700">
+                {stores
+                  .filter(s => 
+                    s.name.toLowerCase().includes(storeSearch.toLowerCase()) || 
+                    s.location.toLowerCase().includes(storeSearch.toLowerCase())
+                  )
+                  .map(store => (
+                    <button
+                      key={store.id}
+                      onClick={() => {
+                        setSelectedStore(store);
+                        setBookingData({ ...bookingData, storeId: store.id });
+                      }}
+                      className={`p-4 rounded-2xl border-2 transition-all text-left flex items-center justify-between ${
+                        bookingData.storeId === store.id 
+                          ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600' 
+                          : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-xl ${bookingData.storeId === store.id ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'}`}>
+                          <StoreIcon className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-gray-800 dark:text-gray-100">{store.name}</p>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{store.location}</p>
+                        </div>
+                      </div>
+                      {bookingData.storeId === store.id && (
+                        <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
+                          <Check className="w-4 h-4 text-white" />
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                {stores.filter(s => 
+                  s.name.toLowerCase().includes(storeSearch.toLowerCase()) || 
+                  s.location.toLowerCase().includes(storeSearch.toLowerCase())
+                ).length === 0 && (
+                  <div className="py-8 text-center">
+                    <p className="text-gray-500 dark:text-gray-400 font-medium">No stores found matching your search.</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </section>
 
           {/* Service Type */}
@@ -290,13 +341,30 @@ const BookingDetails: React.FC = () => {
               <p className="text-xs text-amber-800 dark:text-amber-200">Minimum charge of ₹{settings?.pricing.minCharge || 156} applies for up to 4 kg.</p>
             </div>
           </section>
+
+          {/* Garment Instructions */}
+          <section>
+            <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center">
+              <AlertTriangle className="w-4 h-4 mr-2" /> Special Instructions
+            </h3>
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Garment Care Details</label>
+              <textarea
+                value={bookingData.garmentInstructions}
+                onChange={(e) => setBookingData({ ...bookingData, garmentInstructions: e.target.value })}
+                placeholder="e.g. Handle with care, specific stains, delicate fabric, etc."
+                rows={3}
+                className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 resize-none"
+              />
+            </div>
+          </section>
         </div>
 
         <button
           onClick={handleNext}
-          disabled={bookingData.pickupDrop && (!bookingData.address || !bookingData.phone)}
+          disabled={(bookingData.pickupDrop && (!bookingData.address || !bookingData.phone)) || !bookingData.storeId}
           className={`w-full mt-10 py-4 font-bold rounded-2xl transition-all shadow-lg flex items-center justify-center ${
-            bookingData.pickupDrop && (!bookingData.address || !bookingData.phone)
+            (bookingData.pickupDrop && (!bookingData.address || !bookingData.phone)) || !bookingData.storeId
               ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed shadow-none'
               : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200 dark:shadow-none'
           }`}

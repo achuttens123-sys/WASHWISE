@@ -55,9 +55,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         minLoad: 5
       },
       subscriptionPlans: [
-        { id: 'basic', name: 'Basic', kgLimit: 12, price: 468, originalPrice: 468, discount: 0, description: '12kg Monthly Capacity' },
-        { id: 'pro', name: 'Pro', kgLimit: 30, price: 1899, discount: 15 },
-        { id: 'elite', name: 'Elite', kgLimit: 50, price: 2999, discount: 20 }
+        { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
+        { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
+        { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
+        { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
       ],
       discounts: [],
       promos: []
@@ -65,7 +66,17 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const unsub = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
       if (snapshot.exists()) {
-        setSettings(snapshot.data() as GlobalSettings);
+        const data = snapshot.data() as GlobalSettings;
+        setSettings(data);
+        
+        // Auto-migrate legacy plans if detected (e.g. if names are PRO/ELITE or count is 3)
+        const hasLegacyPlans = data.subscriptionPlans?.some(p => ['PRO', 'ELITE'].includes(p.name.toUpperCase())) || data.subscriptionPlans?.length === 3;
+        if (hasLegacyPlans && isSuperAdmin) {
+          console.log("Legacy plans detected, auto-migrating...");
+          setDoc(doc(db, 'settings', 'global'), defaultSettings).catch(err => {
+            console.error("Settings auto-migration failed:", err);
+          });
+        }
       } else {
         // Initialize if not exists
         setSettings(defaultSettings);

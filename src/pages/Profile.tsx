@@ -6,12 +6,14 @@ import { useNavigate } from 'react-router-dom';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Booking } from '../types';
+import SubscriptionPlansModal from '../components/SubscriptionPlansModal';
 
 const Profile: React.FC = () => {
   const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'profile' | 'wallet' | 'history' | 'rewards'>('profile');
   const [isUpgrading, setIsUpgrading] = useState(false);
+  const [isPlansModalOpen, setIsPlansModalOpen] = useState(false);
   const [studentId, setStudentId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -19,6 +21,8 @@ const Profile: React.FC = () => {
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [editForm, setEditForm] = useState({
     name: user?.name || '',
     phone: user?.phone || '',
@@ -157,9 +161,9 @@ const Profile: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => { setActiveTab(tab.id as any); setIsUpgrading(false); }}
-                  className={`w-full flex items-center px-6 py-4 rounded-[2rem] transition-all duration-300 group ${
+                  className={`w-full flex items-center px-6 py-4 rounded-[2rem] transition-all duration-300 group haptic-feedback ${
                     activeTab === tab.id && !isUpgrading 
-                      ? 'bg-blue-600 text-white shadow-2xl shadow-blue-200 dark:shadow-blue-900/20' 
+                      ? 'bg-blue-600 text-white shadow-2xl shadow-blue-200 dark:shadow-blue-900/20 glow-blue' 
                       : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800/50'
                   }`}
                 >
@@ -204,9 +208,9 @@ const Profile: React.FC = () => {
                       </div>
                       <button 
                         onClick={() => setIsEditing(!isEditing)}
-                        className={`absolute -bottom-2 -right-2 p-3 rounded-2xl shadow-lg border transition-all ${
+                        className={`absolute -bottom-2 -right-2 p-3 rounded-2xl shadow-lg border transition-all haptic-feedback ${
                           isEditing 
-                            ? 'bg-blue-600 text-white border-blue-500' 
+                            ? 'bg-blue-600 text-white border-blue-500 glow-blue' 
                             : 'bg-white dark:bg-gray-800 text-gray-400 border-gray-100 dark:border-gray-700 hover:text-blue-500'
                         }`}
                       >
@@ -282,7 +286,7 @@ const Profile: React.FC = () => {
                         <button
                           type="submit"
                           disabled={loading}
-                          className="flex-1 py-5 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center disabled:opacity-50"
+                          className="flex-1 py-5 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center disabled:opacity-50 haptic-feedback glow-blue"
                         >
                           {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Save Changes'}
                         </button>
@@ -332,14 +336,14 @@ const Profile: React.FC = () => {
                       <div className="flex items-center gap-3 w-full sm:w-auto">
                         <button 
                           onClick={copyReferralCode}
-                          className="flex-1 sm:flex-none px-6 py-3 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all border border-gray-100 dark:border-gray-700 flex items-center justify-center gap-2"
+                          className="flex-1 sm:flex-none px-6 py-3 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all border border-gray-100 dark:border-gray-700 flex items-center justify-center gap-2 haptic-feedback"
                         >
                           {copied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
                           {copied ? 'Copied' : 'Copy'}
                         </button>
                         <button 
                           onClick={handleShare}
-                          className="flex-1 sm:flex-none px-6 py-3 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center gap-2"
+                          className="flex-1 sm:flex-none px-6 py-3 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center gap-2 haptic-feedback glow-blue"
                         >
                           <Share2 className="w-4 h-4" />
                           Share
@@ -367,10 +371,10 @@ const Profile: React.FC = () => {
                           <div className="text-right">
                             <p className="text-[10px] font-black uppercase tracking-widest text-blue-200 mb-1">Starting at</p>
                             <div className="flex items-baseline justify-end gap-1">
-                              <span className="text-4xl font-black tracking-tighter italic">₹468</span>
+                              <span className="text-4xl font-black tracking-tighter italic">₹421</span>
                               <span className="text-sm font-bold opacity-60">/mo</span>
                             </div>
-                            <p className="text-[10px] font-bold text-blue-200 opacity-60 italic">(₹39 × 12kg)</p>
+                            <p className="text-[10px] font-bold text-blue-200 opacity-60 italic">(₹39 × 12kg - 10% Off)</p>
                           </div>
                         </div>
                         
@@ -393,13 +397,22 @@ const Profile: React.FC = () => {
                           ))}
                         </div>
 
-                        <button 
-                          onClick={() => navigate('/billing?type=subscription&plan=basic')}
-                          className="w-full sm:w-auto px-12 py-5 bg-white text-blue-600 text-xs font-black uppercase tracking-[0.2em] rounded-2xl hover:bg-blue-50 transition-all shadow-2xl shadow-blue-900/40 active:scale-95 flex items-center justify-center gap-3"
-                        >
-                          Upgrade to Basic Premium
-                          <ArrowRight className="w-4 h-4" />
-                        </button>
+                        <div className="flex flex-col sm:flex-row gap-4">
+                          <button 
+                            onClick={() => navigate('/billing?type=subscription&packageId=basic')}
+                            className="flex-1 px-8 py-5 bg-white text-blue-600 text-xs font-black uppercase tracking-[0.2em] rounded-2xl hover:bg-blue-50 transition-all shadow-2xl shadow-blue-900/40 active:scale-95 flex items-center justify-center gap-3 haptic-feedback glow-blue"
+                          >
+                            Buy Basic Plan
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => setIsPlansModalOpen(true)}
+                            className="flex-1 px-8 py-5 bg-blue-700/50 text-white text-xs font-black uppercase tracking-[0.2em] rounded-2xl hover:bg-blue-700 transition-all border border-white/20 active:scale-95 flex items-center justify-center gap-3 haptic-feedback"
+                          >
+                            Explore All Plans
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -455,7 +468,7 @@ const Profile: React.FC = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-6 bg-blue-600 text-white text-xs font-black uppercase tracking-[0.2em] rounded-[2rem] hover:bg-blue-700 transition-all shadow-2xl shadow-blue-200 dark:shadow-none flex items-center justify-center disabled:opacity-50"
+                      className="w-full py-6 bg-blue-600 text-white text-xs font-black uppercase tracking-[0.2em] rounded-[2rem] hover:bg-blue-700 transition-all shadow-2xl shadow-blue-200 dark:shadow-none flex items-center justify-center disabled:opacity-50 haptic-feedback glow-blue"
                     >
                       {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Activate Subscription'}
                     </button>
@@ -576,7 +589,13 @@ const Profile: React.FC = () => {
                               <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">Total Paid</p>
                               <p className="text-2xl font-black text-gray-900 dark:text-white tracking-tighter italic">₹{booking.price.toFixed(2)}</p>
                             </div>
-                            <button className="px-8 py-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-gray-900 hover:text-white dark:hover:bg-white dark:hover:text-black transition-all shadow-sm">
+                            <button 
+                              onClick={() => {
+                                setSelectedBooking(booking);
+                                setShowDetailsModal(true);
+                              }}
+                              className="px-8 py-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-gray-900 hover:text-white dark:hover:bg-white dark:hover:text-black transition-all shadow-sm"
+                            >
                               Details
                             </button>
                           </div>
@@ -669,7 +688,7 @@ const Profile: React.FC = () => {
                           <motion.div 
                             initial={{ width: 0 }}
                             animate={{ width: `${Math.min(((user.xp || 0) / 500) * 100, 100)}%` }}
-                            className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full shadow-[0_0_20px_rgba(37,99,235,0.5)]"
+                            className="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full shadow-[0_0_20px_rgba(37,99,235,0.5)] animate-pulse-glow"
                           />
                         </div>
                         <div className="flex justify-between items-center px-2">
@@ -685,6 +704,81 @@ const Profile: React.FC = () => {
           </AnimatePresence>
         </div>
       </div>
+      <AnimatePresence>
+        {showDetailsModal && selectedBooking && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-[2.5rem] overflow-hidden shadow-2xl border border-gray-100 dark:border-gray-800"
+            >
+              <div className="p-8">
+                <div className="flex justify-between items-start mb-8">
+                  <div>
+                    <p className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-[0.2em] mb-1">Booking Details</p>
+                    <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tighter uppercase italic">#{selectedBooking.id?.slice(-6).toUpperCase()}</h3>
+                  </div>
+                  <button 
+                    onClick={() => setShowDetailsModal(false)}
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-colors"
+                  >
+                    <ArrowLeft className="w-5 h-5 text-gray-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Service</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedBooking.serviceType}</p>
+                    </div>
+                    <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Status</p>
+                      <p className="text-sm font-bold text-blue-600 dark:text-blue-400 uppercase">{selectedBooking.status}</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Date & Time</p>
+                    <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedBooking.date} at {selectedBooking.timeSlot}</p>
+                  </div>
+
+                  {selectedBooking.garmentInstructions && (
+                    <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-2xl border border-amber-100 dark:border-amber-800/30">
+                      <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-1">Garment Instructions</p>
+                      <p className="text-xs text-amber-800 dark:text-amber-200 font-medium italic">"{selectedBooking.garmentInstructions}"</p>
+                    </div>
+                  )}
+
+                  {selectedBooking.pickupDrop && (
+                    <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Delivery Address</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400">{selectedBooking.address}</p>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-center pt-4 border-t border-gray-100 dark:border-gray-800">
+                    <p className="text-sm font-bold text-gray-500">Total Amount</p>
+                    <p className="text-2xl font-black text-gray-900 dark:text-white tracking-tighter italic">₹{selectedBooking.price.toFixed(2)}</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowDetailsModal(false)}
+                  className="w-full mt-8 py-4 bg-gray-900 dark:bg-white text-white dark:text-black text-xs font-black uppercase tracking-widest rounded-2xl hover:opacity-90 transition-all"
+                >
+                  Close Details
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <SubscriptionPlansModal 
+        isOpen={isPlansModalOpen}
+        onClose={() => setIsPlansModalOpen(false)}
+      />
     </div>
   );
 };

@@ -11,7 +11,8 @@ import {
   Play,
   Check,
   Wind,
-  Droplets
+  Droplets,
+  Truck
 } from 'lucide-react';
 import { collection, query, where, onSnapshot, updateDoc, doc, orderBy } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
@@ -54,6 +55,24 @@ const StoreStaffDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${id}`);
     }
   };
+
+  if (!user?.storeId) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+        <div className="w-24 h-24 bg-amber-50 dark:bg-amber-900/20 rounded-[2.5rem] flex items-center justify-center mb-6">
+          <AlertCircle className="w-12 h-12 text-amber-600" />
+        </div>
+        <h2 className="text-3xl font-black text-gray-800 dark:text-gray-100 tracking-tight uppercase mb-2">Store Not Assigned</h2>
+        <p className="text-gray-500 dark:text-gray-400 font-medium max-w-md mx-auto">
+          Your account has not been assigned to a specific store yet. Please contact the Super Admin to assign you to a store location.
+        </p>
+        <div className="mt-8 p-6 bg-gray-50 dark:bg-gray-800 rounded-3xl border border-gray-100 dark:border-gray-700">
+          <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Your User ID</p>
+          <code className="text-sm font-mono text-blue-600 dark:text-blue-400">{user?.uid}</code>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -115,14 +134,29 @@ const StoreStaffDashboard: React.FC = () => {
                     </div>
                     <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">{task.userName}</h3>
                     <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">{task.serviceType} • {task.approxLoad}</p>
+                    {task.garmentInstructions && (
+                      <div className="mt-2 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-100 dark:border-amber-800/30">
+                        <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-1">Garment Instructions</p>
+                        <p className="text-xs text-amber-800 dark:text-amber-200 font-medium italic">"{task.garmentInstructions}"</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-4">
-                  {task.status === 'paid' && (
+                  {task.status === 'paid' && task.pickupDrop && (
+                    <button
+                      onClick={() => updateStatus(task.id!, 'Ready for pick up')}
+                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-amber-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-amber-700 transition-all shadow-lg shadow-amber-200 dark:shadow-none group haptic-feedback glow-amber"
+                    >
+                      <Truck className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                      Ready for Pickup
+                    </button>
+                  )}
+                  {((task.status === 'paid' && !task.pickupDrop) || task.status === 'Ready for pick up') && (
                     <button
                       onClick={() => updateStatus(task.id!, 'In Wash')}
-                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-blue-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none group"
+                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-blue-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none group haptic-feedback glow-blue"
                     >
                       <Droplets className="w-6 h-6 group-hover:scale-110 transition-transform" />
                       Start Washing
@@ -131,7 +165,7 @@ const StoreStaffDashboard: React.FC = () => {
                   {task.status === 'In Wash' && (
                     <button
                       onClick={() => updateStatus(task.id!, 'In Drier')}
-                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-indigo-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none group"
+                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-indigo-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none group haptic-feedback glow-blue"
                     >
                       <Wind className="w-6 h-6 group-hover:scale-110 transition-transform" />
                       Move to Drying
@@ -140,17 +174,38 @@ const StoreStaffDashboard: React.FC = () => {
                   {task.status === 'In Drier' && (
                     <button
                       onClick={() => updateStatus(task.id!, 'Washing completed')}
-                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-green-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-green-700 transition-all shadow-lg shadow-green-200 dark:shadow-none group"
+                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-green-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-green-700 transition-all shadow-lg shadow-green-200 dark:shadow-none group haptic-feedback glow-green"
                     >
                       <Check className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                      Mark Ready
+                      Mark Completed
                     </button>
                   )}
-                  {task.status === 'Washing completed' && (
-                    <div className="flex items-center gap-3 px-8 py-6 bg-green-50 dark:bg-green-900/20 text-green-600 rounded-[2rem] font-black uppercase tracking-widest">
-                      <CheckCircle2 className="w-6 h-6" />
-                      Ready for Pickup
-                    </div>
+                  {task.status === 'Washing completed' && task.pickupDrop && (
+                    <button
+                      onClick={() => updateStatus(task.id!, 'Out for delivery')}
+                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-purple-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-purple-700 transition-all shadow-lg shadow-purple-200 dark:shadow-none group haptic-feedback glow-blue"
+                    >
+                      <Truck className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                      Out for Delivery
+                    </button>
+                  )}
+                  {task.status === 'Washing completed' && !task.pickupDrop && (
+                    <button
+                      onClick={() => updateStatus(task.id!, 'Ready to collect')}
+                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-teal-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-teal-700 transition-all shadow-lg shadow-teal-200 dark:shadow-none group haptic-feedback glow-green"
+                    >
+                      <Package className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                      Ready to Collect
+                    </button>
+                  )}
+                  {(task.status === 'Out for delivery' || task.status === 'Ready to collect') && (
+                    <button
+                      onClick={() => updateStatus(task.id!, 'completed')}
+                      className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-gray-800 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-gray-200 dark:shadow-none group haptic-feedback"
+                    >
+                      <CheckCircle2 className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                      Finalize Order
+                    </button>
                   )}
                 </div>
               </div>
@@ -160,12 +215,15 @@ const StoreStaffDashboard: React.FC = () => {
                 <motion.div 
                   initial={{ width: 0 }}
                   animate={{ 
-                    width: task.status === 'paid' ? '25%' : 
-                           task.status === 'In Wash' ? '50%' : 
-                           task.status === 'In Drier' ? '75%' : '100%' 
+                    width: task.status === 'paid' ? '15%' : 
+                           task.status === 'Ready for pick up' ? '30%' :
+                           task.status === 'In Wash' ? '45%' : 
+                           task.status === 'In Drier' ? '60%' : 
+                           task.status === 'Washing completed' ? '75%' :
+                           (task.status === 'Out for delivery' || task.status === 'Ready to collect') ? '90%' : '100%' 
                   }}
                   className={`h-full transition-all duration-1000 ${
-                    task.status === 'Washing completed' ? 'bg-green-500' : 'bg-blue-500'
+                    task.status === 'completed' ? 'bg-green-500' : 'bg-blue-500'
                   }`}
                 />
               </div>

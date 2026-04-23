@@ -32,7 +32,7 @@ const StoreStaffDashboard: React.FC = () => {
     const q = query(
       collection(db, 'bookings'),
       where('storeId', '==', user.storeId),
-      where('status', 'in', ['paid', 'In Wash', 'In Drier', 'Washing completed']),
+      where('status', 'in', ['paid', 'In Wash', 'In Dryer', 'Washing completed']),
       orderBy('createdAt', 'asc')
     );
 
@@ -164,14 +164,14 @@ const StoreStaffDashboard: React.FC = () => {
                   )}
                   {task.status === 'In Wash' && (
                     <button
-                      onClick={() => updateStatus(task.id!, 'In Drier')}
+                      onClick={() => updateStatus(task.id!, 'In Dryer')}
                       className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-indigo-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none group haptic-feedback glow-blue"
                     >
                       <Wind className="w-6 h-6 group-hover:scale-110 transition-transform" />
                       Move to Drying
                     </button>
                   )}
-                  {task.status === 'In Drier' && (
+                  {task.status === 'In Dryer' && (
                     <button
                       onClick={() => updateStatus(task.id!, 'Washing completed')}
                       className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-6 bg-green-600 text-white rounded-[2rem] font-black uppercase tracking-widest hover:bg-green-700 transition-all shadow-lg shadow-green-200 dark:shadow-none group haptic-feedback glow-green"
@@ -218,7 +218,7 @@ const StoreStaffDashboard: React.FC = () => {
                     width: task.status === 'paid' ? '15%' : 
                            task.status === 'Ready for pick up' ? '30%' :
                            task.status === 'In Wash' ? '45%' : 
-                           task.status === 'In Drier' ? '60%' : 
+                           task.status === 'In Dryer' ? '60%' : 
                            task.status === 'Washing completed' ? '75%' :
                            (task.status === 'Out for delivery' || task.status === 'Ready to collect') ? '90%' : '100%' 
                   }}

@@ -1,5 +1,6 @@
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, addDoc, serverTimestamp, doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { getToken, onMessage } from 'firebase/messaging';
+import { db, messaging, auth } from '../firebase';
 
 export interface Notification {
   id?: string;
@@ -12,6 +13,59 @@ export interface Notification {
   createdAt: any;
   isRead: boolean;
 }
+
+const VAPID_KEY = import.meta.env.VITE_FCM_VAPID_KEY;
+
+export const requestNotificationPermission = async () => {
+  if (!messaging) return null;
+
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      console.log('Notification permission granted.');
+      const token = await getToken(messaging, {
+        vapidKey: VAPID_KEY,
+      });
+
+      if (token) {
+        if (import.meta.env.DEV) console.log('FCM Token:', token);
+        await saveTokenToFirestore(token);
+        return token;
+      } else {
+        console.log('No registration token available. Request permission to generate one.');
+      }
+    } else {
+      console.log('Unable to get permission to notify.');
+    }
+  } catch (error) {
+    console.error('An error occurred while retrieving token. ', error);
+  }
+  return null;
+};
+
+const saveTokenToFirestore = async (token: string) => {
+  const user = auth.currentUser;
+  if (!user) return;
+
+  try {
+    const userRef = doc(db, 'users', user.uid);
+    await updateDoc(userRef, {
+      fcmTokens: arrayUnion(token),
+    });
+    console.log('Token saved to Firestore');
+  } catch (error) {
+    console.error('Error saving token to Firestore:', error);
+  }
+};
+
+export const onMessageListener = () =>
+  new Promise((resolve) => {
+    if (!messaging) return;
+    onMessage(messaging, (payload) => {
+      console.log('Message received. ', payload);
+      resolve(payload);
+    });
+  });
 
 export const sendNotification = async (
   userId: string,

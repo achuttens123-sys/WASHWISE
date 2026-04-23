@@ -1,6 +1,7 @@
 import { initializeApp, FirebaseError } from 'firebase/app';
 import { initializeAuth, browserLocalPersistence, browserPopupRedirectResolver } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
+import { getMessaging } from 'firebase/messaging';
 import firebaseConfig from '../firebase-applet-config.json';
 
 export { firebaseConfig };
@@ -12,7 +13,38 @@ export const auth = initializeAuth(app, {
   popupRedirectResolver: browserPopupRedirectResolver,
 });
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Initialize Firestore with settings to handle proxy/iframe connection issues
+const firestoreSettings = {
+  experimentalForceLongPolling: true,
+  ignoreUndefinedProperties: true,
+};
+
+let dbInstance;
+try {
+  const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
+  dbInstance = initializeFirestore(app, firestoreSettings, dbId);
+  console.log(`Firestore initialized with database ${dbId} and long polling settings`);
+} catch (error) {
+  console.error("Error initializing Firestore, falling back to default:", error);
+  dbInstance = initializeFirestore(app, firestoreSettings);
+}
+
+export const db = dbInstance;
+export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
+
+// Validate Connection to Firestore
+import { getDocFromServer, doc } from 'firebase/firestore';
+async function validateConnection() {
+  try {
+    await getDocFromServer(doc(db, 'system_test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration. The client is offline.");
+    }
+    // Other errors are handled by the app's error boundaries or specific calls
+  }
+}
+validateConnection();
 
 export enum OperationType {
   CREATE = 'create',

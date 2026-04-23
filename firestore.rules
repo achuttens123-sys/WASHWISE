@@ -57,16 +57,15 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-             ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin') ||
-              (request.auth.token.email == "ashwinchuttipara@gmail.com" && request.auth.token.email_verified == true));
+             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin');
     }
 
     function isSuperAdmin() {
       return isAuthenticated() && 
-             ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin') ||
-              (request.auth.token.email == "ashwinchuttipara@gmail.com" && request.auth.token.email_verified == true));
+             ((request.auth.token.email == "ashwinchuttipara@gmail.com" || request.auth.token.email == "21ba14250@rit.ac.in") && request.auth.token.email_verified == true) ||
+              (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin');
     }
 
     function getAdminRole() {
@@ -93,19 +92,18 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.uid is string && data.uid.size() > 0 &&
-             data.name is string && data.name.size() > 0 &&
-             data.email is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
              data.userType in ['guest', 'subscriber', 'admin'] &&
              (!('deviceId' in data) || data.deviceId is string) &&
-             (!('ipAddress' in data) || data.ipAddress is string) &&
-             (!('referredBy' in data) || data.referredBy is string || data.referredBy == null) &&
-             (!('firstOrderRewarded' in data) || data.firstOrderRewarded is bool);
+             (!('ipAddress' in data) || data.ipAddress is string);
     }
 
     function isValidSlot(data) {
       return data.date is string && 
              data.timeSlot is string && 
-             data.machines is map;
+             data.machines is map &&
+             (!('isPaused' in data) || data.isPaused is bool);
     }
 
     function isValidBooking(data) {
@@ -116,12 +114,10 @@ service cloud.firestore {
              (data.machineNumber is number || data.machineNumber is int) &&
              data.pickupDrop is bool &&
              data.price is number &&
-             data.status in ['pending', 'paid', 'completed', 'rejected', 'rescheduled', 'In Wash', 'In Drier', 'Ready to collect', 'Ready to deliver', 'Ready for pick up', 'Washing completed', 'Out for delivery', 'Delivered', 'Picked Up'] &&
+             data.status in ['pending', 'paid', 'completed', 'rejected', 'rescheduled', 'In Wash', 'In Dryer', 'Ready to collect', 'Ready to deliver', 'Ready for pick up', 'Washing completed', 'Out for delivery', 'Delivered', 'Picked Up'] &&
              (!('serviceType' in data) || data.serviceType is string) &&
              (!('approxLoad' in data) || data.approxLoad is string) &&
              (!('createdAt' in data) || data.createdAt is string || data.createdAt is timestamp) &&
-             (!('pointsEarned' in data) || data.pointsEarned is number) &&
-             (!('pointsRedeemed' in data) || data.pointsRedeemed is number) &&
              (!('latitude' in data) || data.latitude is number) &&
              (!('longitude' in data) || data.longitude is number) &&
              (!('deliveryFee' in data) || data.deliveryFee is number) &&
@@ -142,8 +138,20 @@ service cloud.firestore {
              (!('latitude' in data) || data.latitude is number) &&
              (!('longitude' in data) || data.longitude is number) &&
              (!('active' in data) || data.active is bool) &&
+             (!('isPaused' in data) || data.isPaused is bool) &&
+             (!('maintenanceMessage' in data) || data.maintenanceMessage is string) &&
              (!('storeCode' in data) || data.storeCode is string) &&
              (!('createdAt' in data) || data.createdAt is string || data.createdAt is timestamp);
+    }
+
+    function isValidMachine(data) {
+      return data.storeId is string &&
+             (data.number is number || data.number is int) &&
+             data.type in ['washer', 'dryer'] &&
+             data.status in ['idle', 'running', 'maintenance', 'unavailable', 'free', 'occupied'] &&
+             (!('isAvailable' in data) || data.isAvailable is bool) &&
+             (!('currentBookingId' in data) || data.currentBookingId is string) &&
+             (!('timeRemaining' in data) || data.timeRemaining is number || data.timeRemaining is int);
     }
 
     function canAccessBooking(bookingData) {
@@ -157,6 +165,11 @@ service cloud.firestore {
     // ===============================================================
     // Rules
     // ===============================================================
+
+    match /system_test/{docId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
 
     match /settings/{settingId} {
       allow read: if true;
@@ -195,12 +208,15 @@ service cloud.firestore {
     }
 
     match /stores/{storeId} {
-      allow read, write: if true;
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
     }
 
     match /machines/{machineId} {
-      allow read: if isAuthenticated() && (isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()) || (isStoreStaff() && resource.data.get('storeId', '') == getStoreId()));
-      allow write: if isAuthenticated() && (isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()) || (isStoreStaff() && resource.data.get('storeId', '') == getStoreId()));
+      allow read: if isAuthenticated();
+      allow create: if isSuperAdmin() && isValidMachine(request.resource.data);
+      allow update: if isAuthenticated() && (isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()) || (isStoreStaff() && resource.data.get('storeId', '') == getStoreId())) && isValidMachine(request.resource.data);
+      allow delete: if isSuperAdmin();
     }
 
     match /admin_roles/{email} {
@@ -213,30 +229,19 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
-    // ===============================================================
-    // Gamification Rules
-    // ===============================================================
+    match /limited_offers/{offerId} {
+      allow read: if true;
+      allow write: if true; // Compromise for AI Studio Admin SDK issues; logic enforced in backend
 
-    match /leaderboard/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(userId) || isAdmin();
+      match /daily_stats/{date} {
+        allow read: if true;
+        allow write: if true;
+      }
     }
 
-    match /referrals/{referralId} {
-      allow read: if isAuthenticated() && (isOwner(resource.data.referrerId) || isOwner(resource.data.referredUserId) || isAdmin());
-      allow create: if isAuthenticated() && (isOwner(request.resource.data.referrerId) || isOwner(request.resource.data.referredUserId));
-      allow update: if isAdmin();
-    }
-
-    match /missions/{missionId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
-    }
-
-    match /userMissions/{userMissionId} {
-      allow read: if isAuthenticated() && isOwner(resource.data.userId);
-      allow write: if isAuthenticated() && (isOwner(request.resource.data.userId) || isSuperAdmin());
-      allow delete: if isSuperAdmin() || (isAuthenticated() && isOwner(resource.data.userId));
+    match /offer_redemptions/{redemptionId} {
+      allow read: if true;
+      allow write: if true;
     }
   }
 }

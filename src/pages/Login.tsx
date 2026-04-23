@@ -5,6 +5,7 @@ import { Mail, User, ArrowLeft, Loader2, LogIn, GraduationCap, CheckCircle, Lock
 import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { isSuperAdminEmail } from '../constants';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import TermsModal from '../components/TermsModal';
@@ -19,19 +20,13 @@ const Login: React.FC = () => {
   const isSubscriber = userType === 'subscriber';
 
   const [step, setStep] = useState<'login' | 'register'>('login');
-  const [authMethod, setAuthMethod] = useState<'google' | 'email' | 'staff'>('google');
+  const [authMethod, setAuthMethod] = useState<'google' | 'email'>('google');
   const [isSignup, setIsSignup] = useState(false);
-  const [showPasswordChange, setShowPasswordChange] = useState(false);
-  const [loggedInStaff, setLoggedInStaff] = useState<any>(null);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    staffId: '',
-    newPassword: '',
-    confirmPassword: '',
     fullName: '',
     studentId: '',
-    referralCode: '',
     selectedPackage: settings?.subscriptionPlans[0]?.id || 'basic'
   });
   const [tempUser, setTempUser] = useState<any>(null);
@@ -47,7 +42,7 @@ const Login: React.FC = () => {
     // Check for admin role by email
     const adminRoleDoc = await getDoc(doc(db, 'admin_roles', fbUser.email || ''));
     const adminRoleData = adminRoleDoc.exists() ? adminRoleDoc.data() : null;
-    const isAdminEmail = fbUser.email === 'ashwinchuttipara@gmail.com';
+    const isAdminEmail = isSuperAdminEmail(fbUser.email);
 
     if (userDoc.exists()) {
       const existingData = userDoc.data();
@@ -102,8 +97,7 @@ const Login: React.FC = () => {
           createdAt: new Date().toISOString(),
           termsAccepted: false,
           deviceId,
-          ipAddress,
-          referredBy: formData.referralCode || null
+          ipAddress
         };
         setPendingUserData(userData);
         setShowTerms(true);
@@ -118,12 +112,6 @@ const Login: React.FC = () => {
       const finalData = { ...pendingUserData, termsAccepted: true };
       await login(finalData);
       
-      // Handle referral if code was provided
-      if (finalData.referredBy) {
-        const { GamificationService } = await import('../services/GamificationService');
-        await GamificationService.handleReferral(finalData.referredBy, finalData.uid);
-      }
-
       setShowTerms(false);
       if (finalData.adminRole) {
         navigate('/admin');
@@ -197,77 +185,6 @@ const Login: React.FC = () => {
     }
   };
 
-  const handleStaffLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staffId: formData.staffId, password: formData.password })
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        if (result.isFirstLogin) {
-          setLoggedInStaff({ uid: result.uid, staffId: formData.staffId });
-          setShowPasswordChange(true);
-        } else {
-          const { signInWithCustomToken } = await import('firebase/auth');
-          const userCredential = await signInWithCustomToken(auth, result.token);
-          await handleAuthSuccess(userCredential.user);
-        }
-      } else {
-        setError(result.error || 'Login failed');
-      }
-    } catch (err) {
-      console.error(err);
-      setError('An error occurred during login');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (formData.newPassword !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-    if (formData.newPassword.length < 8) {
-      setError('Password must be at least 8 characters');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await fetch('/api/auth/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          uid: loggedInStaff.uid, 
-          newPassword: formData.newPassword 
-        })
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        const { signInWithCustomToken } = await import('firebase/auth');
-        const userCredential = await signInWithCustomToken(auth, result.token);
-        await handleAuthSuccess(userCredential.user);
-      } else {
-        setError(result.error || 'Failed to change password');
-      }
-    } catch (err) {
-      console.error(err);
-      setError('An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.studentId || (!formData.fullName && !tempUser?.displayName)) {
@@ -288,8 +205,7 @@ const Login: React.FC = () => {
         createdAt: new Date().toISOString(),
         termsAccepted: false,
         deviceId: tempUser.deviceId,
-        ipAddress: tempUser.ipAddress,
-        referredBy: formData.referralCode || null
+        ipAddress: tempUser.ipAddress
       };
       
       setPendingUserData(userData);
@@ -303,10 +219,10 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto px-4 py-4 sm:py-8">
+    <div className="max-w-md mx-auto px-4 py-8 sm:py-12">
       <button 
         onClick={() => navigate('/')}
-        className="flex items-center text-gray-500 hover:text-blue-600 mb-6 sm:mb-8 transition-colors text-sm"
+        className="flex items-center text-gray-500 hover:text-primary-electric mb-8 transition-colors text-sm font-bold uppercase tracking-widest"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Home
@@ -315,7 +231,7 @@ const Login: React.FC = () => {
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
+        className="bg-white dark:bg-surface-container p-8 sm:p-10 rounded-2xl shadow-2xl shadow-black/5 dark:shadow-none relative overflow-hidden"
       >
         <AnimatePresence mode="wait">
           {step === 'login' ? (
@@ -325,137 +241,111 @@ const Login: React.FC = () => {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
             >
-              <div className="text-center mb-6 sm:mb-8">
-                <h2 className="text-xl sm:text-2xl font-bold text-gray-800 dark:text-gray-100">
+              <div className="text-center mb-10">
+                <h2 className="text-3xl font-display font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">
                   {isSubscriber ? (isSignup ? 'Subscriber Signup' : 'Subscriber Login') : 'Guest Login'}
                 </h2>
-                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-2">
+                <p className="text-sm text-gray-400 dark:text-gray-500 mt-3 font-medium uppercase tracking-widest">
                   {isSubscriber 
                     ? (isSignup ? 'Create account to start subscription' : 'Sign in to access subscription')
                     : 'Sign in with your account to continue'}
                 </p>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-8">
                 {/* Auth Method Toggle */}
-                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
+                <div className="flex bg-gray-50 dark:bg-surface-low p-1.5 rounded-2xl">
                   <button
                     onClick={() => { setAuthMethod('google'); setIsSignup(false); }}
-                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                    className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all ${
                       authMethod === 'google' 
-                        ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' 
-                        : 'text-gray-500 dark:text-gray-400'
+                        ? 'bg-white dark:bg-surface-highest text-primary-electric dark:text-primary-electric-light shadow-sm' 
+                        : 'text-gray-400 dark:text-gray-500'
                     }`}
                   >
                     Google
                   </button>
                   <button
                     onClick={() => { setAuthMethod('email'); setIsSignup(false); }}
-                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                    className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all ${
                       authMethod === 'email' 
-                        ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' 
-                        : 'text-gray-500 dark:text-gray-400'
+                        ? 'bg-white dark:bg-surface-highest text-primary-electric dark:text-primary-electric-light shadow-sm' 
+                        : 'text-gray-400 dark:text-gray-500'
                     }`}
                   >
                     Email
                   </button>
-                  <button
-                    onClick={() => { setAuthMethod('staff'); setIsSignup(false); }}
-                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-                      authMethod === 'staff' 
-                        ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' 
-                        : 'text-gray-500 dark:text-gray-400'
-                    }`}
-                  >
-                    Staff ID
-                  </button>
                 </div>
 
-                {error && <p className="text-red-500 text-sm text-center font-medium bg-red-50 dark:bg-red-900/20 p-3 rounded-xl">{error}</p>}
+                {error && <p className="text-red-500 text-xs text-center font-black uppercase tracking-widest bg-red-50 dark:bg-red-900/10 p-4 rounded-2xl">{error}</p>}
 
                 {authMethod === 'google' ? (
                   <button
                     onClick={handleGoogleLogin}
                     disabled={loading}
-                    className="w-full py-3 sm:py-4 bg-white dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-all flex items-center justify-center shadow-sm hover:shadow-md"
+                    className="w-full py-5 bg-white dark:bg-surface-highest text-gray-700 dark:text-high-contrast font-black uppercase tracking-widest rounded-2xl hover:bg-gray-50 dark:hover:bg-opacity-80 transition-all flex items-center justify-center shadow-sm"
                   >
                     {loading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
                     ) : (
                       <>
-                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5 mr-3" alt="Google" />
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5 mr-4" alt="Google" />
                         Sign in with Google
                       </>
                     )}
                   </button>
-                ) : authMethod === 'email' ? (
-                  <form onSubmit={handleEmailAuth} className="space-y-4">
+                ) : (
+                  <form onSubmit={handleEmailAuth} className="space-y-6">
                     {isSignup && (
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Full Name</label>
+                      <div className="space-y-3">
+                        <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Full Name</label>
                         <div className="relative">
-                          <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                          <User className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
                           <input
                             type="text"
                             required
                             value={formData.fullName}
                             onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
                             placeholder="Enter your full name"
-                            className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
+                            className="w-full pl-14 pr-6 py-5 bg-gray-50 dark:bg-surface-low rounded-2xl focus:bg-white dark:focus:bg-surface-highest outline-none transition-all dark:text-high-contrast font-bold"
                           />
                         </div>
                       </div>
                     )}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Email Address</label>
+                    <div className="space-y-3">
+                      <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Email Address</label>
                       <div className="relative">
-                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                        <Mail className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
                         <input
                           type="email"
                           required
                           value={formData.email}
                           onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                           placeholder="name@example.com"
-                          className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
+                          className="w-full pl-14 pr-6 py-5 bg-gray-50 dark:bg-surface-low rounded-2xl focus:bg-white dark:focus:bg-surface-highest outline-none transition-all dark:text-high-contrast font-bold"
                         />
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Password</label>
+                    <div className="space-y-3">
+                      <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Password</label>
                       <div className="relative">
-                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                        <Lock className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
                         <input
                           type="password"
                           required
                           value={formData.password}
                           onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                           placeholder="••••••••"
-                          className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
+                          className="w-full pl-14 pr-6 py-5 bg-gray-50 dark:bg-surface-low rounded-2xl focus:bg-white dark:focus:bg-surface-highest outline-none transition-all dark:text-high-contrast font-bold"
                         />
                       </div>
                     </div>
 
-                    {isSignup && (
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Referral Code (Optional)</label>
-                        <div className="relative">
-                          <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                          <input
-                            type="text"
-                            value={formData.referralCode}
-                            onChange={(e) => setFormData({ ...formData, referralCode: e.target.value.toUpperCase() })}
-                            placeholder="Have a referral code? Enter to get rewards"
-                            className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
-                          />
-                        </div>
-                      </div>
-                    )}
-
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
+                      className="w-full py-5 bg-gradient-to-br from-primary-electric to-[#3323cc] text-white font-black uppercase tracking-widest rounded-2xl transition-all shadow-xl shadow-primary-electric/20 dark:shadow-none haptic-feedback"
                     >
                       {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isSignup ? 'Create Account' : 'Sign In')}
                     </button>
@@ -463,55 +353,15 @@ const Login: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setIsSignup(!isSignup)}
-                      className="w-full text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                      className="w-full text-xs font-black text-primary-electric dark:text-primary-electric-light hover:opacity-80 transition-opacity uppercase tracking-widest"
                     >
                       {isSignup ? 'Already have an account? Login' : (isSubscriber ? 'New subscriber? Create an account' : 'Don\'t have an account? Sign up')}
                     </button>
                   </form>
-                ) : (
-                  <form onSubmit={handleStaffLogin} className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Staff ID or Email</label>
-                      <div className="relative">
-                        <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                        <input
-                          type="text"
-                          required
-                          value={formData.staffId}
-                          onChange={(e) => setFormData({ ...formData, staffId: e.target.value })}
-                          placeholder="e.g. ST-WW-001 or email@washwise.staff"
-                          className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Password</label>
-                      <div className="relative">
-                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                        <input
-                          type="password"
-                          required
-                          value={formData.password}
-                          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                          placeholder="••••••••"
-                          className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
-                        />
-                      </div>
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
-                    >
-                      {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Staff Login'}
-                    </button>
-                  </form>
                 )}
 
-                <p className="text-xs text-center text-gray-400 dark:text-gray-500 px-4">
-                  By signing in, you agree to our Terms of Service and Privacy Policy.
+                <p className="text-[10px] text-center text-gray-400 dark:text-gray-500 px-4 font-bold uppercase tracking-widest leading-relaxed">
+                  By signing in, you agree to our <br /> Terms of Service and Privacy Policy.
                 </p>
               </div>
             </motion.div>
@@ -522,85 +372,71 @@ const Login: React.FC = () => {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
             >
-              <div className="text-center mb-8">
-                <div className="bg-blue-50 dark:bg-blue-900/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse-glow">
-                  <GraduationCap className="w-8 h-8 text-blue-600 dark:text-blue-400 animate-bounce" />
+              <div className="text-center mb-10">
+                <div className="bg-primary-electric/10 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                  <GraduationCap className="w-10 h-10 text-primary-electric dark:text-primary-electric-light" />
                 </div>
-                <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Complete Signup</h2>
-                <p className="text-gray-500 dark:text-gray-400 mt-2">Please provide your student details</p>
+                <h2 className="text-3xl font-display font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">Complete Signup</h2>
+                <p className="text-sm text-gray-400 dark:text-gray-500 mt-3 font-medium uppercase tracking-widest">Please provide your student details</p>
               </div>
 
-              <form onSubmit={handleRegister} className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Full Name</label>
+              <form onSubmit={handleRegister} className="space-y-8">
+                <div className="space-y-3">
+                  <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Full Name</label>
                   <div className="relative">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                    <User className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
                       required
                       value={formData.fullName}
                       onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
                       placeholder="Enter your full name"
-                      className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
+                      className="w-full pl-14 pr-6 py-5 bg-gray-50 dark:bg-surface-low rounded-2xl focus:bg-white dark:focus:bg-surface-highest outline-none transition-all dark:text-high-contrast font-bold"
                     />
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Student ID</label>
+                <div className="space-y-3">
+                  <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Student ID</label>
                   <div className="relative">
-                    <GraduationCap className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                    <GraduationCap className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
                     <input
                       type="text"
                       required
                       value={formData.studentId}
                       onChange={(e) => setFormData({ ...formData, studentId: e.target.value })}
                       placeholder="e.g. STU12345"
-                      className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
+                      className="w-full pl-14 pr-6 py-5 bg-gray-50 dark:bg-surface-low rounded-2xl focus:bg-white dark:focus:bg-surface-highest outline-none transition-all dark:text-high-contrast font-bold"
                     />
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Referral Code (Optional)</label>
-                  <div className="relative">
-                    <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                    <input
-                      type="text"
-                      value={formData.referralCode}
-                      onChange={(e) => setFormData({ ...formData, referralCode: e.target.value.toUpperCase() })}
-                      placeholder="Have a referral code? Enter to get rewards"
-                      className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Select Package</label>
-                  <div className="grid grid-cols-1 gap-3">
+                <div className="space-y-4">
+                  <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Select Package</label>
+                  <div className="grid grid-cols-1 gap-4">
                     {(settings?.subscriptionPlans || []).map((pkg) => {
                       return (
                         <button
                           key={pkg.id}
                           type="button"
                           onClick={() => setFormData({ ...formData, selectedPackage: pkg.id })}
-                          className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all ${
+                          className={`flex items-center justify-between p-6 rounded-2xl transition-all relative overflow-hidden ${
                             formData.selectedPackage === pkg.id
-                              ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
-                              : 'border-gray-100 dark:border-gray-800 hover:border-gray-200'
+                              ? 'bg-primary-electric/10 ring-2 ring-primary-electric'
+                              : 'bg-gray-50 dark:bg-surface-low hover:bg-gray-100 dark:hover:bg-surface-highest'
                           }`}
                         >
-                          <div className="text-left">
-                            <div className="flex items-center gap-2">
-                              <p className="font-bold text-gray-800 dark:text-gray-100">{pkg.name}</p>
-                              <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-[8px] font-black uppercase tracking-widest rounded">
+                          <div className="text-left relative z-10">
+                            <div className="flex items-center gap-3">
+                              <p className="font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">{pkg.name}</p>
+                              <span className="px-2 py-0.5 bg-green-500 text-white text-[8px] font-black uppercase tracking-widest rounded">
                                 {pkg.discount}% OFF
                               </span>
                             </div>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{pkg.kgLimit} kg/month</p>
+                            <p className="text-xs text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest mt-1">{pkg.kgLimit} kg/month</p>
                           </div>
-                          <div className="text-right">
-                            <p className="font-black text-blue-600 dark:text-blue-400">₹{pkg.price}</p>
+                          <div className="text-right relative z-10">
+                            <p className="font-black text-primary-electric dark:text-primary-electric-light text-xl">₹{pkg.price}</p>
                           </div>
                         </button>
                       );
@@ -608,12 +444,12 @@ const Login: React.FC = () => {
                   </div>
                 </div>
 
-                {error && <p className="text-red-500 text-sm text-center font-medium bg-red-50 dark:bg-red-900/20 p-3 rounded-xl">{error}</p>}
+                {error && <p className="text-red-500 text-xs text-center font-black uppercase tracking-widest bg-red-50 dark:bg-red-900/10 p-4 rounded-2xl">{error}</p>}
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
+                  className="w-full py-5 bg-gradient-to-br from-primary-electric to-[#3323cc] text-white font-black uppercase tracking-widest rounded-2xl transition-all shadow-xl shadow-primary-electric/20 dark:shadow-none haptic-feedback"
                 >
                   {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Complete Registration'}
                 </button>
@@ -630,69 +466,6 @@ const Login: React.FC = () => {
         mode="disclaimer"
         loading={loading}
       />
-
-      {/* Password Change Modal */}
-      <AnimatePresence>
-        {showPasswordChange && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-white dark:bg-gray-900 w-full max-w-md rounded-2xl sm:rounded-[3rem] shadow-2xl overflow-hidden p-6 sm:p-8"
-            >
-              <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center text-blue-600 mx-auto mb-4">
-                  <Lock className="w-8 h-8" />
-                </div>
-                <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Security Update</h3>
-                <p className="text-gray-500 font-medium mt-2">This is your first login. Please set a new secure password.</p>
-              </div>
-
-              <form onSubmit={handleChangePassword} className="space-y-4">
-                {error && <p className="text-red-500 text-sm text-center font-medium bg-red-50 dark:bg-red-900/20 p-3 rounded-xl">{error}</p>}
-                
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">New Password</label>
-                  <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                    <input
-                      type="password"
-                      required
-                      value={formData.newPassword}
-                      onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
-                      placeholder="Min 8 characters"
-                      className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-1">Confirm Password</label>
-                  <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                    <input
-                      type="password"
-                      required
-                      value={formData.confirmPassword}
-                      onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                      placeholder="Repeat new password"
-                      className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all dark:text-gray-100"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-3 sm:py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center shadow-lg shadow-blue-200 dark:shadow-none mt-4"
-                >
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Update Password & Login'}
-                </button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

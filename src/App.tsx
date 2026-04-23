@@ -12,8 +12,6 @@ import BookingDetails from './pages/BookingDetails';
 import Billing from './pages/Billing';
 import Confirmation from './pages/Confirmation';
 import Profile from './pages/Profile';
-import Leaderboard from './pages/Leaderboard';
-import Missions from './pages/Missions';
 import AdminDashboard from './pages/AdminDashboard';
 import SuperAdminDashboard from './pages/dashboards/SuperAdminDashboard';
 import StoreManagerDashboard from './pages/dashboards/StoreManagerDashboard';
@@ -22,6 +20,8 @@ import DeliveryStaffDashboard from './pages/dashboards/DeliveryStaffDashboard';
 import ErrorBoundary from './components/ErrorBoundary';
 import PageTransition from './components/PageTransition';
 import LoadingScreen from './components/LoadingScreen';
+import { requestNotificationPermission, onMessageListener } from './services/NotificationService';
+import { Toaster, toast } from 'react-hot-toast';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode; adminOnly?: boolean }> = ({ children, adminOnly }) => {
   const { user, loading, isAdmin } = useAuth();
@@ -103,22 +103,6 @@ const AnimatedRoutes: React.FC = () => {
             } 
           />
           <Route 
-            path="/leaderboard" 
-            element={
-              <ProtectedRoute>
-                <PageTransition><Leaderboard /></PageTransition>
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/missions" 
-            element={
-              <ProtectedRoute>
-                <PageTransition><Missions /></PageTransition>
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
             path="/admin" 
             element={
               <ProtectedRoute adminOnly>
@@ -133,13 +117,34 @@ const AnimatedRoutes: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
+  const { user } = useAuth();
+
+  React.useEffect(() => {
+    if (user) {
+      requestNotificationPermission();
+      
+      onMessageListener().then((payload: any) => {
+        console.log('Foreground message received:', payload);
+        if (payload.notification) {
+          toast.success(`${payload.notification.title}: ${payload.notification.body}`, {
+            duration: 5000,
+            position: 'top-right',
+          });
+        }
+      }).catch(err => console.log('failed: ', err));
+    }
+  }, [user]);
+
   return (
     <Router>
-      <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-400/10 blur-[120px] animate-pulse-glow" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-400/10 blur-[120px] animate-pulse-glow" style={{ animationDelay: '1s' }} />
+      <Toaster />
+      <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none bg-white dark:bg-deep-core transition-colors duration-500">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-primary-electric/5 blur-[120px] animate-pulse-glow" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-primary-electric-light/5 blur-[120px] animate-pulse-glow" style={{ animationDelay: '1s' }} />
       </div>
-      <AnimatedRoutes />
+      <div className="min-h-screen font-sans text-gray-900 dark:text-high-contrast">
+        <AnimatedRoutes />
+      </div>
     </Router>
   );
 };

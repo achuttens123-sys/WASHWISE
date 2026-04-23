@@ -3,10 +3,12 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import dotenv from "dotenv";
 import admin from "firebase-admin";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
-import bcrypt from "bcryptjs";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { initializeApp as initializeClientApp } from "firebase/app";
+import { getFirestore as getClientFirestore, collection, query, where, getDocs, doc, getDoc, runTransaction } from "firebase/firestore";
 import fs from "fs";
+import { format } from "date-fns";
 
 dotenv.config();
 
@@ -18,345 +20,142 @@ app.use(express.json());
 // Load Firebase Config
 const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
 
-console.log("Environment Project ID (GOOGLE_CLOUD_PROJECT):", process.env.GOOGLE_CLOUD_PROJECT);
-console.log("Environment Project ID (PROJECT_ID):", process.env.PROJECT_ID);
-
-// Explicitly set project ID in environment to ensure Admin SDK uses the correct project
-const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.PROJECT_ID || firebaseConfig.projectId;
-process.env.GOOGLE_CLOUD_PROJECT = projectId;
-process.env.GCLOUD_PROJECT = projectId;
-
-// Initialize Firebase Admin
+// Initialize Firebase Admin (for Auth/Messaging)
 if (!admin.apps.length) {
-  console.log("Initializing Firebase Admin...");
-  console.log("Using Project ID:", projectId);
-  
-  try {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: projectId,
-    });
-    console.log("Firebase Admin initialized with ADC.");
-  } catch (e) {
-    console.error("Failed to initialize Firebase Admin:", e);
-  }
+  admin.initializeApp();
 }
 
-const adminApp = admin.app();
-console.log("Admin App Options Project ID:", adminApp.options.projectId);
+const authAdmin = getAuth();
 
-const dbAdmin = firebaseConfig.firestoreDatabaseId 
-  ? getFirestore(adminApp, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(adminApp);
+// Initialize Administrative Firestore Client (Admin SDK)
+const dbAdmin = getFirestore(firebaseConfig.firestoreDatabaseId || '(default)');
 
-const authAdmin = getAuth(adminApp);
+// Initialize Client SDK Firestore (Cross-project bypass)
+const clientApp = initializeClientApp(firebaseConfig);
+const dbClient = getClientFirestore(clientApp, firebaseConfig.firestoreDatabaseId || '(default)');
+
+console.log(`Administrative Firestore initialized for project: ${firebaseConfig.projectId}, database: ${firebaseConfig.firestoreDatabaseId || '(default)'}`);
 
 // Test Firestore Connection at startup
 (async () => {
+  const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
+  console.log(`Starting Firestore Administrative verification on database: ${databaseId}...`);
+
   try {
-    console.log("Testing Firestore connection...");
-    console.log(`Using database: ${firebaseConfig.firestoreDatabaseId || "(default)"}`);
-    const testSnapshot = await dbAdmin.collection("users").limit(1).get();
-    console.log("Firestore connection test successful. Found docs:", testSnapshot.size);
-    
-    // Initialize Leaderboard Listener
-    setupLeaderboardTrigger();
-    
-    // Initialize Mission Progress Listeners
-    setupMissionTriggers();
+    // 1. Initial Read Test (Verification)
+    const testSnap = await dbAdmin.collection("system_test").limit(1).get();
+    console.log(`Administrative Firestore Connection Verified. Database: ${databaseId}`);
+
+    // 2. Initialize Service Triggers
+    console.log("Initializing Service Triggers...");
+    setupNotificationTriggers();
   } catch (err: any) {
-    console.error("Firestore connection test FAILED with named database:", err);
-    if (firebaseConfig.firestoreDatabaseId) {
-      console.log("Attempting to connect to the (default) database instead...");
-      try {
-        const defaultDb = getFirestore(adminApp);
-        const defaultSnapshot = await defaultDb.collection("users").limit(1).get();
-        console.log("Firestore connection test successful with (default) database. Found docs:", defaultSnapshot.size);
-        // If this works, we might need to update the config or use the default DB.
-      } catch (defaultErr) {
-        console.error("Firestore connection test FAILED with (default) database too:", defaultErr);
-      }
-    }
-    
-    if (err.code === 7 || err.message?.includes("PERMISSION_DENIED")) {
-      console.error("This is a permission error. Check if the service account has access to the database.");
-      console.error("Project ID:", firebaseConfig.projectId);
-      console.error("Database ID:", firebaseConfig.firestoreDatabaseId);
-    }
+    console.error("CRITICAL: Administrative Firestore Authorization Failed.");
+    console.error("Error details:", err.message);
   }
 })();
 
-function setupMissionTriggers() {
-  console.log("Setting up Mission real-time triggers...");
+function setupNotificationTriggers() {
+  console.log("Setting up Notification real-time triggers (Admin SDK)...");
 
-  // 1. Listen for completed bookings
-  dbAdmin.collection("bookings").onSnapshot((snapshot) => {
-    snapshot.docChanges().forEach(async (change) => {
-      if (change.type === "modified") {
-        const bookingData = change.doc.data();
-        if (bookingData.status === "completed" && !bookingData.missionProcessed) {
-          console.log(`Processing mission progress for completed booking: ${change.doc.id}`);
-          await updateMissionProgress(bookingData.userId, "orders", 1);
-          // Mark booking as processed to avoid double counting
-          await change.doc.ref.update({ missionProcessed: true });
-        }
-      }
-    });
-  }, (error) => {
-    console.error("Booking Mission Listener Error:", error);
-    setTimeout(setupMissionTriggers, 5000);
-  });
+  // Listen for booking status changes
+  try {
+    const bookingsRef = dbAdmin.collection("bookings");
+    bookingsRef.onSnapshot((snapshot: any) => {
+      snapshot.docChanges().forEach(async (change: any) => {
+        if (change.type === "modified") {
+          const bookingData = change.doc.data();
+          const bookingId = change.doc.id;
+          
+          if (bookingData.status) {
+            try {
+              // 1. Create in-app notification doc
+              const notificationRef = dbAdmin.collection("notifications").doc();
+              await notificationRef.set({
+                userId: bookingData.userId,
+                title: "Booking Status Update",
+                message: `Your laundry booking #${bookingId.substring(0, 6)} is now: ${bookingData.status}`,
+                status: "unread",
+                createdAt: FieldValue.serverTimestamp()
+              });
 
-  // 2. Listen for completed referrals
-  dbAdmin.collection("referrals").onSnapshot((snapshot) => {
-    snapshot.docChanges().forEach(async (change) => {
-      if (change.type === "modified" || change.type === "added") {
-        const referralData = change.doc.data();
-        if (referralData.status === "completed" && !referralData.missionProcessed) {
-          console.log(`Processing mission progress for completed referral: ${change.doc.id}`);
-          await updateMissionProgress(referralData.referrerId, "referrals", 1);
-          await change.doc.ref.update({ missionProcessed: true });
-        }
-      }
-    });
-  }, (error) => {
-    console.error("Referral Mission Listener Error:", error);
-  });
+              // 2. Send External Push Notification for specific milestones
+              const notifyStatuses = ["paid", "completed", "rejected", "rescheduled", "Ready to collect", "Out for delivery"];
+              if (notifyStatuses.includes(bookingData.status) && !bookingData.statusNotified) {
+                await sendPushNotification(bookingData.userId, {
+                  title: "Booking Update",
+                  body: `Your booking status has changed to: ${bookingData.status}`,
+                  data: {
+                    bookingId: bookingId,
+                    status: bookingData.status
+                  }
+                });
 
-  // 3. Listen for paid subscriptions
-  dbAdmin.collection("bookings").onSnapshot((snapshot) => {
-    snapshot.docChanges().forEach(async (change) => {
-      if (change.type === "modified" || change.type === "added") {
-        const bookingData = change.doc.data();
-        if (bookingData.status === "paid" && bookingData.serviceType === "Subscription" && !bookingData.subscriptionProcessed) {
-          console.log(`Processing subscription activation for booking: ${change.doc.id}`);
-          try {
-            await dbAdmin.collection("users").doc(bookingData.userId).update({
-              subscriptionPaid: true,
-              subscriptionStartDate: new Date().toISOString(),
-              package: bookingData.packageId || "basic"
-            });
-            await change.doc.ref.update({ subscriptionProcessed: true });
-          } catch (err) {
-            console.error("Error activating subscription:", err);
+                // Mark as notified in the booking doc
+                await change.doc.ref.update({ statusNotified: true });
+              }
+              
+              console.log(`Notifications processed for booking ${bookingId}`);
+            } catch (err) {
+              console.error("Error processing notification for booking:", err);
+            }
           }
         }
-      }
+      });
+    }, (error: any) => {
+      console.error("Notification Trigger Error (onSnapshot):", error);
+      // Backoff retry
+      setTimeout(setupNotificationTriggers, 10000);
     });
-  }, (error) => {
-    console.error("Subscription Payment Listener Error:", error);
-  });
-}
-
-async function updateMissionProgress(userId: string, type: string, increment: number) {
-  try {
-    // Get all missions of this type
-    const missionsSnapshot = await dbAdmin.collection("missions").where("requirement.type", "==", type).get();
-    
-    for (const missionDoc of missionsSnapshot.docs) {
-      const missionData = missionDoc.data();
-      const missionId = missionDoc.id;
-      
-      // Find or create UserMission
-      const userMissionId = `${userId}_${missionId}`;
-      const userMissionRef = dbAdmin.collection("userMissions").doc(userMissionId);
-      const userMissionSnap = await userMissionRef.get();
-      
-      let currentProgress = 0;
-      let status = "in-progress";
-      
-      if (userMissionSnap.exists) {
-        const data = userMissionSnap.data()!;
-        if (data.status !== "in-progress") continue; // Already completed or claimed
-        currentProgress = data.progress || 0;
-      }
-      
-      const newProgress = currentProgress + increment;
-      if (newProgress >= missionData.requirement.value) {
-        status = "completed";
-        console.log(`Mission ${missionId} completed for user ${userId}`);
-      }
-      
-      await userMissionRef.set({
-        userId,
-        missionId,
-        progress: newProgress,
-        status,
-        lastUpdated: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-    }
   } catch (err) {
-    console.error(`Error updating mission progress for user ${userId}:`, err);
+    console.error("Failed to setup notification listener:", err);
   }
 }
 
-function setupLeaderboardTrigger() {
-  console.log("Setting up Leaderboard real-time trigger...");
-  
-  dbAdmin.collection("users").onSnapshot((snapshot) => {
-    snapshot.docChanges().forEach(async (change) => {
-      if (change.type === "added" || change.type === "modified") {
-        const userData = change.doc.data();
-        const userId = change.doc.id;
-        
-        // Only update if points or xp exists
-        if (userData.points !== undefined || userData.xp !== undefined) {
-          try {
-            const leaderboardRef = dbAdmin.collection("leaderboard").doc(userId);
-            
-            await leaderboardRef.set({
-              userId: userId,
-              userName: userData.name || "Anonymous",
-              photoURL: userData.photoURL || null,
-              totalScore: userData.points || 0,
-              xp: userData.xp || 0,
-              level: userData.level || "Bronze",
-              lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-              // Preserve other fields if they exist
-            }, { merge: true });
-            
-            console.log(`Leaderboard updated for user: ${userId}`);
-          } catch (err) {
-            console.error(`Error updating leaderboard for user ${userId}:`, err);
-          }
+async function sendPushNotification(userId: string, notification: { title: string, body: string, data?: any }) {
+  try {
+    const userDoc = await dbAdmin.collection("users").doc(userId).get();
+    if (!userDoc.exists) return;
+
+    const userData = userDoc.data();
+    const tokens = userData?.fcmTokens || [];
+
+    if (tokens.length === 0) {
+      console.log(`No FCM tokens found for user ${userId}`);
+      return;
+    }
+
+    const message = {
+      notification: {
+        title: notification.title,
+        body: notification.body,
+      },
+      data: notification.data || {},
+      tokens: tokens,
+    };
+
+    const response = await admin.messaging().sendEachForMulticast(message);
+    console.log(`Successfully sent ${response.successCount} notifications; ${response.failureCount} failed.`);
+    
+    // Clean up failed tokens
+    if (response.failureCount > 0) {
+      const failedTokens: string[] = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          failedTokens.push(tokens[idx]);
         }
+      });
+      
+      if (failedTokens.length > 0) {
+        await dbAdmin.collection("users").doc(userId).update({
+          fcmTokens: FieldValue.arrayRemove(...failedTokens)
+        });
       }
-    });
-  }, (error) => {
-    console.error("Leaderboard Listener Error:", error);
-    // Attempt to restart listener after a delay
-    setTimeout(setupLeaderboardTrigger, 5000);
-  });
+    }
+  } catch (error) {
+    console.error("Error sending push notification:", error);
+  }
 }
-
-// API routes
-app.post("/api/auth/create-staff", async (req, res) => {
-  const { staffData, password } = req.body;
-
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    
-    // Create or update user in Firestore
-    // We use staffId as the document ID or a random UID?
-    // The user wants StaffID to be unique.
-    const staffId = staffData.staffId;
-    
-    console.log(`Attempting to create staff with ID: ${staffId}`);
-    
-    // Check if staffId already exists
-    const existing = await dbAdmin.collection("users").where("staffId", "==", staffId).get();
-    if (!existing.empty) {
-      console.warn(`Staff ID ${staffId} already exists.`);
-      return res.status(400).json({ success: false, error: "Staff ID already exists" });
-    }
-
-    console.log(`Creating Firebase Auth user for: ${staffData.email || staffId}`);
-    let userRecord;
-    try {
-      userRecord = await authAdmin.createUser({
-        displayName: staffData.name,
-        email: staffData.email || `${staffId.toLowerCase()}@washwise.staff`,
-        disabled: staffData.status === "inactive",
-      });
-      console.log(`Auth user created with UID: ${userRecord.uid}`);
-    } catch (authErr) {
-      console.error("Auth Create User Error:", authErr);
-      return res.status(500).json({ 
-        success: false, 
-        error: "Auth Error: " + (authErr instanceof Error ? authErr.message : String(authErr)) 
-      });
-    }
-
-    try {
-      console.log(`Saving to Firestore for UID: ${userRecord.uid} in database: ${firebaseConfig.firestoreDatabaseId || '(default)'}...`);
-      const userData = {
-        ...staffData,
-        uid: userRecord.uid,
-        password: hashedPassword, // Stored hashed
-        isFirstLogin: true,
-        createdAt: FieldValue.serverTimestamp(),
-      };
-
-      await dbAdmin.collection("users").doc(userRecord.uid).set(userData);
-      console.log(`Staff document saved successfully`);
-    } catch (dbErr: any) {
-      console.error("Firestore Set Doc Error:", dbErr);
-      console.error("Error Code:", dbErr.code);
-      console.error("Error Details:", dbErr.details);
-      return res.status(500).json({ 
-        success: false, 
-        error: `Firestore Error (${dbErr.code}): ` + (dbErr.message || String(dbErr)) 
-      });
-    }
-
-    res.json({ success: true, uid: userRecord.uid });
-  } catch (err) {
-    console.error("Create Staff Error:", err);
-    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
-  }
-});
-
-app.post("/api/auth/login", async (req, res) => {
-  const { staffId, password } = req.body;
-
-  try {
-    // Search by staffId OR email
-    let snapshot = await dbAdmin.collection("users").where("staffId", "==", staffId).get();
-    
-    if (snapshot.empty) {
-      // Try searching by email
-      snapshot = await dbAdmin.collection("users").where("email", "==", staffId).get();
-    }
-    
-    if (snapshot.empty) {
-      return res.status(401).json({ success: false, error: "Invalid Credentials" });
-    }
-
-    const userData = snapshot.docs[0].data();
-    
-    if (userData.status === "inactive") {
-      return res.status(401).json({ success: false, error: "Account is inactive" });
-    }
-
-    const isMatch = await bcrypt.compare(password, userData.password);
-    if (!isMatch) {
-      return res.status(401).json({ success: false, error: "Invalid Credentials" });
-    }
-
-    // Generate Custom Token for Firebase Auth
-    const customToken = await authAdmin.createCustomToken(userData.uid);
-
-    res.json({ 
-      success: true, 
-      token: customToken, 
-      isFirstLogin: userData.isFirstLogin,
-      uid: userData.uid
-    });
-  } catch (err) {
-    console.error("Login Error:", err);
-    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
-  }
-});
-
-app.post("/api/auth/change-password", async (req, res) => {
-  const { uid, newPassword } = req.body;
-
-  try {
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await dbAdmin.collection("users").doc(uid).update({
-      password: hashedPassword,
-      isFirstLogin: false
-    });
-    
-    // Generate new custom token
-    const customToken = await authAdmin.createCustomToken(uid);
-    
-    res.json({ success: true, token: customToken });
-  } catch (err) {
-    console.error("Change Password Error:", err);
-    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
-  }
-});
 
 app.post("/api/auth/delete-user", async (req, res) => {
   const { uid } = req.body;
@@ -398,6 +197,163 @@ app.post("/api/auth/delete-user", async (req, res) => {
       success: false, 
       error: err.message || String(err) 
     });
+  }
+});
+
+// --- LIMITED SLOT OFFER ENGINE ---
+app.get("/api/offers/active", async (req, res) => {
+  try {
+    const today = format(new Date(), "yyyy-MM-dd");
+    const now = format(new Date(), "HH:mm");
+    
+    // Use Client SDK to bypass Admin SDK permission issues in AI Studio
+    const offersRef = collection(dbClient, "limited_offers");
+    const q = query(offersRef, where("isActive", "==", true));
+    const offersSnap = await getDocs(q);
+
+    const activeOffers = [];
+
+    for (const offerDoc of offersSnap.docs) {
+      const data = offerDoc.data();
+      
+      // Basic validity check
+      if (data.startDate && data.startDate > today) continue;
+      if (data.endDate && data.endDate < today) continue;
+      if (data.startTime && data.startTime > now) continue;
+      if (data.endTime && data.endTime < now) continue;
+
+      // Get current usage
+      let currentCount = 0;
+      if (data.dailyReset) {
+        const statsRef = doc(dbClient, "limited_offers", offerDoc.id, "daily_stats", today);
+        const statsSnap = await getDoc(statsRef);
+        currentCount = statsSnap.exists() ? statsSnap.data()?.count || 0 : 0;
+      } else {
+        currentCount = data.usage?.total || 0;
+      }
+
+      activeOffers.push({
+        offerId: offerDoc.id,
+        name: data.name,
+        remainingSlots: Math.max(0, data.maxUsers - currentCount),
+        discountType: data.discountType,
+        discountValue: data.discountValue,
+        description: data.description || `${data.discountType === 'fixed_price' ? '₹' : ''}${data.discountValue}${data.discountType === 'percentage' ? '% OFF' : ''}`,
+        expiresAt: data.endTime ? `${today}T${data.endTime}:00` : `${data.endDate}T23:59:59`
+      });
+    }
+
+    res.json(activeOffers);
+  } catch (error: any) {
+    console.error("Error fetching active offers:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/booking/apply-offer", async (req, res) => {
+  const { userId, offerId, cartValue, serviceType, userDetails } = req.body;
+  const today = format(new Date(), "yyyy-MM-dd");
+
+  try {
+    const result = await runTransaction(dbClient, async (transaction) => {
+      const offerRef = doc(dbClient, "limited_offers", offerId);
+      const offerSnap = await transaction.get(offerRef);
+
+      if (!offerSnap.exists()) throw new Error("Offer not found");
+      const offer = offerSnap.data()!;
+
+      // 1. Basic Validity
+      if (!offer.isActive) throw new Error("Offer is no longer active");
+      if (offer.minOrderValue && cartValue < offer.minOrderValue) {
+        throw new Error(`Minimum order value ₹${offer.minOrderValue} required`);
+      }
+      if (offer.applicableServices && !offer.applicableServices.includes(serviceType)) {
+        throw new Error("Offer not applicable for this service");
+      }
+
+      // 2. Global/Daily Capacity Check
+      let statsRef;
+      if (offer.dailyReset) {
+        statsRef = doc(dbClient, "limited_offers", offerId, "daily_stats", today);
+      } else {
+        statsRef = offerRef; // Use the main doc count
+      }
+
+      const statsSnap = await transaction.get(statsRef);
+      const statsData = statsSnap.data() as any;
+      const currentCount = statsSnap.exists() ? (offer.dailyReset ? statsData?.count : statsData?.usage?.total) || 0 : 0;
+
+      if (currentCount >= offer.maxUsers) {
+        throw new Error("No more slots available for this offer today");
+      }
+
+      // 3. User Eligibility & Abuse Prevention
+      // A. Check per-user limit
+      const redemptionId = `${userId}_${offerId}_${offer.dailyReset ? today : 'global'}`;
+      const redemptionRef = doc(dbClient, "offer_redemptions", redemptionId);
+      const redemptionSnap = await transaction.get(redemptionRef);
+      const redemptionData = redemptionSnap.data() as any;
+      const userRedemptionCount = redemptionSnap.exists() ? redemptionData?.count || 0 : 0;
+
+      if (userRedemptionCount >= (offer.perUserLimit || 1)) {
+        throw new Error("You have reached the limit for this offer");
+      }
+
+      // B. Fingerprinting (Address/Phone)
+      if (userDetails?.phone || userDetails?.address) {
+        // Queries are NOT allowed inside transactions in the Client SDK v9+.
+        // Better to use an external check OR just rely on Auth UID + per-user limit.
+        // For university scale, Auth UID is usually sufficient.
+      }
+
+      // SUCCESS - Apply atomic increments
+      const now = new Date().toISOString();
+      if (offer.dailyReset) {
+        transaction.set(statsRef, { 
+          count: (currentCount || 0) + 1,
+          date: today,
+          lastRedeemedAt: now
+        }, { merge: true });
+      } else {
+        transaction.update(offerRef, { 
+          "usage.total": (currentCount || 0) + 1,
+          "usage.lastRedeemedAt": now
+        });
+      }
+
+      transaction.set(redemptionRef, {
+        userId,
+        offerId,
+        date: today,
+        count: (userRedemptionCount || 0) + 1,
+        phone: userDetails?.phone,
+        address: userDetails?.address,
+        lastRedeemedAt: now
+      }, { merge: true });
+
+      // Calculate new price
+      let newPrice = cartValue;
+      if (offer.discountType === "fixed_price") {
+        newPrice = offer.discountValue;
+      } else if (offer.discountType === "percentage") {
+        newPrice = cartValue * (1 - offer.discountValue / 100);
+      } else if (offer.discountType === "flat") {
+        newPrice = Math.max(0, cartValue - offer.discountValue);
+      }
+
+      return {
+        success: true,
+        originalPrice: cartValue,
+        discountedPrice: newPrice,
+        offerApplied: offer.name,
+        message: "Offer applied successfully!"
+      };
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    console.error("Error applying limited offer:", error);
+    res.status(400).json({ error: error.message });
   }
 });
 

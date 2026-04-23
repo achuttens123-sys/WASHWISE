@@ -19,7 +19,6 @@ import { collection, query, where, onSnapshot, updateDoc, doc, orderBy, getDoc }
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Booking } from '../../types';
-import { GamificationService } from '../../services/GamificationService';
 import { format } from 'date-fns';
 
 const DeliveryStaffDashboard: React.FC = () => {
@@ -55,15 +54,6 @@ const DeliveryStaffDashboard: React.FC = () => {
   const updateStatus = async (id: string, status: Booking['status']) => {
     try {
       await updateDoc(doc(db, 'bookings', id), { status });
-      
-      if (status === 'completed') {
-        const bookingSnap = await getDoc(doc(db, 'bookings', id));
-        if (bookingSnap.exists()) {
-          const booking = bookingSnap.data() as Booking;
-          await GamificationService.awardOrderRewards(booking.userId, { ...booking, id });
-          await GamificationService.validateReferral(booking.userId, { ...booking, id });
-        }
-      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${id}`);
     }

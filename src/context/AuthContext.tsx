@@ -3,6 +3,7 @@ import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { User } from '../types';
+import { isSuperAdminEmail } from '../constants';
 
 interface AuthContextType {
   user: User | null;
@@ -37,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [isAuthReady, setIsAuthReady] = useState(false);
 
-  const isSuperAdmin = user?.adminRole === 'super_admin' || user?.email === 'ashwinchuttipara@gmail.com';
+  const isSuperAdmin = user?.adminRole === 'super_admin' || isSuperAdminEmail(user?.email);
   const isStoreManager = user?.adminRole === 'store_manager';
   const isStoreStaff = user?.adminRole === 'store_staff';
   const isDeliveryStaff = user?.adminRole === 'delivery_staff';
@@ -77,7 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
               
               // Hardcoded super admin check
-              if (fbUser.email === 'ashwinchuttipara@gmail.com') {
+              if (isSuperAdminEmail(fbUser.email)) {
                 userData.adminRole = 'super_admin';
                 userData.role = 'admin';
               }
@@ -109,20 +110,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (userData: User) => {
-    const referralCode = `WASH-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-    const userWithGamification = cleanData({ 
-      points: 0, 
-      xp: 0, 
-      level: 'Bronze', 
-      streak: 0, 
-      riskScore: 0, 
-      referralCode,
-      totalReferrals: 0,
-      ...userData 
-    });
-    setUser(userWithGamification);
+    const cleanedUserData = cleanData(userData);
+    setUser(cleanedUserData);
     try {
-      await setDoc(doc(db, 'users', userData.uid), userWithGamification, { merge: true });
+      await setDoc(doc(db, 'users', userData.uid), cleanedUserData, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${userData.uid}`);
     }

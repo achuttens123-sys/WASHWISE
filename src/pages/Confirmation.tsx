@@ -198,18 +198,6 @@ const Confirmation: React.FC = () => {
                   <span className="text-gray-500 dark:text-gray-400">{booking.serviceType} ({booking.approxLoad})</span>
                   <span className="font-bold text-gray-800 dark:text-gray-200">₹{booking.price.toFixed(2)}</span>
                 </div>
-                {booking.pointsEarned && booking.pointsEarned > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-indigo-600 dark:text-indigo-400 font-medium">Points Earned</span>
-                    <span className="font-bold text-indigo-600 dark:text-indigo-400">+{booking.pointsEarned} pts</span>
-                  </div>
-                )}
-                {booking.pointsRedeemed && booking.pointsRedeemed > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-red-600 dark:text-red-400 font-medium">Points Redeemed</span>
-                    <span className="font-bold text-red-600 dark:text-red-400">-{booking.pointsRedeemed} pts</span>
-                  </div>
-                )}
                 {booking.pickupDrop && (
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 dark:text-gray-400">Pickup & Drop Service</span>

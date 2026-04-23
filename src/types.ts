@@ -17,15 +17,7 @@ export interface User {
   lastLogin?: any;
   studentId?: string;
   isRegistered?: boolean;
-  points?: number;
-  xp?: number;
-  level?: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
-  streak?: number;
   lastOrderDate?: string;
-  riskScore?: number;
-  referralCode?: string;
-  referredBy?: string;
-  totalReferrals?: number;
   package?: string;
   subscriptionPaid?: boolean;
   subscriptionStartDate?: string;
@@ -37,50 +29,6 @@ export interface User {
   deviceIds?: string[];
   deviceId?: string;
   ipAddress?: string;
-  firstOrderRewarded?: boolean;
-}
-
-export interface LeaderboardEntry {
-  id?: string;
-  userId: string;
-  userName: string;
-  photoURL?: string;
-  totalScore: number;
-  weeklyScore: number;
-  rank?: number;
-  lastUpdated: any;
-  hostel?: string;
-}
-
-export interface Referral {
-  id?: string;
-  referrerId: string;
-  referredUserId: string;
-  status: 'pending' | 'completed' | 'flagged';
-  createdAt: any;
-  completedAt?: any;
-}
-
-export interface Mission {
-  id: string;
-  title: string;
-  description: string;
-  rewardXP: number;
-  rewardPoints: number;
-  type: 'daily' | 'weekly' | 'one-time';
-  requirement: {
-    type: 'orders' | 'referrals' | 'spend' | 'streak';
-    value: number;
-  };
-}
-
-export interface UserMission {
-  id?: string;
-  userId: string;
-  missionId: string;
-  progress: number;
-  status: 'in-progress' | 'completed' | 'claimed';
-  lastUpdated: any;
 }
 
 export interface Store {
@@ -93,6 +41,8 @@ export interface Store {
   latitude?: number;
   longitude?: number;
   active: boolean;
+  isPaused?: boolean;
+  maintenanceMessage?: string;
   createdAt: any;
 }
 
@@ -101,8 +51,10 @@ export interface Machine {
   storeId: string;
   number: number;
   type: 'washer' | 'dryer';
-  status: 'free' | 'occupied' | 'maintenance';
+  status: 'free' | 'occupied' | 'maintenance' | 'unavailable' | 'idle' | 'running';
+  isAvailable?: boolean;
   currentBookingId?: string;
+  timeRemaining?: number;
 }
 
 export interface Bag {
@@ -127,6 +79,7 @@ export interface Slot {
   machines: {
     [key: string]: string; // machine number (1-4) -> user uid
   };
+  isPaused?: boolean;
 }
 
 export interface Booking {
@@ -148,9 +101,7 @@ export interface Booking {
   serviceType: 'Wash & Fold' | 'Express Wash' | 'Instant Booking' | 'Subscription';
   approxLoad: '1-4 kg' | '5 kg' | '6 kg' | '7+ kg';
   price: number;
-  status: 'pending' | 'paid' | 'completed' | 'rejected' | 'rescheduled' | 'In Wash' | 'In Drier' | 'Ready to collect' | 'Ready to deliver' | 'Ready for pick up' | 'Washing completed' | 'Out for delivery';
-  pointsEarned?: number;
-  pointsRedeemed?: number;
+  status: 'pending' | 'paid' | 'completed' | 'rejected' | 'rescheduled' | 'In Wash' | 'In Dryer' | 'Ready to collect' | 'Ready to deliver' | 'Ready for pick up' | 'Washing completed' | 'Out for delivery';
   packageId?: string;
   garmentInstructions?: string;
   createdAt?: any;

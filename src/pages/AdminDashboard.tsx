@@ -27,6 +27,7 @@ import { collection, query, orderBy, onSnapshot, updateDoc, doc, getDoc, runTran
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import { db, handleFirestoreError, OperationType, firebaseConfig } from '../firebase';
+import { isSuperAdminEmail } from '../constants';
 import { Booking, TIME_SLOTS, Slot, AdminRole, User as AppUser } from '../types';
 import { useSettings } from '../context/SettingsContext';
 import { format, addDays } from 'date-fns';
@@ -49,8 +50,9 @@ const AdminDashboard: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
+  const [limitedOffers, setLimitedOffers] = useState<any[]>([]);
   const [adminRoles, setAdminRoles] = useState<{ email: string; role: AdminRole }[]>([]);
-  const [activeTab, setActiveTab] = useState<'bookings' | 'notifications' | 'stores' | 'team' | 'users'>('bookings');
+  const [activeTab, setActiveTab] = useState<'bookings' | 'notifications' | 'stores' | 'team' | 'users' | 'offers'>('bookings');
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [userSearchTerm, setUserSearchTerm] = useState('');
@@ -72,8 +74,7 @@ const AdminDashboard: React.FC = () => {
     email: '',
     userType: 'guest',
     studentId: '',
-    package: 'basic',
-    points: 0
+    package: 'basic'
   });
   const [userPassword, setUserPassword] = useState('');
   const [isResettingWallets, setIsResettingWallets] = useState(false);
@@ -83,8 +84,28 @@ const AdminDashboard: React.FC = () => {
   const [rejectionModal, setRejectionModal] = useState(false);
   const [rescheduleModal, setRescheduleModal] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
-  const [newDate, setNewDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  // Offer Management State
+  const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
+  const [editingOffer, setEditingOffer] = useState<any>(null);
+  const [offerFormData, setOfferFormData] = useState({
+    name: '',
+    discountType: 'percentage',
+    discountValue: 0,
+    maxUsers: 10,
+    perUserLimit: 1,
+    startDate: format(new Date(), 'yyyy-MM-dd'),
+    endDate: format(addDays(new Date(), 7), 'yyyy-MM-dd'),
+    startTime: '09:00',
+    endTime: '21:00',
+    dailyReset: true,
+    applicableServices: ['Wash & Fold', 'Express Wash', 'Instant Booking'],
+    minOrderValue: 0,
+    isActive: true,
+    newUsersOnly: false,
+    description: ''
+  });
   const [newSlot, setNewSlot] = useState(TIME_SLOTS[0]);
+  const [newDate, setNewDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [processing, setProcessing] = useState(false);
 
   // Team Management State
@@ -103,7 +124,9 @@ const AdminDashboard: React.FC = () => {
     phone: '',
     latitude: 9.575086702360185,
     longitude: 76.62057146585084,
-    active: true
+    active: true,
+    isPaused: false,
+    maintenanceMessage: 'Store is temporarily closed for maintenance.'
   });
 
   useEffect(() => {
@@ -155,6 +178,15 @@ const AdminDashboard: React.FC = () => {
       setAdminRoles(roles);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'admin_roles');
+    });
+    return () => unsubscribe();
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    const q = query(collection(db, 'limited_offers'), orderBy('isActive', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setLimitedOffers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubscribe();
   }, [isSuperAdmin]);
@@ -281,6 +313,17 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleToggleStorePause = async (store: Store) => {
+    try {
+      await StoreService.updateStore(store.id, { 
+        isPaused: !store.isPaused,
+        maintenanceMessage: store.maintenanceMessage || 'Store is temporarily closed for maintenance.'
+      });
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   useEffect(() => {
     if (!isSuperAdmin) return;
     const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
@@ -310,7 +353,6 @@ const AdminDashboard: React.FC = () => {
         userType: userFormData.userType || 'guest',
         studentId: userFormData.studentId || '',
         package: userFormData.package || 'basic',
-        points: userFormData.points || 0,
         isRegistered: true,
         createdAt: new Date().toISOString(),
         subscriptionPaid: false
@@ -324,8 +366,7 @@ const AdminDashboard: React.FC = () => {
         email: '',
         userType: 'guest',
         studentId: '',
-        package: 'basic',
-        points: 0
+        package: 'basic'
       });
       setUserPassword('');
     } catch (error: any) {
@@ -414,20 +455,6 @@ const AdminDashboard: React.FC = () => {
         // 2. ALL WRITES LAST
         // Update booking status
         transaction.update(bookingRef, { status: newStatus });
-
-        // If status is 'completed', add points to user
-        if (newStatus === 'completed' && bookingData.status !== 'completed') {
-          if (userSnap.exists()) {
-            const currentPoints = userSnap.data().points || 0;
-            const pointsToAdd = bookingData.pointsEarned || 0;
-            transaction.update(userRef, { points: currentPoints + pointsToAdd });
-          }
-          
-          // Referral & Gamification logic
-          const { GamificationService } = await import('../services/GamificationService');
-          await GamificationService.awardOrderRewards(bookingData.userId, { ...bookingData, id: bookingId });
-          await GamificationService.validateReferral(bookingData.userId, { ...bookingData, id: bookingId });
-        }
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
@@ -459,23 +486,6 @@ const AdminDashboard: React.FC = () => {
           const machines = slotSnap.data().machines;
           machines[selectedBooking.machineNumber.toString()] = '';
           transaction.update(slotRef, { machines });
-        }
-
-        // Reverse points
-        if (userSnap.exists()) {
-          const userData = userSnap.data();
-          let currentPoints = userData.points || 0;
-          
-          // If points were earned, deduct them
-          if (selectedBooking.pointsEarned) {
-            currentPoints -= selectedBooking.pointsEarned;
-          }
-          // If points were redeemed, refund them
-          if (selectedBooking.pointsRedeemed) {
-            currentPoints += selectedBooking.pointsRedeemed;
-          }
-          
-          transaction.update(userRef, { points: Math.max(0, currentPoints) });
         }
       });
 
@@ -702,7 +712,347 @@ const AdminDashboard: React.FC = () => {
             )}
           </button>
         )}
+        {isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('offers')}
+            className={`pb-4 px-2 text-sm font-bold transition-all relative ${
+              activeTab === 'offers' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+            }`}
+          >
+            Special Offers
+            {activeTab === 'offers' && (
+              <motion.div
+                layoutId="activeTab"
+                className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400"
+              />
+            )}
+          </button>
+        )}
       </div>
+
+      {activeTab === 'offers' && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Limited Slot Offers</h3>
+            <button 
+              onClick={() => {
+                setEditingOffer(null);
+                setOfferFormData({
+                  name: '',
+                  discountType: 'percentage',
+                  discountValue: 0,
+                  maxUsers: 10,
+                  perUserLimit: 1,
+                  startDate: format(new Date(), 'yyyy-MM-dd'),
+                  endDate: format(addDays(new Date(), 7), 'yyyy-MM-dd'),
+                  startTime: '00:00',
+                  endTime: '23:59',
+                  dailyReset: true,
+                  applicableServices: ['Wash & Fold', 'Express Wash', 'Instant Booking'],
+                  minOrderValue: 0,
+                  isActive: true,
+                  newUsersOnly: false,
+                  description: ''
+                });
+                setIsOfferModalOpen(true);
+              }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" /> Create Offer
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {limitedOffers.map(offer => (
+              <div key={offer.id} className="bg-white dark:bg-gray-900 p-6 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h4 className="text-lg font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">{offer.name}</h4>
+                    <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">
+                      {offer.discountType === 'percentage' ? `${offer.discountValue}% OFF` : `₹${offer.discountValue} OFF`}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        setEditingOffer(offer);
+                        setOfferFormData(offer);
+                        setIsOfferModalOpen(true);
+                      }}
+                      className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        if (confirm('Delete this offer?')) {
+                          await deleteDoc(doc(db, 'limited_offers', offer.id));
+                        }
+                      }}
+                      className="p-2 text-gray-400 hover:text-red-600 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-2xl">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Status</p>
+                    <p className={`text-xs font-black uppercase ${offer.isActive ? 'text-green-600' : 'text-red-600'}`}>
+                      {offer.isActive ? 'ACTIVE' : 'INACTIVE'}
+                    </p>
+                  </div>
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-2xl">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Max Slots</p>
+                    <p className="text-sm font-black text-gray-800 dark:text-white uppercase">{offer.maxUsers} {offer.dailyReset ? '/ DAY' : 'TOTAL'}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-3 h-3" /> {offer.startDate} to {offer.endDate}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-3 h-3" /> {offer.startTime} - {offer.endTime}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {offer.applicableServices?.map((s: string) => (
+                      <span key={s} className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded-md text-[9px] font-black uppercase">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Offer Modal */}
+      {isOfferModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-gray-900 rounded-3xl p-8 max-w-2xl w-full shadow-2xl border border-gray-100 dark:border-gray-800 my-8"
+          >
+            <h2 className="text-2xl font-black text-gray-800 dark:text-gray-100 mb-6 uppercase tracking-tight">
+              {editingOffer ? 'Edit Special Offer' : 'Create Special Offer'}
+            </h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Offer Name</label>
+                  <input
+                    type="text"
+                    value={offerFormData.name}
+                    onChange={(e) => setOfferFormData({ ...offerFormData, name: e.target.value })}
+                    className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., First 10 Morning Birds"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Type</label>
+                    <select
+                      value={offerFormData.discountType}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, discountType: e.target.value })}
+                      className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    >
+                      <option value="percentage">Percentage</option>
+                      <option value="flat">Flat Discount</option>
+                      <option value="fixed_price">Fixed Override</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Value</label>
+                    <input
+                      type="number"
+                      value={offerFormData.discountValue}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, discountValue: parseFloat(e.target.value) })}
+                      className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Max Users</label>
+                    <input
+                      type="number"
+                      value={offerFormData.maxUsers}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, maxUsers: parseInt(e.target.value) })}
+                      className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Per User Limit</label>
+                    <input
+                      type="number"
+                      value={offerFormData.perUserLimit}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, perUserLimit: parseInt(e.target.value) })}
+                      className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-4">
+                   <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={offerFormData.dailyReset}
+                        onChange={(e) => setOfferFormData({ ...offerFormData, dailyReset: e.target.checked })}
+                        className="w-5 h-5 rounded border-gray-300"
+                      />
+                      <span className="text-[10px] font-black text-gray-600 uppercase">Daily Reset</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={offerFormData.newUsersOnly}
+                        onChange={(e) => setOfferFormData({ ...offerFormData, newUsersOnly: e.target.checked })}
+                        className="w-5 h-5 rounded border-gray-300"
+                      />
+                      <span className="text-[10px] font-black text-gray-600 uppercase">New Users Only</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={offerFormData.isActive}
+                        onChange={(e) => setOfferFormData({ ...offerFormData, isActive: e.target.checked })}
+                        className="w-5 h-5 rounded border-gray-300"
+                      />
+                      <span className="text-[10px] font-black text-gray-600 uppercase">Is Active</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Start Date</label>
+                    <input
+                      type="date"
+                      value={offerFormData.startDate}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, startDate: e.target.value })}
+                      className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">End Date</label>
+                    <input
+                      type="date"
+                      value={offerFormData.endDate}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, endDate: e.target.value })}
+                      className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Min Order Value (₹)</label>
+                    <input
+                      type="number"
+                      value={offerFormData.minOrderValue}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, minOrderValue: parseFloat(e.target.value) })}
+                      className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Applicable Services</label>
+                    <div className="flex flex-wrap gap-2">
+                      {['Wash & Fold', 'Express Wash', 'Instant Booking'].map(service => (
+                        <button
+                          key={service}
+                          type="button"
+                          onClick={() => {
+                            const current = offerFormData.applicableServices || [];
+                            const next = current.includes(service) 
+                              ? current.filter(s => s !== service)
+                              : [...current, service];
+                            setOfferFormData({ ...offerFormData, applicableServices: next });
+                          }}
+                          className={`px-2 py-1 rounded-md text-[9px] font-black uppercase transition-all ${
+                            offerFormData.applicableServices?.includes(service)
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-500'
+                          }`}
+                        >
+                          {service}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Start Time</label>
+                    <input
+                      type="time"
+                      value={offerFormData.startTime}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, startTime: e.target.value })}
+                      className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">End Time</label>
+                    <input
+                      type="time"
+                      value={offerFormData.endTime}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, endTime: e.target.value })}
+                      className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Description</label>
+                  <input
+                    type="text"
+                    value={offerFormData.description}
+                    onChange={(e) => setOfferFormData({ ...offerFormData, description: e.target.value })}
+                    className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
+                    placeholder="e.g., Get a ₹1 wash every morning"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => setIsOfferModalOpen(false)}
+                className="flex-1 py-4 bg-gray-100 dark:bg-gray-800 text-gray-600 font-black uppercase tracking-widest rounded-2xl hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                   setProcessing(true);
+                   try {
+                     if (editingOffer) {
+                       await updateDoc(doc(db, 'limited_offers', editingOffer.id), offerFormData);
+                     } else {
+                       await addDoc(collection(db, 'limited_offers'), {
+                         ...offerFormData,
+                         createdAt: new Date().toISOString(),
+                         usage: { total: 0 }
+                       });
+                     }
+                     setIsOfferModalOpen(false);
+                   } catch (err) {
+                     console.error(err);
+                   } finally {
+                     setProcessing(false);
+                   }
+                }}
+                className="flex-1 py-4 bg-blue-600 text-white font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 shadow-xl shadow-blue-200 dark:shadow-none"
+              >
+                {processing ? 'Processing...' : (editingOffer ? 'Update Offer' : 'Create Offer')}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {activeTab === 'bookings' ? (
         <>
@@ -728,7 +1078,7 @@ const AdminDashboard: React.FC = () => {
             <option value="pending">Pending</option>
             <option value="paid">Paid</option>
             <option value="In Wash">In Wash</option>
-            <option value="In Drier">In Drier</option>
+            <option value="In Dryer">In Dryer</option>
             <option value="Ready to collect">Ready to collect</option>
             <option value="Ready to deliver">Ready to deliver</option>
             <option value="Ready for pick up">Ready for pick up</option>
@@ -832,7 +1182,7 @@ const AdminDashboard: React.FC = () => {
                         <option value="pending">PENDING</option>
                         <option value="paid">PAID</option>
                         <option value="In Wash">IN WASH</option>
-                        <option value="In Drier">IN DRIER</option>
+                        <option value="In Dryer">IN DRYER</option>
                         <option value="Ready to collect">READY TO COLLECT</option>
                         <option value="Ready to deliver">READY TO DELIVER</option>
                         <option value="Ready for pick up">READY FOR PICK UP</option>
@@ -983,7 +1333,7 @@ const AdminDashboard: React.FC = () => {
                         <td className="px-6 py-4">
                           <button 
                             onClick={() => handleRemoveTeamMember(member.email)}
-                            disabled={member.email === 'ashwinchuttipara@gmail.com'}
+                            disabled={isSuperAdminEmail(member.email)}
                             className="p-2 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                           >
                             <Trash2 className="w-5 h-5" />
@@ -1079,7 +1429,6 @@ const AdminDashboard: React.FC = () => {
                               </p>
                             </>
                           )}
-                          <p className="text-gray-400 dark:text-gray-500">Points: {u.points || 0}</p>
                           {u.isSuspended && (
                             <p className="text-red-600 font-black uppercase tracking-widest text-[10px] flex items-center gap-1">
                               <ShieldAlert className="w-3 h-3" /> Suspended
@@ -1091,7 +1440,7 @@ const AdminDashboard: React.FC = () => {
                         <div className="flex gap-2">
                           <button 
                             onClick={() => handleToggleSuspension(u.uid, !!u.isSuspended)}
-                            disabled={u.email === 'ashwinchuttipara@gmail.com'}
+                            disabled={isSuperAdminEmail(u.email)}
                             title={u.isSuspended ? 'Unsuspend User' : 'Suspend User'}
                             className={`p-2 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
                               u.isSuspended 
@@ -1103,7 +1452,7 @@ const AdminDashboard: React.FC = () => {
                           </button>
                           <button 
                             onClick={() => handleDeleteUser(u.uid)}
-                            disabled={u.email === 'ashwinchuttipara@gmail.com'}
+                            disabled={isSuperAdminEmail(u.email)}
                             title="Delete User"
                             className="p-2 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                           >
@@ -1186,23 +1535,35 @@ const AdminDashboard: React.FC = () => {
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 line-clamp-2">{store.address}</p>
                 
                 <div className="flex items-center justify-between pt-4 border-t border-gray-50 dark:border-gray-800">
-                  <div className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                    {store.latitude.toFixed(4)}, {store.longitude.toFixed(4)}
-                  </div>
-                  <button 
-                    onClick={() => toggleStoreStatus(store)}
-                    className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${
-                      store.active 
-                        ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
-                    }`}
-                  >
-                    {store.active ? (
-                      <><ToggleRight className="w-4 h-4" /> Active</>
-                    ) : (
-                      <><ToggleLeft className="w-4 h-4" /> Inactive</>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                      {store.latitude.toFixed(4)}, {store.longitude.toFixed(4)}
+                    </div>
+                    {store.isPaused && (
+                      <div className="text-[10px] font-black text-amber-600 uppercase tracking-widest flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> Paused
+                      </div>
                     )}
-                  </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => handleToggleStorePause(store)}
+                      className={`p-1 rounded-lg transition-all ${store.isPaused ? 'text-amber-600' : 'text-gray-400'}`}
+                      title={store.isPaused ? 'Resume Store' : 'Pause Store'}
+                    >
+                      {store.isPaused ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
+                    </button>
+                    <button 
+                      onClick={() => toggleStoreStatus(store)}
+                      className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${
+                        store.active 
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                      }`}
+                    >
+                      {store.active ? 'Active' : 'Inactive'}
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             ))}
@@ -1564,6 +1925,31 @@ const AdminDashboard: React.FC = () => {
                   className="w-5 h-5 rounded border-gray-300 dark:border-gray-700 text-blue-600 focus:ring-blue-500 dark:bg-gray-800"
                 />
                 <label htmlFor="active" className="text-sm font-bold text-gray-700 dark:text-gray-300">Store is Active</label>
+              </div>
+
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/10 rounded-2xl border border-amber-100 dark:border-amber-900/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600" />
+                    <span className="text-xs font-black text-amber-900 dark:text-amber-100 uppercase tracking-tight">Maintenance Mode</span>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setStoreFormData({ ...storeFormData, isPaused: !storeFormData.isPaused })}
+                    className={`p-1 rounded-lg transition-all ${storeFormData.isPaused ? 'text-amber-600' : 'text-gray-400'}`}
+                  >
+                    {storeFormData.isPaused ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
+                  </button>
+                </div>
+                {storeFormData.isPaused && (
+                  <input 
+                    type="text"
+                    value={storeFormData.maintenanceMessage}
+                    onChange={(e) => setStoreFormData({ ...storeFormData, maintenanceMessage: e.target.value })}
+                    className="w-full bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-xs font-bold outline-none"
+                    placeholder="Maintenance message..."
+                  />
+                )}
               </div>
             </div>
             

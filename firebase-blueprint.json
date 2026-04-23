@@ -16,22 +16,14 @@
         "employeeId": { "type": "string", "description": "Auto-generated employee ID" },
         "address": { "type": "string", "description": "User's address" },
         "status": { "type": "string", "enum": ["active", "inactive"], "description": "Staff status" },
-        "points": { "type": "integer", "description": "User's loyalty points" },
         "studentId": { "type": "string", "description": "User's student ID" },
         "isRegistered": { "type": "boolean", "description": "Whether the user is registered" },
-        "xp": { "type": "integer", "description": "User's experience points" },
-        "level": { "type": "string", "enum": ["Bronze", "Silver", "Gold", "Platinum"], "description": "User's level" },
-        "streak": { "type": "integer", "description": "User's weekly streak" },
-        "riskScore": { "type": "integer", "description": "User's anti-abuse risk score" },
-        "referralCode": { "type": "string", "description": "User's unique referral code" },
-        "totalReferrals": { "type": "integer", "description": "Total successful referrals" },
-        "deviceId": { "type": "string", "description": "Device identifier for fraud prevention" },
-        "ipAddress": { "type": "string", "description": "IP address for fraud prevention" },
-        "firstOrderRewarded": { "type": "boolean", "description": "Whether the user has been rewarded for their first order" },
-        "referredBy": { "type": "string", "description": "Referral code of the user who referred this user" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation timestamp" },
-        "lastLogin": { "type": "string", "format": "date-time", "description": "Last login timestamp" },
-        "walletBalance": { "type": "number", "description": "User's current wallet balance in INR" }
+        "walletBalance": { "type": "number", "description": "User's current wallet balance in INR" },
+        "fcmTokens": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "FCM tokens for push notifications"
+        }
       },
       "required": ["uid", "name", "email", "userType"]
     },
@@ -45,7 +37,8 @@
         "machines": {
           "type": "object",
           "description": "Map of machine IDs to user UIDs"
-        }
+        },
+        "isPaused": { "type": "boolean", "description": "Whether this specific slot is paused for maintenance" }
       },
       "required": ["date", "timeSlot", "machines"]
     },
@@ -71,9 +64,7 @@
         "serviceType": { "type": "string", "enum": ["Wash & Fold", "Express Wash", "Instant Booking", "Subscription"], "description": "Type of service" },
         "approxLoad": { "type": "string", "enum": ["1-2 kg", "3-4 kg", "5-6 kg"], "description": "Approximate load" },
         "price": { "type": "number", "description": "Total price in INR" },
-        "pointsEarned": { "type": "integer", "description": "Points earned from this booking" },
-        "pointsRedeemed": { "type": "integer", "description": "Points redeemed for this booking" },
-        "status": { "type": "string", "enum": ["pending", "paid", "completed", "rejected", "rescheduled", "In Wash", "In Drier", "Ready to collect", "Ready to deliver", "Ready for pick up", "Washing completed", "Out for delivery"], "description": "Booking status" },
+        "status": { "type": "string", "enum": ["pending", "paid", "completed", "rejected", "rescheduled", "In Wash", "In Dryer", "Ready to collect", "Ready to deliver", "Ready for pick up", "Washing completed", "Out for delivery"], "description": "Booking status" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Booking creation timestamp" }
       },
       "required": ["userId", "date", "timeSlot", "machineNumber", "price", "status"]
@@ -92,6 +83,8 @@
         "latitude": { "type": "number", "description": "Store latitude" },
         "longitude": { "type": "number", "description": "Store longitude" },
         "active": { "type": "boolean", "description": "Whether the store is active" },
+        "isPaused": { "type": "boolean", "description": "Whether the store is temporarily paused for maintenance" },
+        "maintenanceMessage": { "type": "string", "description": "Message to display when store is paused" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
       },
       "required": ["name", "active"]
@@ -105,7 +98,8 @@
         "storeId": { "type": "string", "description": "Store ID" },
         "number": { "type": "integer", "description": "Machine number" },
         "type": { "type": "string", "enum": ["washer", "dryer"], "description": "Machine type" },
-        "status": { "type": "string", "enum": ["idle", "running", "maintenance"], "description": "Machine status" },
+        "status": { "type": "string", "enum": ["idle", "running", "maintenance", "unavailable"], "description": "Machine status" },
+        "isAvailable": { "type": "boolean", "description": "Whether the machine is available for booking" },
         "currentBookingId": { "type": "string", "description": "ID of the current booking" },
         "timeRemaining": { "type": "integer", "description": "Time remaining in minutes" }
       },
@@ -126,6 +120,45 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Notification creation timestamp" }
       },
       "required": ["userId", "email", "type", "title", "message", "isRead", "createdAt"]
+    },
+    "LimitedOffer": {
+      "title": "LimitedOffer",
+      "description": "A high-urgency marketing offer with limited slots and dynamic criteria.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "discountType": { "type": "string", "enum": ["fixed_price", "percentage", "flat"] },
+        "discountValue": { "type": "number" },
+        "maxUsers": { "type": "integer", "description": "Global or daily limit of redemptions" },
+        "perUserLimit": { "type": "integer", "default": 1 },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
+        "startTime": { "type": "string", "description": "HH:MM format" },
+        "endTime": { "type": "string", "description": "HH:MM format" },
+        "dailyReset": { "type": "boolean", "default": true },
+        "applicableServices": { "type": "array", "items": { "type": "string" } },
+        "newUsersOnly": { "type": "boolean", "default": false },
+        "minOrderValue": { "type": "number", "default": 0 },
+        "isActive": { "type": "boolean", "default": true },
+        "usage": {
+           "type": "object",
+           "description": "Tracks usage for non-daily reset offers"
+        }
+      },
+      "required": ["name", "discountType", "discountValue", "maxUsers"]
+    },
+    "Redemption": {
+      "title": "Redemption",
+      "description": "Tracking document for an offer's use by a user.",
+      "type": "object",
+      "properties": {
+        "offerId": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string", "description": "YYYY-MM-DD for daily limit tracking" },
+        "count": { "type": "integer" },
+        "lastRedeemedAt": { "type": "string", "format": "date-time" }
+      }
     },
     "Settings": {
       "title": "Settings",
@@ -184,65 +217,6 @@
         "manage_inventory": { "type": "boolean" },
         "view_reports": { "type": "boolean" }
       }
-    },
-    "LeaderboardEntry": {
-      "title": "LeaderboardEntry",
-      "description": "An entry in the global or weekly leaderboard.",
-      "type": "object",
-      "properties": {
-        "userId": { "type": "string" },
-        "userName": { "type": "string" },
-        "photoURL": { "type": "string" },
-        "totalScore": { "type": "integer" },
-        "weeklyScore": { "type": "integer" },
-        "lastUpdated": { "type": "string", "format": "date-time" },
-        "hostel": { "type": "string" }
-      }
-    },
-    "Referral": {
-      "title": "Referral",
-      "description": "A referral record tracking the invitee and inviter.",
-      "type": "object",
-      "properties": {
-        "referrerId": { "type": "string" },
-        "referredUserId": { "type": "string" },
-        "status": { "type": "string", "enum": ["pending", "completed", "flagged"] },
-        "riskReason": { "type": "string", "description": "Reason for flagging as fraud" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "completedAt": { "type": "string", "format": "date-time" },
-        "flaggedAt": { "type": "string", "format": "date-time" }
-      }
-    },
-    "Mission": {
-      "title": "Mission",
-      "description": "A mission or challenge for users to complete.",
-      "type": "object",
-      "properties": {
-        "title": { "type": "string" },
-        "description": { "type": "string" },
-        "rewardXP": { "type": "integer" },
-        "rewardPoints": { "type": "integer" },
-        "type": { "type": "string", "enum": ["daily", "weekly", "one-time"] },
-        "requirement": {
-          "type": "object",
-          "properties": {
-            "type": { "type": "string", "enum": ["orders", "referrals", "spend", "streak"] },
-            "value": { "type": "integer" }
-          }
-        }
-      }
-    },
-    "UserMission": {
-      "title": "UserMission",
-      "description": "A user's progress on a specific mission.",
-      "type": "object",
-      "properties": {
-        "userId": { "type": "string" },
-        "missionId": { "type": "string" },
-        "progress": { "type": "integer" },
-        "status": { "type": "string", "enum": ["in-progress", "completed", "claimed"] },
-        "lastUpdated": { "type": "string", "format": "date-time" }
-      }
     }
   },
   "firestore": {
@@ -274,25 +248,17 @@
       "schema": "Settings",
       "description": "Global application settings"
     },
+    "/limited_offers/{offerId}": {
+      "schema": "LimitedOffer",
+      "description": "High-urgency limited slot offers"
+    },
+    "/offer_redemptions/{redemptionId}": {
+      "schema": "Redemption",
+      "description": "Tracking user redemptions of limited offers"
+    },
     "/role_permissions/{roleId}": {
       "schema": "RolePermissions",
       "description": "Permissions assigned to each administrative role"
-    },
-    "/leaderboard/{userId}": {
-      "schema": "LeaderboardEntry",
-      "description": "Leaderboard entries"
-    },
-    "/referrals/{referralId}": {
-      "schema": "Referral",
-      "description": "Referral records"
-    },
-    "/missions/{missionId}": {
-      "schema": "Mission",
-      "description": "Available missions"
-    },
-    "/userMissions/{userMissionId}": {
-      "schema": "UserMission",
-      "description": "User mission progress"
     }
   }
 }

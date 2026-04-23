@@ -1,9 +1,10 @@
 import React from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { LogOut, User, Bell, Menu, X, ShieldCheck, Sun, Moon, FileText, Trophy, Target } from 'lucide-react';
+import { LogOut, User, Bell, Menu, X, ShieldCheck, Sun, Moon, FileText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { isSuperAdminEmail } from '../constants';
 import TermsModal from './TermsModal';
 
 import NotificationCenter from './NotificationCenter';
@@ -35,8 +36,25 @@ const Layout: React.FC = () => {
               className="flex items-center cursor-pointer shrink-0" 
               onClick={() => navigate(user ? '/dashboard' : '/')}
             >
-              <div className="bg-blue-600 p-1.5 sm:p-2 rounded-lg sm:rounded-xl mr-2 sm:mr-3 shadow-lg shadow-blue-200 dark:shadow-blue-900/20">
-                <div className="w-4 h-4 sm:w-6 sm:h-6 border-2 border-white rounded-md" />
+              <div className="mr-2 sm:mr-3 shrink-0">
+                <img 
+                  src="/logo.png" 
+                  alt="WASHWISE Logo" 
+                  className="w-8 h-8 sm:w-10 sm:h-10 object-contain"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    // Fallback to CSS logo if image fails to load
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent) {
+                      const fallback = document.createElement('div');
+                      fallback.className = "bg-blue-600 p-1.5 sm:p-2 rounded-lg sm:rounded-xl shadow-lg shadow-blue-200 dark:shadow-blue-900/20";
+                      fallback.innerHTML = '<div class="w-4 h-4 sm:w-6 sm:h-6 border-2 border-white rounded-md"></div>';
+                      parent.appendChild(fallback);
+                    }
+                  }}
+                />
               </div>
               <span className="text-xl sm:text-2xl font-black text-gray-800 dark:text-white tracking-tight">WASHWISE</span>
             </motion.div>
@@ -61,25 +79,7 @@ const Layout: React.FC = () => {
 
               {!isAuthPage && user && (
                 <>
-                  <button 
-                    onClick={() => navigate('/missions')}
-                    className={`flex items-center px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                      location.pathname === '/missions' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    <Target className="w-4 h-4 mr-2" />
-                    Missions
-                  </button>
-                  <button 
-                    onClick={() => navigate('/leaderboard')}
-                    className={`flex items-center px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                      location.pathname === '/leaderboard' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    <Trophy className="w-4 h-4 mr-2" />
-                    Leaderboard
-                  </button>
-                  {user?.role === 'admin' || user?.email === 'ashwinchuttipara@gmail.com' ? (
+                  {user?.role === 'admin' || isSuperAdminEmail(user?.email) ? (
                     <button 
                       onClick={() => navigate('/admin')}
                       className={`flex items-center px-4 py-2 rounded-xl text-sm font-bold transition-all ${
@@ -149,7 +149,7 @@ const Layout: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             className="md:hidden bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 px-4 py-6 space-y-4"
           >
-            {user?.role === 'admin' || user?.email === 'ashwinchuttipara@gmail.com' ? (
+            {user?.role === 'admin' || isSuperAdminEmail(user?.email) ? (
               <button 
                 onClick={() => { navigate('/admin'); setIsMenuOpen(false); }}
                 className="w-full flex items-center space-x-3 p-4 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-bold rounded-2xl border border-blue-100 dark:border-blue-900/30"
@@ -158,22 +158,6 @@ const Layout: React.FC = () => {
                 <span>Admin Dashboard</span>
               </button>
             ) : null}
-            <div className="grid grid-cols-2 gap-4">
-              <button 
-                onClick={() => { navigate('/missions'); setIsMenuOpen(false); }}
-                className="flex flex-col items-center justify-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-900/30"
-              >
-                <Target className="w-6 h-6 text-blue-600 mb-2" />
-                <span className="text-xs font-black uppercase tracking-widest text-blue-700 dark:text-blue-400">Missions</span>
-              </button>
-              <button 
-                onClick={() => { navigate('/leaderboard'); setIsMenuOpen(false); }}
-                className="flex flex-col items-center justify-center p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-2xl border border-yellow-100 dark:border-yellow-900/30"
-              >
-                <Trophy className="w-6 h-6 text-yellow-600 mb-2" />
-                <span className="text-xs font-black uppercase tracking-widest text-yellow-700 dark:text-yellow-400">Ranks</span>
-              </button>
-            </div>
             <button 
               onClick={() => { navigate('/profile'); setIsMenuOpen(false); }}
               className="w-full flex items-center space-x-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700"

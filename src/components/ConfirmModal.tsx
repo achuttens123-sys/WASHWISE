@@ -51,9 +51,9 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-[2.5rem] shadow-2xl overflow-hidden"
+          className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-[2.5rem] shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
         >
-          <div className="p-8">
+          <div className="p-8 overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between mb-6">
               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${iconColors[variant]}`}>
                 <AlertCircle className="w-6 h-6" />

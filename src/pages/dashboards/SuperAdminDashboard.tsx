@@ -44,11 +44,12 @@ import {
   Map as MapIcon,
   Navigation,
   History,
-  Database
+  Database,
+  Monitor
 } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, updateDoc, doc, getDoc, runTransaction, where, limit, addDoc, deleteDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { Booking, AdminRole, User as AppUser, Store, Package } from '../../types';
+import { Booking, AdminRole, User as AppUser, Store, Package, Slot, TIME_SLOTS, Machine } from '../../types';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { StoreService } from '../../services/StoreService';
@@ -71,14 +72,13 @@ import {
   Cell
 } from 'recharts';
 
-import StaffManagement from '../../components/admin/StaffManagement';
-
 const SuperAdminDashboard: React.FC = () => {
   const { user: currentUser } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'stores' | 'orders' | 'users' | 'staff' | 'pricing' | 'finance' | 'logistics' | 'maintenance'>('overview');
+  const [machines, setMachines] = useState<Machine[]>([]);
+  const [activeTab, setActiveTab] = useState<'overview' | 'stores' | 'orders' | 'users' | 'pricing' | 'finance' | 'logistics' | 'maintenance' | 'availability' | 'machines'>('overview');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [globalSettings, setGlobalSettings] = useState<any>(null);
@@ -88,9 +88,29 @@ const SuperAdminDashboard: React.FC = () => {
   // Store Management State
   const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
   const [editingStore, setEditingStore] = useState<Store | null>(null);
-  const [storeFormData, setStoreFormData] = useState({ name: '', location: '', address: '', phone: '', storeCode: '', latitude: 0, longitude: 0, active: true });
+  const [storeFormData, setStoreFormData] = useState({ 
+    name: '', 
+    location: '', 
+    address: '', 
+    phone: '', 
+    storeCode: '', 
+    latitude: 0, 
+    longitude: 0, 
+    active: true,
+    isPaused: false,
+    maintenanceMessage: 'Store is temporarily closed for maintenance.'
+  });
   
-  // User Management State
+  // Machine Management State
+  const [isMachineModalOpen, setIsMachineModalOpen] = useState(false);
+  const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
+  const [machineFormData, setMachineFormData] = useState({
+    storeId: '',
+    number: 1,
+    type: 'washer' as 'washer' | 'dryer',
+    status: 'idle' as any,
+    isAvailable: true
+  });
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [userFilterRole, setUserFilterRole] = useState<string>('all');
@@ -107,6 +127,12 @@ const SuperAdminDashboard: React.FC = () => {
     onConfirm: () => {},
     variant: 'danger'
   });
+
+  // Machine Availability State
+  const [availabilityDate, setAvailabilityDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState(TIME_SLOTS[0]);
+  const [currentSlotData, setCurrentSlotData] = useState<Slot | null>(null);
+  const [isClearingSlot, setIsClearingSlot] = useState(false);
 
   useEffect(() => {
     // Global data fetching for Super Admin
@@ -128,6 +154,12 @@ const SuperAdminDashboard: React.FC = () => {
       setUsers(snapshot.docs.map(doc => ({ ...doc.data(), uid: doc.id })) as AppUser[]);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'users');
+    });
+
+    const unsubMachines = onSnapshot(collection(db, 'machines'), (snapshot) => {
+      setMachines(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Machine[]);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'machines');
     });
 
     const loadSettings = async () => {
@@ -224,9 +256,105 @@ const SuperAdminDashboard: React.FC = () => {
       unsubBookings();
       unsubStores();
       unsubUsers();
+      unsubMachines();
       unsubSettings();
     };
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'availability') return;
+
+    const slotId = `${availabilityDate}_${selectedTimeSlot}`;
+    const unsubSlot = onSnapshot(doc(db, 'slots', slotId), (snapshot) => {
+      if (snapshot.exists()) {
+        setCurrentSlotData({ id: snapshot.id, ...snapshot.data() } as Slot);
+      } else {
+        setCurrentSlotData({
+          date: availabilityDate,
+          timeSlot: selectedTimeSlot,
+          machines: { '1': '', '2': '', '3': '', '4': '' }
+        });
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `slots/${slotId}`);
+    });
+
+    return () => unsubSlot();
+  }, [activeTab, availabilityDate, selectedTimeSlot]);
+
+  const handleClearSlot = async (machineNumber: string) => {
+    if (!currentSlotData) return;
+    
+    setIsClearingSlot(true);
+    try {
+      const slotId = `${availabilityDate}_${selectedTimeSlot}`;
+      const slotRef = doc(db, 'slots', slotId);
+      
+      await runTransaction(db, async (transaction) => {
+        const slotSnap = await transaction.get(slotRef);
+        if (!slotSnap.exists()) return;
+        
+        const machines = slotSnap.data().machines;
+        const updatedMachines = { ...machines };
+        delete updatedMachines[machineNumber];
+        
+        transaction.update(slotRef, { machines: updatedMachines });
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `slots/${availabilityDate}_${selectedTimeSlot}`);
+    } finally {
+      setIsClearingSlot(false);
+    }
+  };
+
+  const handleToggleSlotMachineAvailability = async (machineNumber: string, isCurrentlyAvailable: boolean) => {
+    setIsClearingSlot(true);
+    try {
+      const slotId = `${availabilityDate}_${selectedTimeSlot}`;
+      const slotRef = doc(db, 'slots', slotId);
+      
+      await runTransaction(db, async (transaction) => {
+        const slotSnap = await transaction.get(slotRef);
+        
+        let updatedMachines: Record<string, string> = {};
+        if (slotSnap.exists()) {
+          updatedMachines = { ...slotSnap.data().machines };
+        }
+        
+        if (isCurrentlyAvailable) {
+          updatedMachines[machineNumber] = 'unavailable';
+        } else {
+          delete updatedMachines[machineNumber];
+        }
+        
+        if (slotSnap.exists()) {
+          transaction.update(slotRef, { machines: updatedMachines });
+        } else {
+          transaction.set(slotRef, { 
+            date: availabilityDate,
+            timeSlot: selectedTimeSlot,
+            machines: updatedMachines,
+            createdAt: new Date().toISOString()
+          });
+        }
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `slots/${availabilityDate}_${selectedTimeSlot}`);
+    } finally {
+      setIsClearingSlot(false);
+    }
+  };
+
+  const handleToggleMachineAvailability = async (machine: Machine) => {
+    try {
+      await updateDoc(doc(db, 'machines', machine.id), {
+        isAvailable: !machine.isAvailable,
+        status: !machine.isAvailable ? 'idle' : 'unavailable'
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `machines/${machine.id}`);
+    }
+  };
 
   const stats = {
     revenue: bookings.reduce((acc, b) => acc + (b.price || 0), 0),
@@ -271,9 +399,67 @@ const SuperAdminDashboard: React.FC = () => {
       }
       setIsStoreModalOpen(false);
       setEditingStore(null);
-      setStoreFormData({ name: '', location: '', address: '', phone: '', storeCode: '', latitude: 0, longitude: 0, active: true });
+      setStoreFormData({ 
+        name: '', 
+        location: '', 
+        address: '', 
+        phone: '', 
+        storeCode: '', 
+        latitude: 0, 
+        longitude: 0, 
+        active: true,
+        isPaused: false,
+        maintenanceMessage: 'Store is temporarily closed for maintenance.'
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'stores');
+    }
+  };
+
+  const handleSaveMachine = async () => {
+    try {
+      if (editingMachine) {
+        await updateDoc(doc(db, 'machines', editingMachine.id), machineFormData);
+      } else {
+        const machineId = `${machineFormData.storeId}_M${machineFormData.number}_${machineFormData.type}`;
+        await setDoc(doc(db, 'machines', machineId), {
+          ...machineFormData,
+          id: machineId
+        });
+      }
+      setIsMachineModalOpen(false);
+      setEditingMachine(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'machines');
+    }
+  };
+
+  const handleDeleteMachine = async (id: string) => {
+    setConfirmConfig({
+      title: 'Delete Machine',
+      message: 'Are you sure you want to delete this machine? This will remove it from the system.',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'machines', id));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'machines');
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
+  };
+
+  const handleToggleSlotPause = async () => {
+    if (!currentSlotData) return;
+    try {
+      const slotId = `${availabilityDate}_${selectedTimeSlot}`;
+      await setDoc(doc(db, 'slots', slotId), {
+        ...currentSlotData,
+        isPaused: !currentSlotData.isPaused
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `slots/${availabilityDate}_${selectedTimeSlot}`);
     }
   };
 
@@ -345,7 +531,7 @@ const SuperAdminDashboard: React.FC = () => {
   const handleClearAllOrders = async () => {
     setConfirmConfig({
       title: 'Clear All Order History',
-      message: 'CRITICAL: This will permanently delete ALL bookings, machine slots, and mission progress from the entire system. This action cannot be undone. Are you absolutely sure?',
+      message: 'CRITICAL: This will permanently delete ALL bookings and machine slots from the entire system. This action cannot be undone. Are you absolutely sure?',
       onConfirm: async () => {
         setIsSaving(true);
         try {
@@ -367,16 +553,7 @@ const SuperAdminDashboard: React.FC = () => {
             throw e;
           }
 
-          // 3. Clear User Missions (Progress tied to orders)
-          try {
-            const missionsSnap = await getDocs(collection(db, 'userMissions'));
-            await Promise.all(missionsSnap.docs.map(d => deleteDoc(doc(db, 'userMissions', d.id))));
-          } catch (e) {
-            handleFirestoreError(e, OperationType.DELETE, 'userMissions');
-            throw e;
-          }
-
-          // 4. Clear Notifications (Mostly order related)
+          // 3. Clear Notifications (Mostly order related)
           try {
             const notificationsSnap = await getDocs(collection(db, 'notifications'));
             await Promise.all(notificationsSnap.docs.map(d => deleteDoc(doc(db, 'notifications', d.id))));
@@ -385,12 +562,11 @@ const SuperAdminDashboard: React.FC = () => {
             throw e;
           }
 
-          // 5. Reset User Stats (lastOrderDate, etc.)
+          // 4. Reset User Stats (lastOrderDate, etc.)
           try {
             const usersSnap = await getDocs(collection(db, 'users'));
             await Promise.all(usersSnap.docs.map(d => updateDoc(doc(db, 'users', d.id), {
-              lastOrderDate: null,
-              firstOrderRewarded: false
+              lastOrderDate: null
             })));
           } catch (e) {
             handleFirestoreError(e, OperationType.UPDATE, 'users/stats');
@@ -454,7 +630,18 @@ const SuperAdminDashboard: React.FC = () => {
           <button 
             onClick={() => {
               setEditingStore(null);
-              setStoreFormData({ name: '', location: '', address: '', phone: '', storeCode: '', latitude: 0, longitude: 0, active: true });
+              setStoreFormData({ 
+                name: '', 
+                location: '', 
+                address: '', 
+                phone: '', 
+                storeCode: '', 
+                latitude: 0, 
+                longitude: 0, 
+                active: true,
+                isPaused: false,
+                maintenanceMessage: 'Store is temporarily closed for maintenance.'
+              });
               setIsStoreModalOpen(true);
             }}
             className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg sm:rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center gap-2"
@@ -499,11 +686,12 @@ const SuperAdminDashboard: React.FC = () => {
           { id: 'stores', label: 'Stores', icon: StoreIcon },
           { id: 'orders', label: 'Global Orders', icon: PackageIcon },
           { id: 'users', label: 'User Management', icon: UsersIcon },
-          { id: 'staff', label: 'Staff Management', icon: Briefcase },
           { id: 'pricing', label: 'Pricing Control', icon: DollarSign },
           { id: 'finance', label: 'Finance', icon: TrendingUp },
           { id: 'logistics', label: 'Logistics', icon: Truck },
           { id: 'maintenance', label: 'Maintenance', icon: Database },
+          { id: 'availability', label: 'Machine Slots', icon: Monitor },
+          { id: 'machines', label: 'Machine Management', icon: Activity },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -1096,7 +1284,18 @@ const SuperAdminDashboard: React.FC = () => {
                 <button 
                   onClick={() => {
                     setEditingStore(null);
-                    setStoreFormData({ name: '', location: '', address: '', phone: '', storeCode: '', latitude: 0, longitude: 0, active: true });
+                    setStoreFormData({ 
+                      name: '', 
+                      location: '', 
+                      address: '', 
+                      phone: '', 
+                      storeCode: '', 
+                      latitude: 0, 
+                      longitude: 0, 
+                      active: true,
+                      isPaused: false,
+                      maintenanceMessage: 'Store is temporarily closed for maintenance.'
+                    });
                     setIsStoreModalOpen(true);
                   }}
                   className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center gap-2"
@@ -1139,11 +1338,18 @@ const SuperAdminDashboard: React.FC = () => {
                           </div>
                         </td>
                         <td className="py-6">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
-                            store.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                          }`}>
-                            {store.active ? 'Active' : 'Inactive'}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest w-fit ${
+                              store.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                            }`}>
+                              {store.active ? 'Active' : 'Inactive'}
+                            </span>
+                            {store.isPaused && (
+                              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 w-fit">
+                                Maintenance
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-6">
                           <span className="text-sm font-black text-gray-800 dark:text-gray-100">
@@ -1163,17 +1369,31 @@ const SuperAdminDashboard: React.FC = () => {
                                   storeCode: store.storeCode || '',
                                   latitude: (store as any).latitude || 0, 
                                   longitude: (store as any).longitude || 0, 
-                                  active: store.active ?? true 
+                                  active: store.active ?? true,
+                                  isPaused: store.isPaused || false,
+                                  maintenanceMessage: store.maintenanceMessage || 'Store is temporarily closed for maintenance.'
                                 });
                                 setIsStoreModalOpen(true);
                               }}
                               className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                              title="Edit Store"
                             >
                               <Edit2 className="w-5 h-5" />
                             </button>
                             <button 
+                              onClick={() => {
+                                setActiveTab('availability');
+                                // In a real multi-store app, we'd filter by storeId here
+                              }}
+                              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-xl transition-all"
+                              title="Manage Machine Slots"
+                            >
+                              <Monitor className="w-5 h-5" />
+                            </button>
+                            <button 
                               onClick={() => handleDeleteStore(store.id)}
                               className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                              title="Delete Store"
                             >
                               <Trash2 className="w-5 h-5" />
                             </button>
@@ -1410,17 +1630,6 @@ const SuperAdminDashboard: React.FC = () => {
           </motion.div>
         )}
 
-        {activeTab === 'staff' && (
-          <motion.div
-            key="staff"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-          >
-            <StaffManagement stores={stores} />
-          </motion.div>
-        )}
-
         {activeTab === 'finance' && (
           <motion.div
             key="finance"
@@ -1557,6 +1766,219 @@ const SuperAdminDashboard: React.FC = () => {
             </div>
           </motion.div>
         )}
+
+        {activeTab === 'availability' && (
+          <motion.div
+            key="availability"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="space-y-8"
+          >
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Machine Availability Management</h2>
+                <p className="text-gray-500 dark:text-gray-400 font-medium">View and manually clear booked slots for machines.</p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Select Date</label>
+                  <input
+                    type="date"
+                    value={availabilityDate}
+                    onChange={(e) => setAvailabilityDate(e.target.value)}
+                    className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Select Time Slot</label>
+                  <select
+                    value={selectedTimeSlot}
+                    onChange={(e) => setSelectedTimeSlot(e.target.value)}
+                    className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {TIME_SLOTS.map(slot => (
+                      <option key={slot} value={slot}>{slot}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((num) => {
+                const machineNum = num.toString();
+                const bookedUserId = currentSlotData?.machines[machineNum];
+                const bookedUser = users.find(u => u.uid === bookedUserId);
+                
+                return (
+                  <div key={machineNum} className="bg-white dark:bg-gray-900 p-8 rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col items-center text-center relative overflow-hidden group">
+                    <div className={`w-20 h-20 rounded-[2rem] flex items-center justify-center mb-6 transition-all duration-500 ${
+                      bookedUserId ? (bookedUserId === 'unavailable' ? 'bg-red-50 text-red-600 dark:bg-red-900/20' : 'bg-blue-50 text-blue-600 dark:bg-blue-900/20') : 'bg-green-50 text-green-600 dark:bg-green-900/20'
+                    }`}>
+                      <Monitor className="w-10 h-10" />
+                    </div>
+                    
+                    <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 mb-1">Machine #{machineNum}</h3>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-6">Standard Washer</p>
+                    
+                    {bookedUserId ? (
+                      <div className="space-y-4 w-full">
+                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-800">
+                          {bookedUserId === 'unavailable' ? (
+                            <div className="flex flex-col items-center py-2">
+                              <Ban className="w-6 h-6 text-red-500 mb-2" />
+                              <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">Marked Unavailable</p>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Booked By</p>
+                              <p className="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">{bookedUser?.name || 'Unknown User'}</p>
+                              <p className="text-[10px] font-mono text-gray-500 truncate">{bookedUserId}</p>
+                            </>
+                          )}
+                        </div>
+                        
+                        <button
+                          onClick={() => bookedUserId === 'unavailable' ? handleToggleSlotMachineAvailability(machineNum, false) : handleClearSlot(machineNum)}
+                          disabled={isClearingSlot}
+                          className={`w-full py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border flex items-center justify-center gap-2 ${
+                            bookedUserId === 'unavailable' 
+                              ? 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white' 
+                              : 'bg-red-50 text-red-600 border-red-100 hover:bg-red-600 hover:text-white'
+                          }`}
+                        >
+                          {isClearingSlot ? <Loader2 className="w-3 h-3 animate-spin" /> : bookedUserId === 'unavailable' ? <CheckCircle2 className="w-3 h-3" /> : <Trash2 className="w-3 h-3" />}
+                          {bookedUserId === 'unavailable' ? 'Make Available' : 'Clear Slot'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3 w-full">
+                        <div className="py-2">
+                          <span className="px-4 py-2 bg-green-100 text-green-700 text-[10px] font-black uppercase tracking-widest rounded-full">
+                            Available
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleToggleSlotMachineAvailability(machineNum, true)}
+                          disabled={isClearingSlot}
+                          className="w-full py-3 bg-gray-50 text-gray-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-gray-800 hover:text-white transition-all border border-gray-100 dark:border-gray-800 flex items-center justify-center gap-2"
+                        >
+                          {isClearingSlot ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />}
+                          Mark Unavailable
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Decorative background element */}
+                    <div className={`absolute -right-4 -bottom-4 w-24 h-24 rounded-full blur-3xl opacity-10 transition-all duration-500 ${
+                      bookedUserId ? (bookedUserId === 'unavailable' ? 'bg-red-600' : 'bg-blue-600') : 'bg-green-600'
+                    }`} />
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-900/10 p-6 rounded-[2.5rem] border border-amber-100 dark:border-amber-900/20 flex items-start gap-4">
+              <AlertCircle className="w-6 h-6 text-amber-600 shrink-0 mt-1" />
+              <div>
+                <h4 className="text-sm font-black text-amber-800 dark:text-amber-200 uppercase tracking-tight mb-1">Important Note</h4>
+                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium leading-relaxed">
+                  Clearing a slot manually will make the machine available for other users to book immediately. 
+                  This action does NOT automatically cancel or refund the user's booking. 
+                  Please ensure you communicate with the user or handle the booking status separately in the Global Orders tab.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {activeTab === 'machines' && (
+          <motion.div
+            key="machines"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="space-y-8"
+          >
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Machine Management</h2>
+                <p className="text-gray-500 dark:text-gray-400 font-medium">Add, edit, and control global machine availability.</p>
+              </div>
+              <button 
+                onClick={() => {
+                  setEditingMachine(null);
+                  setMachineFormData({ storeId: stores[0]?.id || '', number: machines.length + 1, type: 'washer', status: 'idle', isAvailable: true });
+                  setIsMachineModalOpen(true);
+                }}
+                className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Add New Machine
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {machines.map((machine) => (
+                <div key={machine.id} className="bg-white dark:bg-gray-900 p-8 rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-sm relative overflow-hidden group">
+                  <div className="flex items-start justify-between mb-6">
+                    <div className={`p-4 rounded-2xl ${machine.isAvailable ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}>
+                      <Monitor className="w-8 h-8" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                          setEditingMachine(machine);
+                          setMachineFormData({ storeId: machine.storeId, number: machine.number, type: machine.type, status: machine.status, isAvailable: machine.isAvailable });
+                          setIsMachineModalOpen(true);
+                        }}
+                        className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl text-gray-400 hover:text-blue-600 transition-all"
+                      >
+                        <Edit2 className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteMachine(machine.id)}
+                        className="p-2 hover:bg-red-50 rounded-xl text-gray-400 hover:text-red-600 transition-all"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mb-6">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-xl font-black text-gray-800 dark:text-gray-100">Machine #{machine.number}</h3>
+                      <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-[9px] font-black uppercase tracking-widest rounded-lg">{machine.type}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 font-medium">{stores.find(s => s.id === machine.storeId)?.name || 'Unknown Store'}</p>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-6 border-t border-gray-50 dark:border-gray-800">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${
+                        machine.status === 'idle' ? 'bg-green-500' : 
+                        machine.status === 'maintenance' ? 'bg-amber-500' : 'bg-red-500'
+                      }`} />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-600 dark:text-gray-400">{machine.status}</span>
+                    </div>
+                    <button 
+                      onClick={() => handleToggleMachineAvailability(machine)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                        machine.isAvailable 
+                          ? 'bg-green-50 text-green-600 hover:bg-green-100' 
+                          : 'bg-red-50 text-red-600 hover:bg-red-100'
+                      }`}
+                    >
+                      {machine.isAvailable ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+                      {machine.isAvailable ? 'Available' : 'Unavailable'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Store Modal */}
@@ -1567,9 +1989,9 @@ const SuperAdminDashboard: React.FC = () => {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-[3rem] overflow-hidden shadow-2xl"
+              className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-[3rem] overflow-hidden shadow-2xl max-h-[90vh] flex flex-col"
             >
-              <div className="p-8 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <div className="p-8 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0">
                 <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">
                   {editingStore ? 'Edit Store' : 'Add New Store'}
                 </h3>
@@ -1577,7 +1999,7 @@ const SuperAdminDashboard: React.FC = () => {
                   <X className="w-6 h-6 text-gray-400" />
                 </button>
               </div>
-              <div className="p-8 space-y-6">
+              <div className="p-8 space-y-6 overflow-y-auto flex-1 custom-scrollbar">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="space-y-2">
                     <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Store Name</label>
@@ -1651,6 +2073,34 @@ const SuperAdminDashboard: React.FC = () => {
                     />
                   </div>
                 </div>
+
+                <div className="p-6 bg-amber-50 dark:bg-amber-900/10 rounded-3xl border border-amber-100 dark:border-amber-900/20 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <AlertCircle className="w-5 h-5 text-amber-600" />
+                      <span className="text-sm font-black text-amber-900 dark:text-amber-100 uppercase tracking-tight">Maintenance Mode</span>
+                    </div>
+                    <button 
+                      onClick={() => setStoreFormData({ ...storeFormData, isPaused: !storeFormData.isPaused })}
+                      className={`p-1 rounded-lg transition-all ${storeFormData.isPaused ? 'text-amber-600' : 'text-gray-400'}`}
+                    >
+                      {storeFormData.isPaused ? <ToggleRight className="w-8 h-8" /> : <ToggleLeft className="w-8 h-8" />}
+                    </button>
+                  </div>
+                  {storeFormData.isPaused && (
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Maintenance Message</label>
+                      <input 
+                        type="text"
+                        value={storeFormData.maintenanceMessage}
+                        onChange={(e) => setStoreFormData({ ...storeFormData, maintenanceMessage: e.target.value })}
+                        className="w-full bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
+                        placeholder="Display message to customers"
+                      />
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Operational Status</label>
                   <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl">
@@ -1679,6 +2129,98 @@ const SuperAdminDashboard: React.FC = () => {
                 >
                   {editingStore ? 'Update Store' : 'Create Store'}
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+        {isMachineModalOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMachineModalOpen(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-[2.5rem] shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+            >
+              <div className="p-8 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0">
+                <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">
+                  {editingMachine ? 'Edit Machine' : 'New Machine'}
+                </h3>
+                <button onClick={() => setIsMachineModalOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all">
+                  <X className="w-6 h-6 text-gray-400" />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-6 overflow-y-auto flex-1 custom-scrollbar">
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Store</label>
+                    <select 
+                      value={machineFormData.storeId}
+                      onChange={(e) => setMachineFormData({ ...machineFormData, storeId: e.target.value })}
+                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none"
+                    >
+                      {stores.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Number</label>
+                      <input 
+                        type="number"
+                        value={machineFormData.number}
+                        onChange={(e) => setMachineFormData({ ...machineFormData, number: parseInt(e.target.value) })}
+                        className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Type</label>
+                      <select 
+                        value={machineFormData.type}
+                        onChange={(e) => setMachineFormData({ ...machineFormData, type: e.target.value as any })}
+                        className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none"
+                      >
+                        <option value="washer">Washer</option>
+                        <option value="dryer">Dryer</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Initial Status</label>
+                    <select 
+                      value={machineFormData.status}
+                      onChange={(e) => setMachineFormData({ ...machineFormData, status: e.target.value as any })}
+                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none"
+                    >
+                      <option value="idle">Idle</option>
+                      <option value="maintenance">Maintenance</option>
+                      <option value="unavailable">Unavailable</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-8 flex gap-4">
+                  <button 
+                    onClick={() => setIsMachineModalOpen(false)}
+                    className="flex-1 py-4 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-2xl font-bold hover:bg-gray-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleSaveMachine}
+                    className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none"
+                  >
+                    {editingMachine ? 'Update Machine' : 'Create Machine'}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

@@ -22,7 +22,9 @@ const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json
 
 // Initialize Firebase Admin (for Auth/Messaging)
 if (!admin.apps.length) {
-  admin.initializeApp();
+  admin.initializeApp({
+    projectId: firebaseConfig.projectId
+  });
 }
 
 const authAdmin = getAuth();

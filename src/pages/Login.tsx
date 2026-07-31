@@ -231,7 +231,7 @@ const Login: React.FC = () => {
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white dark:bg-surface-container p-8 sm:p-10 rounded-2xl shadow-2xl shadow-black/5 dark:shadow-none relative overflow-hidden"
+        className="bg-white dark:bg-surface-container p-5 sm:p-10 rounded-2xl shadow-2xl shadow-black/5 dark:shadow-none relative overflow-hidden"
       >
         <AnimatePresence mode="wait">
           {step === 'login' ? (
@@ -283,14 +283,14 @@ const Login: React.FC = () => {
                   <button
                     onClick={handleGoogleLogin}
                     disabled={loading}
-                    className="w-full py-5 bg-white dark:bg-surface-highest text-gray-700 dark:text-high-contrast font-black uppercase tracking-widest rounded-2xl hover:bg-gray-50 dark:hover:bg-opacity-80 transition-all flex items-center justify-center shadow-sm"
+                    className="w-full py-4 px-6 bg-white dark:bg-surface-highest text-gray-700 dark:text-high-contrast font-black uppercase tracking-wider text-xs sm:text-sm rounded-2xl hover:bg-gray-50 dark:hover:bg-opacity-80 transition-all flex items-center justify-center gap-3 shadow-sm"
                   >
                     {loading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
                     ) : (
                       <>
-                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5 mr-4" alt="Google" />
-                        Sign in with Google
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5 shrink-0" alt="Google" />
+                        <span className="whitespace-nowrap">Sign in with Google</span>
                       </>
                     )}
                   </button>

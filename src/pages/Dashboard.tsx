@@ -21,55 +21,6 @@ const LAUNDRY_TIPS = [
   "Check pockets for coins or tissues before washing!"
 ];
 
-const DynamicClock: React.FC<{ slot: string; isUnavailable: boolean }> = ({ slot, isUnavailable }) => {
-  const [timeRange] = slot.split(' ');
-  const [startTime] = timeRange.split('-');
-  const hours = parseInt(startTime.split(':')[0], 10);
-  const hourRotation = (hours % 12) * 30;
-
-  return (
-    <div className="relative w-7 h-7 flex items-center justify-center">
-      <svg 
-        viewBox="0 0 24 24" 
-        fill="none" 
-        stroke="currentColor" 
-        strokeWidth="2.5" 
-        strokeLinecap="round" 
-        strokeLinejoin="round" 
-        className={`w-full h-full transition-colors duration-500 ${isUnavailable ? 'text-gray-400 dark:text-gray-500' : 'text-primary-electric dark:text-primary-electric-light'}`}
-      >
-        <circle cx="12" cy="12" r="10" />
-        {/* Hour Hand */}
-        <motion.line 
-          x1="12" y1="12" 
-          x2="12" y2="7.5"
-          initial={{ rotate: 0 }}
-          animate={{ rotate: hourRotation }}
-          transition={{ type: "spring", stiffness: 100, damping: 15, delay: 0.1 }}
-          style={{ originX: "12px", originY: "12px" }}
-        />
-        {/* Minute Hand */}
-        <motion.line 
-          x1="12" y1="12" 
-          x2="12" y2="5.5"
-          initial={{ rotate: 0 }}
-          animate={{ rotate: 0 }}
-          style={{ originX: "12px", originY: "12px" }}
-        />
-      </svg>
-      <motion.span 
-        initial={{ opacity: 0, scale: 0.5 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className={`absolute inset-0 flex items-center justify-center text-[8px] font-black leading-none pt-0.5 ${
-          isUnavailable ? 'text-gray-400/40 dark:text-gray-500/40' : 'text-primary-electric/40 dark:text-primary-electric-light/40'
-        }`}
-      >
-        {hours}
-      </motion.span>
-    </div>
-  );
-};
-
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -106,8 +57,19 @@ const Dashboard: React.FC = () => {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
       const bookings = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Booking[];
-      setActiveBookings(bookings);
+      
+      // Filter out bookings that are in the past and have terminal or near-terminal statuses
+      const filteredBookings = bookings.filter(b => {
+        const isPast = b.date < todayStr;
+        const isNearTerminal = ['Washing completed', 'Ready to deliver', 'Ready to collect', 'Out for delivery'].includes(b.status);
+        
+        if (isPast && isNearTerminal) return false;
+        return true;
+      });
+
+      setActiveBookings(filteredBookings);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'bookings');
     });
@@ -261,40 +223,60 @@ const Dashboard: React.FC = () => {
         </motion.div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
-        <div className="md:col-span-3">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
-            <div className="flex items-center gap-6">
+      <div className="flex flex-col lg:flex-row gap-6 mb-12 sm:mb-16 w-full items-stretch">
+        {/* Main Dashboard Info - Large Bento Card */}
+        <div className="flex-[3] bg-white dark:bg-surface-container p-6 sm:p-10 xl:p-12 rounded-[2rem] sm:rounded-[3.5rem] shadow-2xl shadow-black/5 dark:shadow-none border border-gray-100/50 dark:border-surface-highest/10 relative overflow-hidden group">
+          {/* Subtle Background Accent */}
+          <div className="absolute -right-20 -top-20 w-64 h-64 bg-primary-electric/5 rounded-full blur-[100px] pointer-events-none" />
+          
+          <div className="relative z-10 flex flex-col h-full justify-between gap-10">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-6 sm:gap-10">
               <motion.div 
-                whileHover={{ scale: 1.05, rotate: 2 }}
-                className="w-20 h-20 bg-primary-electric rounded-2xl flex items-center justify-center shadow-2xl shadow-primary-electric/20 shrink-0 cursor-pointer"
+                whileHover={{ scale: 1.05, rotate: -2 }}
+                className="w-16 h-16 sm:w-24 sm:h-24 bg-primary-electric rounded-[1.5rem] sm:rounded-3xl flex items-center justify-center shadow-2xl shadow-primary-electric/40 shrink-0 cursor-pointer relative group/avatar"
                 onClick={() => navigate('/profile')}
               >
-                <span className="text-3xl font-display font-black text-white">{user?.name?.[0]?.toUpperCase()}</span>
+                <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover/avatar:opacity-100 transition-opacity rounded-3xl" />
+                <span className="text-2xl sm:text-4xl font-display font-black text-white">{user?.name?.[0]?.toUpperCase()}</span>
               </motion.div>
-              <div>
-                <h1 className="text-4xl sm:text-5xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none">{getGreeting()}</h1>
-                <div className="flex flex-wrap items-center gap-3 mt-3">
-                  <p className="text-sm text-gray-400 dark:text-gray-500 font-medium uppercase tracking-widest">{user?.name}</p>
-                  {user?.userType === 'subscriber' && user?.package && user?.subscriptionPaid && (
-                    <span className="px-3 py-1 bg-primary-electric/10 text-primary-electric dark:text-primary-electric-light text-[10px] font-black uppercase tracking-widest rounded-full">
-                      {user.package} Plan
-                    </span>
+              
+              <div className="space-y-1 sm:space-y-2">
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl xl:text-6xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-[0.9]">
+                  {getGreeting()}
+                </h1>
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.3em] leading-none">
+                    {user?.name}
+                  </p>
+                  {user?.userType === 'subscriber' && (
+                    <>
+                      <div className="h-1 w-1 bg-gray-300 dark:bg-gray-600 rounded-full" />
+                      <span className="text-[8px] sm:text-[9px] font-black text-primary-electric dark:text-primary-electric-light uppercase tracking-widest">
+                        {user.package} Member
+                      </span>
+                    </>
                   )}
                 </div>
               </div>
             </div>
-            
-            <div className="flex bg-gray-50 dark:bg-surface-low p-1.5 rounded-2xl w-fit">
+
+            {/* View Toggle - Ultra-Clean Style */}
+            <div className="relative flex bg-gray-100/50 dark:bg-surface-low p-1.5 rounded-[1.5rem] w-full sm:w-fit shadow-inner border border-gray-200/20 dark:border-surface-highest/10 sm:min-w-[300px] overflow-hidden">
+              <motion.div
+                initial={false}
+                animate={{ x: view === 'today' ? 0 : '100%' }}
+                className="absolute top-1.5 bottom-1.5 left-1.5 w-[calc(50%-6px)] bg-white dark:bg-surface-highest rounded-[1.2rem] shadow-xl z-0"
+                transition={{ type: "spring", stiffness: 350, damping: 35 }}
+              />
               <button
                 onClick={() => { setView('today'); setSelectedDate(new Date()); }}
-                className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${view === 'today' ? 'bg-white dark:bg-surface-highest shadow-sm text-primary-electric dark:text-primary-electric-light' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                className={`relative z-10 flex-1 px-4 sm:px-8 py-3 rounded-[1.2rem] text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] transition-colors duration-300 ${view === 'today' ? 'text-primary-electric dark:text-primary-electric-light' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
               >
                 Today
               </button>
               <button
                 onClick={() => setView('advance')}
-                className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${view === 'advance' ? 'bg-white dark:bg-surface-highest shadow-sm text-primary-electric dark:text-primary-electric-light' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                className={`relative z-10 flex-1 px-4 sm:px-8 py-3 rounded-[1.2rem] text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] transition-colors duration-300 ${view === 'advance' ? 'text-primary-electric dark:text-primary-electric-light' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
               >
                 Advance
               </button>
@@ -302,18 +284,45 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="md:col-span-1">
-          {/* Status Overview Card */}
+        {/* Status Card - Specialized Bento Card */}
+        <div className="lg:w-80 shrink-0 bg-white dark:bg-surface-container p-8 sm:p-10 rounded-[2.5rem] sm:rounded-[3.5rem] shadow-2xl shadow-black/5 dark:shadow-none border border-gray-100/50 dark:border-surface-highest/10 relative overflow-hidden group flex flex-col justify-between items-center text-center">
+          {/* Visual Accents */}
+          <div className="absolute top-6 right-6 p-2 bg-primary-electric/5 rounded-xl opacity-40 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500">
+            <Sparkles className="w-5 h-5 text-primary-electric" />
+          </div>
+          
+          <div className="space-y-1 relative z-10">
+            <p id="dashboard-status-title" className="text-[9px] font-black uppercase tracking-[0.3em] text-gray-400 dark:text-gray-500 leading-none">Your Status</p>
+            <div className="h-px w-6 bg-primary-electric/20 mx-auto mt-3" />
+          </div>
+          
+          <div className="py-6 sm:py-8 relative z-10">
+            {activeBookings.length > 0 ? (
+              <div className="space-y-2">
+                <motion.span 
+                  key={activeBookings.length}
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="block text-5xl sm:text-7xl font-display font-black text-primary-electric dark:text-primary-electric-light leading-none tracking-tighter italic"
+                >
+                  {activeBookings.length}
+                </motion.span>
+                <span className="block text-[10px] sm:text-[11px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-[0.3em]">Active Orders</span>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <span className="block text-lg sm:text-xl font-display font-black text-primary-electric/20 dark:text-primary-electric-light/20 leading-tight uppercase tracking-[0.2em]">All Clear</span>
+                <span className="block text-4xl sm:text-6xl font-display font-black text-primary-electric dark:text-primary-electric-light leading-[0.85] uppercase tracking-tighter italic">READY</span>
+              </div>
+            )}
+          </div>
+          
           <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            whileHover={{ y: -6 }}
-            className="bg-white dark:bg-surface-container p-8 rounded-2xl shadow-xl shadow-black/5 dark:shadow-none h-full flex flex-col justify-center"
+            whileHover={{ scale: 1.05 }}
+            className="relative z-10 flex gap-2 items-center px-4 py-2 bg-gray-50 dark:bg-surface-highest rounded-full border border-gray-100 dark:border-surface-highest/5"
           >
-            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-2 text-center">Current Status</p>
-            <p className="text-3xl font-display font-black text-primary-electric dark:text-primary-electric-light text-center uppercase tracking-tight">
-              {activeBookings.length > 0 ? `${activeBookings.length} Active Wash` : 'Ready to Wash'}
-            </p>
+            <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-[8px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">Live Status</span>
           </motion.div>
         </div>
       </div>
@@ -363,17 +372,15 @@ const Dashboard: React.FC = () => {
           <div className="grid grid-cols-1 gap-8">
             {activeBookings.map((booking, index) => {
               const steps = booking.pickupDrop ? [
-                { label: 'Booking confirmed', statuses: ['paid'] },
+                { label: 'Order Confirmed', statuses: ['paid', 'pending'] },
                 { label: 'Ready for Pickup', statuses: ['Ready for pick up'] },
-                { label: 'In wash', statuses: ['In Wash'] },
-                { label: 'In Dryer', statuses: ['In Dryer'] },
-                { label: 'Washing completed', statuses: ['Washing completed', 'Ready to deliver'] },
-                { label: 'Out for delivery', statuses: ['Out for delivery', 'completed'] }
+                { label: 'In wash', statuses: ['In Wash', 'In Dryer'] },
+                { label: 'Completed', statuses: ['Washing completed', 'Ready to deliver'] },
+                { label: 'Out for Delivery', statuses: ['Out for delivery', 'completed'] }
               ] : [
-                { label: 'Booking confirmed', statuses: ['paid'] },
-                { label: 'In wash', statuses: ['In Wash'] },
-                { label: 'In Dryer', statuses: ['In Dryer'] },
-                { label: 'Washing Completed', statuses: ['Washing completed'] },
+                { label: 'Confirmed', statuses: ['paid', 'pending'] },
+                { label: 'In wash', statuses: ['In Wash', 'In Dryer'] },
+                { label: 'Completed', statuses: ['Washing completed'] },
                 { label: 'Ready for Pickup', statuses: ['Ready to collect', 'completed'] }
               ];
 
@@ -386,22 +393,38 @@ const Dashboard: React.FC = () => {
               }
               if (currentStepIndex === -1) currentStepIndex = 0;
 
-              // Show progress bar as complete for these specific statuses
-              const isEffectivelyComplete = ['Ready to collect', 'Ready to deliver', 'Out for delivery', 'completed'].includes(booking.status);
+              // Show progress bar as complete for completed bookings
+              const isEffectivelyComplete = booking.status === 'completed';
               const displayStepIndex = isEffectivelyComplete ? steps.length : currentStepIndex;
 
               const getStatusLabel = (status: string) => {
-                const labels: Record<string, string> = {
-                  'paid': 'Order confirmed',
-                  'Washing completed': 'Completed',
-                  'completed': 'Finalized',
-                  'Ready for pick up': 'Ready for pick up',
-                  'In Wash': 'In Wash',
-                  'In Dryer': 'In Dryer',
-                  'Ready to collect': 'Ready to collect',
-                  'Out for delivery': 'Out for delivery'
-                };
-                return (labels[status] || status).toUpperCase();
+                if (booking.pickupDrop) {
+                  const labels: Record<string, string> = {
+                    'paid': 'Order Confirmed',
+                    'pending': 'Order Confirmed',
+                    'Ready for pick up': 'Ready for Pickup',
+                    'In Wash': 'In wash',
+                    'In Dryer': 'In wash',
+                    'Washing completed': 'Completed',
+                    'Ready to deliver': 'Completed',
+                    'Out for delivery': 'Out for Delivery',
+                    'completed': 'Out for Delivery',
+                    'cancelled': 'Cancelled'
+                  };
+                  return (labels[status] || status).toUpperCase();
+                } else {
+                  const labels: Record<string, string> = {
+                    'paid': 'Confirmed',
+                    'pending': 'Confirmed',
+                    'In Wash': 'In wash',
+                    'In Dryer': 'In wash',
+                    'Washing completed': 'Completed',
+                    'Ready to collect': 'Ready for customer pickup',
+                    'completed': 'Ready for customer pickup',
+                    'cancelled': 'Cancelled'
+                  };
+                  return (labels[status] || status).toUpperCase();
+                }
               };
 
               return (
@@ -411,19 +434,19 @@ const Dashboard: React.FC = () => {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ delay: index * 0.1 }}
                   whileHover={{ y: -6 }}
-                  className="bg-white dark:bg-surface-container p-8 rounded-2xl shadow-2xl shadow-black/5 dark:shadow-none transition-all duration-300 relative overflow-hidden group"
+                  className="bg-white dark:bg-surface-container p-4 sm:p-8 rounded-2xl shadow-2xl shadow-black/5 dark:shadow-none transition-all duration-300 relative overflow-hidden group"
                 >
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-10">
-                    <div className="flex items-center gap-6">
-                      <div className={`p-5 bg-primary-electric rounded-2xl shadow-xl shadow-primary-electric/20 ${['In Wash', 'In Dryer'].includes(booking.status) ? 'animate-pulse' : ''}`}>
-                        <Loader2 className={`w-8 h-8 text-white ${['In Wash', 'In Dryer'].includes(booking.status) ? 'animate-spin' : ''}`} />
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8 mb-8 md:mb-10">
+                    <div className="flex items-center gap-3 sm:gap-6 min-w-0">
+                      <div className={`p-3.5 sm:p-5 shrink-0 bg-primary-electric rounded-2xl shadow-xl shadow-primary-electric/20 ${['In Wash', 'In Dryer'].includes(booking.status) ? 'animate-pulse' : ''}`}>
+                        <Loader2 className={`w-6 h-6 sm:w-8 sm:h-8 text-white ${['In Wash', 'In Dryer'].includes(booking.status) ? 'animate-spin' : ''}`} />
                       </div>
-                      <div>
-                        <div className="flex items-center gap-3 mb-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 sm:gap-3 mb-1.5 flex-wrap">
                           <p className="text-[10px] font-black text-primary-electric dark:text-primary-electric-light uppercase tracking-widest">{booking.serviceType}</p>
-                          <span className="text-[10px] font-black text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-surface-low px-3 py-1 rounded-full uppercase tracking-widest">M#{booking.machineNumber}</span>
+                          <span className="text-[10px] font-black text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-surface-low px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest">M#{booking.machineNumber}</span>
                         </div>
-                        <h3 className="text-3xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase">{getStatusLabel(booking.status)}</h3>
+                        <h3 className="text-xl sm:text-2xl md:text-3xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase break-words leading-tight">{getStatusLabel(booking.status)}</h3>
                       </div>
                     </div>
                     {booking.garmentInstructions && (
@@ -438,12 +461,12 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="relative overflow-x-auto pb-4 scrollbar-hide">
-                    <div className="min-w-[600px] relative h-24">
+                  <div className="relative overflow-hidden pt-2 pb-2 sm:pb-4">
+                    <div className="w-full relative min-h-[75px] sm:min-h-[96px] flex flex-col justify-center">
                       {/* Progress Line Track */}
-                      <div className="absolute top-5 left-7 right-7 h-1 -z-0">
+                      <div className="absolute top-3.5 sm:top-5 left-5 right-5 sm:left-11 sm:right-11 h-0.5 sm:h-1 -z-0">
                         {/* Background line */}
-                        <div className="absolute inset-0 bg-gray-50 dark:bg-surface-low rounded-full" />
+                        <div className="absolute inset-0 bg-gray-100 dark:bg-surface-low rounded-full" />
                         {/* Active line */}
                         <motion.div 
                           initial={{ width: 0 }}
@@ -453,7 +476,7 @@ const Dashboard: React.FC = () => {
                         />
                       </div>
 
-                      <div className="flex justify-between relative z-10 px-2">
+                      <div className="flex justify-between items-start relative z-10 w-full">
                         {steps.map((step, idx) => {
                           const isCompleted = idx < displayStepIndex;
                           const isCurrent = idx === currentStepIndex && !isEffectivelyComplete;
@@ -464,26 +487,26 @@ const Dashboard: React.FC = () => {
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ delay: 0.3 + idx * 0.1 }}
-                              className="flex flex-col items-center group"
+                              className="flex flex-col items-center flex-1 text-center group min-w-0"
                             >
                               <motion.div 
-                                animate={isCurrent ? { scale: [1, 1.1, 1] } : {}}
+                                animate={isCurrent ? { scale: [1, 1.15, 1] } : {}}
                                 transition={isCurrent ? { repeat: Infinity, duration: 2 } : {}}
-                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-700 ${
+                                className={`w-7 h-7 sm:w-10 sm:h-10 rounded-full shrink-0 flex items-center justify-center transition-all duration-700 ${
                                   isCompleted ? 'bg-primary-electric text-white' : 
-                                  isCurrent ? 'bg-white dark:bg-surface-container ring-4 ring-primary-electric text-primary-electric shadow-xl shadow-primary-electric/20' : 
-                                  'bg-white dark:bg-surface-container ring-4 ring-gray-50 dark:ring-surface-low text-gray-200 dark:text-gray-700'
+                                  isCurrent ? 'bg-white dark:bg-surface-container border-2 sm:border-4 border-primary-electric text-primary-electric shadow-md sm:shadow-xl shadow-primary-electric/20' : 
+                                  'bg-white dark:bg-surface-container border-2 sm:border-4 border-gray-100 dark:border-surface-low text-gray-200 dark:text-gray-700'
                                 }`}
                               >
                                 {isCompleted ? (
                                   <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
-                                    <CheckCircle2 className="w-6 h-6" />
+                                    <CheckCircle2 className="w-4 h-4 sm:w-6 sm:h-6" />
                                   </motion.div>
                                 ) : (
-                                  <Circle className={`w-3 h-3 fill-current ${isCurrent ? 'animate-pulse' : ''}`} />
+                                  <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full ${isCurrent ? 'bg-primary-electric animate-pulse' : 'bg-gray-200 dark:bg-gray-700'}`} />
                                 )}
                               </motion.div>
-                              <p className={`mt-4 text-[10px] font-black uppercase tracking-tighter text-center max-w-[80px] transition-colors duration-700 ${
+                              <p className={`mt-1.5 sm:mt-4 text-[8px] sm:text-[10px] font-black uppercase tracking-tighter text-center w-full px-0.5 truncate sm:whitespace-normal transition-colors duration-700 ${
                                 isCurrent ? 'text-primary-electric dark:text-primary-electric-light' : 
                                 isCompleted ? 'text-gray-500 dark:text-gray-400' : 
                                 'text-gray-200 dark:text-gray-700'
@@ -536,7 +559,7 @@ const Dashboard: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
         {loading ? (
           <div className="col-span-full flex flex-col items-center justify-center py-24 text-center">
             <Loader2 className="w-12 h-12 text-primary-electric animate-spin mb-6" />
@@ -563,44 +586,44 @@ const Dashboard: React.FC = () => {
                 whileTap={!isUnavailable ? { scale: 0.98 } : {}}
                 onClick={() => handleSlotSelect(slot)}
                 disabled={isUnavailable}
-                className={`p-8 rounded-2xl text-left transition-all flex flex-col justify-between h-56 relative overflow-hidden group haptic-feedback ${
+                className={`p-3.5 sm:p-8 rounded-2xl text-left transition-all flex flex-col justify-between h-36 sm:h-56 relative overflow-hidden group haptic-feedback ${
                   isUnavailable 
                     ? 'bg-gray-50/50 dark:bg-surface-low/50 opacity-40 cursor-not-allowed grayscale' 
                     : 'bg-white dark:bg-surface-container shadow-xl shadow-black/5 dark:shadow-none hover:shadow-2xl hover:shadow-primary-electric/10'
                 }`}
               >
-                <div className="flex justify-between items-start w-full relative z-10">
-                  <div className={`p-4 rounded-2xl ${isUnavailable ? 'bg-gray-100 dark:bg-surface-low' : 'bg-primary-electric/10'}`}>
-                    <DynamicClock slot={slot} isUnavailable={isUnavailable} />
+                <div className="flex justify-between items-start w-full relative z-10 gap-1">
+                  <div className={`p-2 sm:p-4 rounded-xl sm:rounded-2xl shrink-0 ${isUnavailable ? 'bg-gray-100 dark:bg-surface-low' : 'bg-primary-electric/10'}`}>
+                    <Clock className={`w-4 h-4 sm:w-7 sm:h-7 ${isUnavailable ? 'text-gray-400 dark:text-gray-500' : 'text-primary-electric dark:text-primary-electric-light'}`} />
                   </div>
                   {user?.isSuspended ? (
-                    <span className="px-3 py-1 bg-red-500 text-white text-[9px] font-black rounded-full uppercase tracking-widest">Suspended</span>
+                    <span className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-red-500 text-white text-[8px] sm:text-[9px] font-black rounded-full uppercase tracking-wider sm:tracking-widest">Suspended</span>
                   ) : isStorePaused ? (
-                    <span className="px-3 py-1 bg-amber-500 text-white text-[9px] font-black rounded-full uppercase tracking-widest">Paused</span>
+                    <span className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-amber-500 text-white text-[8px] sm:text-[9px] font-black rounded-full uppercase tracking-wider sm:tracking-widest">Paused</span>
                   ) : isPaused ? (
-                    <span className="px-3 py-1 bg-amber-500 text-white text-[9px] font-black rounded-full uppercase tracking-widest">Paused</span>
+                    <span className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-amber-500 text-white text-[8px] sm:text-[9px] font-black rounded-full uppercase tracking-wider sm:tracking-widest">Paused</span>
                   ) : isFull ? (
-                    <span className="px-3 py-1 bg-red-500 text-white text-[9px] font-black rounded-full uppercase tracking-widest">Full</span>
+                    <span className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-red-500 text-white text-[8px] sm:text-[9px] font-black rounded-full uppercase tracking-wider sm:tracking-widest">Full</span>
                   ) : isPast ? (
-                    <span className="px-3 py-1 bg-gray-400 text-white text-[9px] font-black rounded-full uppercase tracking-widest">Past</span>
+                    <span className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-gray-400 text-white text-[8px] sm:text-[9px] font-black rounded-full uppercase tracking-wider sm:tracking-widest">Past</span>
                   ) : (
-                    <span className="px-3 py-1 bg-green-500 text-white text-[9px] font-black rounded-full uppercase tracking-widest">Available</span>
+                    <span className="px-1.5 py-0.5 sm:px-3 sm:py-1 bg-green-500 text-white text-[8px] sm:text-[9px] font-black rounded-full uppercase tracking-wider sm:tracking-widest">Available</span>
                   )}
                 </div>
                 
-                <div className="relative z-10">
-                  <h3 className={`text-2xl font-display font-black tracking-tight uppercase ${isUnavailable ? 'text-gray-400 dark:text-gray-500' : 'text-gray-800 dark:text-high-contrast'}`}>{slot}</h3>
-                  <div className="flex items-center mt-3">
-                    <div className="flex -space-x-1.5 mr-4">
+                <div className="relative z-10 w-full min-w-0">
+                  <h3 className={`text-xs xs:text-sm sm:text-2xl font-display font-black tracking-tighter sm:tracking-tight uppercase truncate ${isUnavailable ? 'text-gray-400 dark:text-gray-500' : 'text-gray-800 dark:text-high-contrast'}`}>{slot}</h3>
+                  <div className="flex items-center mt-1 sm:mt-3">
+                    <div className="flex -space-x-1 sm:-space-x-1.5 mr-2 sm:mr-4 shrink-0">
                       {[...Array(4)].map((_, i) => (
                         <div 
                           key={i} 
-                          className={`w-3 h-3 rounded-full ring-2 ring-white dark:ring-surface-container ${i < (4 - availability) ? 'bg-primary-electric' : 'bg-gray-100 dark:bg-surface-low'}`}
+                          className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full ring-1 sm:ring-2 ring-white dark:ring-surface-container ${i < (4 - availability) ? 'bg-primary-electric' : 'bg-gray-100 dark:bg-surface-low'}`}
                         />
                       ))}
                     </div>
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${isUnavailable ? 'text-gray-400 dark:text-gray-500' : 'text-gray-500 dark:text-gray-400'}`}>
-                      {availability} machines left
+                    <span className={`text-[8px] sm:text-[10px] font-black uppercase tracking-wider sm:tracking-widest truncate ${isUnavailable ? 'text-gray-400 dark:text-gray-500' : 'text-gray-500 dark:text-gray-400'}`}>
+                      {availability} left
                     </span>
                   </div>
                 </div>

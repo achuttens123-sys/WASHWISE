@@ -120,17 +120,30 @@ const StoreManagerDashboard: React.FC = () => {
     ready: bookings.filter(b => ['Ready to collect', 'Ready to deliver'].includes(b.status)).length,
   };
 
-  const statusOptions = [
-    { value: 'paid', label: 'Order confirmed' },
-    { value: 'Ready for pick up', label: 'Ready for pick up' },
-    { value: 'In Wash', label: 'In Wash' },
-    { value: 'In Dryer', label: 'In Dryer' },
-    { value: 'Washing completed', label: 'Completed' },
-    { value: 'Ready to collect', label: 'Ready to collect' },
-    { value: 'Out for delivery', label: 'Out for delivery' },
-    { value: 'completed', label: 'Finalized' },
-    { value: 'cancelled', label: 'Cancelled' }
-  ];
+  const getStatusOptions = (pickupDrop: boolean) => {
+    if (pickupDrop) {
+      return [
+        { value: 'paid', label: 'Order Confirmed' },
+        { value: 'Ready for pick up', label: 'Ready for Pickup' },
+        { value: 'In Wash', label: 'In wash' },
+        { value: 'In Dryer', label: 'In wash (Drying)' },
+        { value: 'Washing completed', label: 'Completed' },
+        { value: 'Out for delivery', label: 'Out for Delivery' },
+        { value: 'completed', label: 'Finalized' },
+        { value: 'cancelled', label: 'Cancelled' }
+      ];
+    } else {
+      return [
+        { value: 'paid', label: 'Confirmed' },
+        { value: 'In Wash', label: 'In wash' },
+        { value: 'In Dryer', label: 'In wash (Drying)' },
+        { value: 'Washing completed', label: 'Completed' },
+        { value: 'Ready to collect', label: 'Ready for customer pickup' },
+        { value: 'completed', label: 'Finalized' },
+        { value: 'cancelled', label: 'Cancelled' }
+      ];
+    }
+  };
 
   if (!user?.storeId) {
     return (
@@ -270,6 +283,11 @@ const StoreManagerDashboard: React.FC = () => {
                       <div>
                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Service</p>
                         <p className="text-sm font-bold text-gray-700 dark:text-gray-300">{booking.serviceType}</p>
+                        {booking.garmentInstructions && (
+                          <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium italic mt-0.5" title={booking.garmentInstructions}>
+                            Instr: {booking.garmentInstructions}
+                          </p>
+                        )}
                       </div>
                       <div>
                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Status</p>
@@ -277,13 +295,17 @@ const StoreManagerDashboard: React.FC = () => {
                           value={booking.status}
                           onChange={(e) => updateBookingStatus(booking.id!, e.target.value as any)}
                           className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest outline-none border-none cursor-pointer ${
-                            booking.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                            booking.status === 'In Wash' ? 'bg-blue-100 text-blue-700' :
-                            booking.status === 'completed' ? 'bg-green-100 text-green-700' :
-                            'bg-gray-100 text-gray-700'
+                            ['paid', 'pending'].includes(booking.status) ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                            booking.status === 'Ready for pick up' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
+                            ['In Wash', 'In Dryer'].includes(booking.status) ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' :
+                            ['Washing completed', 'Ready to deliver'].includes(booking.status) ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' :
+                            booking.status === 'Ready to collect' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
+                            booking.status === 'Out for delivery' ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' :
+                            booking.status === 'completed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                           }`}
                         >
-                          {statusOptions.map(opt => (
+                          {getStatusOptions(booking.pickupDrop).map(opt => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
                           ))}
                         </select>
@@ -350,21 +372,30 @@ const StoreManagerDashboard: React.FC = () => {
                         <td className="px-6 py-4">
                           <p className="text-sm font-bold text-gray-800 dark:text-gray-100">{booking.userName}</p>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400 font-medium">
-                          {booking.serviceType}
+                        <td className="px-6 py-4">
+                          <span className="text-sm font-medium text-gray-600 dark:text-gray-400">{booking.serviceType}</span>
+                          {booking.garmentInstructions && (
+                            <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium italic mt-1 max-w-[150px] truncate" title={booking.garmentInstructions}>
+                              Instr: {booking.garmentInstructions}
+                            </p>
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <select 
                             value={booking.status}
                             onChange={(e) => updateBookingStatus(booking.id!, e.target.value as any)}
                             className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest outline-none border-none cursor-pointer ${
-                              booking.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                              booking.status === 'In Wash' ? 'bg-blue-100 text-blue-700' :
-                              booking.status === 'completed' ? 'bg-green-100 text-green-700' :
-                              'bg-gray-100 text-gray-700'
+                              ['paid', 'pending'].includes(booking.status) ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                              booking.status === 'Ready for pick up' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
+                              ['In Wash', 'In Dryer'].includes(booking.status) ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' :
+                              ['Washing completed', 'Ready to deliver'].includes(booking.status) ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' :
+                              booking.status === 'Ready to collect' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
+                              booking.status === 'Out for delivery' ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' :
+                              booking.status === 'completed' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                              'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                             }`}
                           >
-                            {statusOptions.map(opt => (
+                            {getStatusOptions(booking.pickupDrop).map(opt => (
                               <option key={opt.value} value={opt.value}>{opt.label}</option>
                             ))}
                           </select>

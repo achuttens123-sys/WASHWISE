@@ -162,90 +162,73 @@ const SuperAdminDashboard: React.FC = () => {
       handleFirestoreError(error, OperationType.GET, 'machines');
     });
 
+    const defaultSettings = {
+      pricing: {
+        washFold: 0,
+        expressWash: 44,
+        instantBooking: 44,
+        minCharge: 156,
+        pricePerKg: 39,
+        minLoad: 5,
+        deliveryFee: 30
+      },
+      subscriptionPlans: [
+        { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
+        { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
+        { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
+        { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
+      ],
+      discounts: [],
+      promos: []
+    };
+
     const loadSettings = async () => {
       try {
         const settingsDoc = await getDoc(doc(db, 'settings', 'global'));
         if (settingsDoc.exists()) {
-          setGlobalSettings(settingsDoc.data());
+          const data = settingsDoc.data();
+          setGlobalSettings({
+            ...defaultSettings,
+            ...data,
+            pricing: {
+              ...defaultSettings.pricing,
+              ...(data?.pricing || {})
+            }
+          });
         } else {
-          const initialSettings = {
-            pricing: { washFold: 0, expressWash: 44, instantBooking: 44, minCharge: 156, pricePerKg: 39, minLoad: 5 },
-            subscriptionPlans: [
-              { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
-              { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
-              { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
-              { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
-            ],
-            discounts: [],
-            promos: []
-          };
-          setGlobalSettings(initialSettings);
-          await setDoc(doc(db, 'settings', 'global'), initialSettings);
+          setGlobalSettings(defaultSettings);
+          await setDoc(doc(db, 'settings', 'global'), defaultSettings);
         }
       } catch (error) {
         console.error("Manual Settings Load Error:", error);
-        setGlobalSettings({
-          pricing: { washFold: 0, expressWash: 44, instantBooking: 44, minCharge: 156, pricePerKg: 39, minLoad: 5 },
-          subscriptionPlans: [
-            { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
-            { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
-            { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
-            { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
-          ],
-          discounts: [],
-          promos: []
-        });
+        setGlobalSettings(defaultSettings);
       }
     };
 
     const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
       if (snapshot.exists()) {
-        setGlobalSettings(snapshot.data());
-      } else {
-        // Initialize if not exists
-        const initialSettings = {
+        const data = snapshot.data();
+        setGlobalSettings({
+          ...defaultSettings,
+          ...data,
           pricing: {
-            washFold: 0,
-            expressWash: 44,
-            instantBooking: 44,
-            minCharge: 156,
-            pricePerKg: 39,
-            minLoad: 5
-          },
-          subscriptionPlans: [
-            { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
-            { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
-            { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
-            { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
-          ],
-          discounts: [],
-          promos: []
-        };
-        setGlobalSettings(initialSettings);
-        setDoc(doc(db, 'settings', 'global'), initialSettings).catch(err => {
+            ...defaultSettings.pricing,
+            ...(data?.pricing || {})
+          }
+        });
+      } else {
+        setGlobalSettings(defaultSettings);
+        setDoc(doc(db, 'settings', 'global'), defaultSettings).catch(err => {
           console.error("Settings initialization failed:", err);
         });
       }
     }, (error) => {
       console.error("Settings Snapshot Error:", error);
-      // Fallback to avoid infinite loading
-      const fallbackSettings = {
-        pricing: { washFold: 0, expressWash: 44, instantBooking: 44, minCharge: 156, pricePerKg: 39, minLoad: 5 },
-        subscriptionPlans: [
-          { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
-          { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
-          { id: 'premium', name: 'Premium', kgLimit: 20, price: 647, originalPrice: 780, discount: 17, description: '20kg Monthly Capacity' },
-          { id: 'super_premium', name: 'Super Premium', kgLimit: 32, price: 936, originalPrice: 1248, discount: 25, description: '32kg Monthly Capacity' }
-        ],
-        discounts: [],
-        promos: []
-      };
-      setGlobalSettings(fallbackSettings);
-      
+      setGlobalSettings(defaultSettings);
       try {
         handleFirestoreError(error, OperationType.GET, 'settings/global');
       } catch (e) {
-        // Error is logged by handleFirestoreError
+        // Error logged
       }
     });
 
@@ -884,7 +867,7 @@ const SuperAdminDashboard: React.FC = () => {
               <p className="text-sm text-gray-500 font-medium mb-2">Loading pricing settings...</p>
               <button 
                 onClick={() => setGlobalSettings({
-                  pricing: { washFold: 0, expressWash: 44, instantBooking: 44, minCharge: 156, pricePerKg: 39, minLoad: 5 },
+                  pricing: { washFold: 0, expressWash: 44, instantBooking: 44, minCharge: 156, pricePerKg: 39, minLoad: 5, deliveryFee: 30 },
                   subscriptionPlans: [
                     { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
                     { id: 'standard', name: 'Standard', kgLimit: 16, price: 530, originalPrice: 624, discount: 15, description: '16kg Monthly Capacity' },
@@ -953,14 +936,21 @@ const SuperAdminDashboard: React.FC = () => {
                 {Object.entries(globalSettings.pricing).map(([key, value]: [string, any]) => (
                   <div key={key} className="space-y-2">
                     <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">
-                      {key.replace(/([A-Z])/g, ' $1').trim()} {key.includes('Load') ? '(kg)' : '(₹)'}
+                      {key === 'washFold' ? 'Wash & Fold Rate' :
+                       key === 'expressWash' ? 'Express Wash Rate' :
+                       key === 'instantBooking' ? 'Instant Booking Rate' :
+                       key === 'minCharge' ? 'Minimum Charge' :
+                       key === 'minLoad' ? 'Minimum Load' :
+                       key === 'pricePerKg' ? 'Price Per KG' :
+                       key === 'deliveryFee' ? 'Delivery Fee / Charge' :
+                       key.replace(/([A-Z])/g, ' $1').trim()} {key.includes('Load') ? '(kg)' : '(₹)'}
                     </label>
                     <input 
                       type="number"
                       value={value}
                       onChange={(e) => setGlobalSettings({
                         ...globalSettings,
-                        pricing: { ...globalSettings.pricing, [key]: parseFloat(e.target.value) }
+                        pricing: { ...globalSettings.pricing, [key]: parseFloat(e.target.value) || 0 }
                       })}
                       className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />

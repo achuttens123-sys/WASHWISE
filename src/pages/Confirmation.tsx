@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { CheckCircle2, Calendar, Clock, Monitor, ArrowRight, Download, Share2, Printer, ReceiptText, User, Hash, CreditCard, AlertCircle, RefreshCw } from 'lucide-react';
+import { CheckCircle2, Calendar, Clock, Monitor, ArrowRight, Download, Share2, Printer, ReceiptText, User, Hash, CreditCard, AlertCircle, RefreshCw, Check } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Booking } from '../types';
+import { jsPDF } from 'jspdf';
 
 const Confirmation: React.FC = () => {
   const navigate = useNavigate();
@@ -12,6 +13,8 @@ const Confirmation: React.FC = () => {
   const [booking, setBooking] = useState<Booking | null>(null);
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   useEffect(() => {
     const fetchBooking = async () => {
@@ -41,6 +44,181 @@ const Confirmation: React.FC = () => {
     window.print();
   };
 
+  const handleDownloadPDF = () => {
+    if (!booking) return;
+    setIsDownloading(true);
+
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      // Colors
+      const primaryColor = [37, 99, 235]; // Blue 600 (#2563eb)
+      const secondaryColor = [31, 41, 55]; // Gray 800
+      const lightGray = [243, 244, 246]; // Gray 100
+      const borderGray = [229, 231, 235]; // Gray 200
+
+      // Margins & Dimensions
+      const margin = 20;
+      const width = doc.internal.pageSize.getWidth();
+      const height = doc.internal.pageSize.getHeight();
+
+      // Background decorative top bar
+      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.rect(0, 0, width, 5, 'F');
+
+      // Brand Header
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(26);
+      doc.text('WASHWISE', margin, 25);
+
+      doc.setTextColor(156, 163, 175); // Gray 400
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.text('LAUNDRY & DRY CLEANING CHALLAN SLIP', margin, 31);
+
+      // Invoice metadata (top-right)
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('INVOICE / CHALLAN', width - margin - 55, 20);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(107, 114, 128); // Gray 500
+      doc.text(`Invoice No: ${bookingId?.toUpperCase() || 'N/A'}`, width - margin - 55, 25);
+      doc.text(`Date Issued: ${new Date().toLocaleDateString()}`, width - margin - 55, 30);
+      doc.text(`Service Date: ${booking.date}`, width - margin - 55, 35);
+
+      // Divider line
+      doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
+      doc.setLineWidth(0.5);
+      doc.line(margin, 42, width - margin, 42);
+
+      // Customer Details
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text('BILL TO:', margin, 52);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(75, 85, 99); // Gray 600
+      doc.text(`Customer Name: ${booking.userName}`, margin, 58);
+      doc.text(`Phone: ${booking.phone || 'N/A'}`, margin, 64);
+      if (booking.pickupDrop && booking.address) {
+        doc.text(`Address: ${booking.address}`, margin, 70, { maxWidth: width - (margin * 2) - 10 });
+      }
+
+      // Machine Assignment Box
+      const machineY = booking.pickupDrop && booking.address ? 82 : 76;
+      doc.setFillColor(239, 246, 255); // Blue 50
+      doc.setDrawColor(191, 219, 254); // Blue 200
+      doc.rect(margin, machineY, width - (margin * 2), 16, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(30, 58, 138); // Blue 900
+      doc.text(`ASSIGNED MACHINE: Machine #${booking.machineNumber || 'Pending'}`, margin + 5, machineY + 10);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(30, 41, 59); // Slate 800
+      doc.text(`Status: ${booking.status.toUpperCase()}`, width - margin - 40, machineY + 10);
+
+      // Service Summary Table Header
+      const tableY = machineY + 28;
+      doc.setFillColor(lightGray[0], lightGray[1], lightGray[2]);
+      doc.rect(margin, tableY, width - (margin * 2), 10, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(55, 65, 81); // Gray 700
+      doc.text('DESCRIPTION', margin + 4, tableY + 6.5);
+      doc.text('WEIGHT/LOAD', margin + 100, tableY + 6.5);
+      doc.text('AMOUNT', width - margin - 25, tableY + 6.5);
+
+      // Table Row
+      const rowY = tableY + 16;
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(75, 85, 99);
+      
+      const deliveryFee = booking.pickupDrop ? (booking.deliveryFee ?? 30) : 0;
+      const basePrice = booking.price - deliveryFee;
+
+      doc.text(`${booking.serviceType}`, margin + 4, rowY);
+      doc.text(`${booking.approxLoad}`, margin + 100, rowY);
+      doc.text(`₹${basePrice.toFixed(2)}`, width - margin - 25, rowY);
+
+      // If pickupDrop is enabled, show the delivery fee line
+      let totalY = rowY + 12;
+      if (booking.pickupDrop) {
+        doc.text('Pickup & Drop Service Fee', margin + 4, rowY + 8);
+        doc.text(`₹${deliveryFee.toFixed(2)}`, width - margin - 25, rowY + 8);
+        totalY += 8;
+      }
+
+      // Divider for totals
+      doc.line(margin, totalY - 4, width - margin, totalY - 4);
+
+      // Total Paid
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text('TOTAL AMOUNT PAID (INR)', margin + 4, totalY + 4);
+      doc.setFontSize(13);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text(`₹${booking.price.toFixed(2)}`, width - margin - 25, totalY + 4);
+
+      // Footer Notes
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(156, 163, 175);
+      doc.text('This is a computer-generated challan and receipt for services booked on Washwise.', margin, height - 30);
+      doc.text('Please keep this invoice handy when picking up your laundry.', margin, height - 25);
+      
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text('THANK YOU FOR CHOOSING WASHWISE!', margin, height - 18);
+
+      // Save PDF
+      doc.save(`Washwise_Invoice_${bookingId?.toUpperCase() || 'Booking'}.pdf`);
+    } catch (err) {
+      console.error('Failed to generate PDF invoice:', err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleShareReceipt = async () => {
+    if (!booking) return;
+
+    const shareText = `WASHWISE LAUNDRY CHALLAN\n\nBooking ID: ${bookingId?.toUpperCase()}\nCustomer: ${booking.userName}\nService: ${booking.serviceType} (${booking.approxLoad})\nDate: ${booking.date} at ${booking.timeSlot}\nAssigned Machine: Machine #${booking.machineNumber || 'Pending'}\nTotal Paid: ₹${booking.price.toFixed(2)}\nStatus: ${booking.status.toUpperCase()}\n\nThank you for choosing Washwise!`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Washwise Booking Receipt',
+          text: shareText,
+        });
+      } catch (err) {
+        console.log('Share canceled or failed:', err);
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(shareText);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+      } catch (err) {
+        console.error('Failed to copy text:', err);
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[80vh]">
@@ -53,6 +231,9 @@ const Confirmation: React.FC = () => {
 
   const isRejected = booking.status === 'rejected';
   const isRescheduled = booking.status === 'rescheduled';
+
+  const deliveryFee = booking.pickupDrop ? (booking.deliveryFee ?? 30) : 0;
+  const basePrice = booking.price - deliveryFee;
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-12">
@@ -173,7 +354,7 @@ const Confirmation: React.FC = () => {
                   </div>
                   <div>
                     <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest">Assigned Machine</p>
-                    <p className="text-2xl font-black text-gray-800 dark:text-gray-100">Machine #{booking.machineNumber}</p>
+                    <p className="text-2xl font-black text-gray-800 dark:text-gray-100">Machine #{booking.machineNumber || 'Pending'}</p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -196,12 +377,12 @@ const Confirmation: React.FC = () => {
               <div className="bg-gray-50 dark:bg-gray-800/50 rounded-2xl p-4 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500 dark:text-gray-400">{booking.serviceType} ({booking.approxLoad})</span>
-                  <span className="font-bold text-gray-800 dark:text-gray-200">₹{booking.price.toFixed(2)}</span>
+                  <span className="font-bold text-gray-800 dark:text-gray-200">₹{basePrice.toFixed(2)}</span>
                 </div>
                 {booking.pickupDrop && (
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 dark:text-gray-400">Pickup & Drop Service</span>
-                    <span className="font-bold text-gray-800 dark:text-gray-200">Included</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200">₹{deliveryFee.toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center pt-3 border-t border-gray-200 dark:border-gray-700 mt-2">
@@ -250,11 +431,28 @@ const Confirmation: React.FC = () => {
 
         {/* Secondary Actions */}
         <div className="flex justify-center gap-6 no-print">
-          <button className="text-sm font-bold text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 flex items-center transition-colors">
-            <Download className="w-4 h-4 mr-2" /> Download PDF
+          <button 
+            onClick={handleDownloadPDF}
+            disabled={isDownloading}
+            className="text-sm font-bold text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 flex items-center transition-colors disabled:opacity-50"
+          >
+            {isDownloading ? (
+              <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />
+            ) : (
+              <Download className="w-4 h-4 mr-2" />
+            )}
+            Download PDF
           </button>
-          <button className="text-sm font-bold text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 flex items-center transition-colors">
-            <Share2 className="w-4 h-4 mr-2" /> Share Receipt
+          <button 
+            onClick={handleShareReceipt}
+            className="text-sm font-bold text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 flex items-center transition-colors"
+          >
+            {isCopied ? (
+              <Check className="w-4 h-4 mr-2 text-green-500" />
+            ) : (
+              <Share2 className="w-4 h-4 mr-2" />
+            )}
+            {isCopied ? 'Copied!' : 'Share Receipt'}
           </button>
         </div>
       </motion.div>

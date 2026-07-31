@@ -172,7 +172,8 @@
             "expressWash": { "type": "number" },
             "instantBooking": { "type": "number" },
             "minCharge": { "type": "number" },
-            "pricePerKg": { "type": "number" }
+            "pricePerKg": { "type": "number" },
+            "deliveryFee": { "type": "number" }
           }
         },
         "discounts": {

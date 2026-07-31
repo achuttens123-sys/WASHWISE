@@ -67,7 +67,7 @@ const BookingDetails: React.FC = () => {
     }
     
     if (bookingData.pickupDrop && user?.userType !== 'subscriber') {
-      basePrice += 30; // Flat delivery fee
+      basePrice += settings?.pricing?.deliveryFee ?? 30; // Dynamic delivery fee
     }
     
     return basePrice;
@@ -84,7 +84,7 @@ const BookingDetails: React.FC = () => {
 
     const price = calculatePrice();
     const isSubscriber = user?.userType === 'subscriber';
-    const deliveryFee = (bookingData.pickupDrop && !isSubscriber) ? 30 : 0;
+    const deliveryFee = (bookingData.pickupDrop && !isSubscriber) ? (settings?.pricing?.deliveryFee ?? 30) : 0;
 
     const params = new URLSearchParams({
       date: dateStr,
@@ -196,7 +196,7 @@ const BookingDetails: React.FC = () => {
                       <p className="text-xs opacity-80">
                         {user?.userType === 'subscriber' 
                           ? 'Delivery is FREE for subscribers!' 
-                          : 'A flat delivery fee of ₹30 applies for pickup and drop service.'}
+                          : `A flat delivery fee of ₹${settings?.pricing?.deliveryFee ?? 30} applies for pickup and drop service.`}
                       </p>
                     </div>
                   </div>

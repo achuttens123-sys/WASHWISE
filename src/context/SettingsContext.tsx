@@ -11,6 +11,7 @@ interface PricingSettings {
   minCharge: number;
   pricePerKg: number;
   minLoad: number;
+  deliveryFee: number;
 }
 
 interface SubscriptionPlan {
@@ -52,7 +53,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         instantBooking: 44,
         minCharge: 156,
         pricePerKg: 39,
-        minLoad: 5
+        minLoad: 5,
+        deliveryFee: 30
       },
       subscriptionPlans: [
         { id: 'basic', name: 'Basic', kgLimit: 12, price: 421, originalPrice: 468, discount: 10, description: '12kg Monthly Capacity' },
@@ -67,7 +69,18 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const unsub = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data() as GlobalSettings;
-        setSettings(data);
+        const mergedSettings: GlobalSettings = {
+          ...defaultSettings,
+          ...data,
+          pricing: {
+            ...defaultSettings.pricing,
+            ...(data?.pricing || {})
+          },
+          subscriptionPlans: data?.subscriptionPlans || defaultSettings.subscriptionPlans,
+          discounts: data?.discounts || defaultSettings.discounts,
+          promos: data?.promos || defaultSettings.promos
+        };
+        setSettings(mergedSettings);
         
         // Auto-migrate legacy plans if detected (e.g. if names are PRO/ELITE or count is 3)
         const hasLegacyPlans = data.subscriptionPlans?.some(p => ['PRO', 'ELITE'].includes(p.name.toUpperCase())) || data.subscriptionPlans?.length === 3;

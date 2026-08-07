@@ -24,11 +24,31 @@ interface SubscriptionPlan {
   description?: string;
 }
 
+export interface GlobalDiscount {
+  id: string;
+  name: string;
+  type: 'percentage' | 'fixed';
+  value: number;
+  active: boolean;
+  applicableFor?: 'all' | 'wash' | 'subscription';
+}
+
+export interface PromoCode {
+  id: string;
+  code: string;
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  expiryDate?: string;
+  description?: string;
+  active: boolean;
+  applicableFor?: 'all' | 'wash' | 'subscription';
+}
+
 interface GlobalSettings {
   pricing: PricingSettings;
   subscriptionPlans: SubscriptionPlan[];
-  discounts: any[];
-  promos: any[];
+  discounts: GlobalDiscount[];
+  promos: PromoCode[];
 }
 
 interface SettingsContextType {

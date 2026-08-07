@@ -21,6 +21,7 @@ export interface User {
   package?: string;
   subscriptionPaid?: boolean;
   subscriptionStartDate?: string;
+  kilosLeft?: number;
   isSuspended?: boolean;
   walletBalance?: number;
   photoURL?: string;

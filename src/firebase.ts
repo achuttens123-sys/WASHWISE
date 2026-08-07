@@ -38,13 +38,17 @@ async function validateConnection() {
   try {
     await getDocFromServer(doc(db, 'system_test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. The client is offline.");
+    if (error instanceof Error && (error.message.includes('the client is offline') || (error as any).code === 'unavailable')) {
+      console.warn("Firestore connection check deferred (operating in offline/reconnecting mode).");
+    } else {
+      console.warn("Firestore connection test info:", error);
     }
-    // Other errors are handled by the app's error boundaries or specific calls
   }
 }
-validateConnection();
+
+if (typeof window !== 'undefined') {
+  setTimeout(validateConnection, 2000);
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -130,6 +134,11 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   }
+  if (errorCode === 'unavailable' && (operationType === OperationType.GET || operationType === OperationType.LIST)) {
+    console.warn(`[Firestore Offline/Unavailable] Operation: ${operationType}, Path: ${path}`, error);
+    return;
+  }
+
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }

@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { StoreService } from '../services/StoreService';
 import { Store } from '../types';
+import TermsModal from '../components/TermsModal';
 
 const BookingDetails: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -13,12 +14,15 @@ const BookingDetails: React.FC = () => {
   const { user } = useAuth();
   const { settings } = useSettings();
   
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [isTermsOpen, setIsTermsOpen] = useState(false);
+  
   const dateStr = searchParams.get('date') || '';
   const timeSlot = searchParams.get('slot') || '';
 
   const [bookingData, setBookingData] = useState({
     pickupDrop: false,
-    serviceType: 'Wash & Fold' as 'Wash & Fold' | 'Express Wash' | 'Instant Booking',
+    serviceType: 'Wash & Fold' as 'Wash & Fold' | 'Express Wash',
     approxLoad: '1-4 kg' as '1-4 kg' | '5 kg' | '6 kg' | '7+ kg',
     address: '',
     phone: '',
@@ -45,6 +49,16 @@ const BookingDetails: React.FC = () => {
     fetchStores();
   }, []);
 
+  useEffect(() => {
+    if (user) {
+      setBookingData(prev => ({
+        ...prev,
+        address: prev.address || user.address || '',
+        phone: prev.phone || user.phone || ''
+      }));
+    }
+  }, [user]);
+
   const calculatePrice = () => {
     if (!settings) return 0;
     const { pricing } = settings;
@@ -62,8 +76,6 @@ const BookingDetails: React.FC = () => {
     
     if (bookingData.serviceType === 'Express Wash') {
       basePrice += pricing.expressWash;
-    } else if (bookingData.serviceType === 'Instant Booking') {
-      basePrice += pricing.instantBooking;
     }
     
     if (bookingData.pickupDrop && user?.userType !== 'subscriber') {
@@ -290,8 +302,8 @@ const BookingDetails: React.FC = () => {
             <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center">
               <Package className="w-4 h-4 mr-2" /> Service Type
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {['Wash & Fold', 'Express Wash', 'Instant Booking'].map((type) => (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {['Wash & Fold', 'Express Wash'].map((type) => (
                 <motion.button
                   key={type}
                   whileHover={{ scale: 1.02 }}
@@ -306,7 +318,7 @@ const BookingDetails: React.FC = () => {
                     {bookingData.serviceType === type && <motion.div layoutId="service-dot" className="w-4 h-4 bg-blue-600 rounded-full" />}
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {type === 'Wash & Fold' ? 'Standard care' : type === 'Express Wash' ? 'Faster delivery' : 'Priority booking'}
+                    {type === 'Wash & Fold' ? 'Standard care' : 'Faster delivery'}
                   </p>
                 </motion.button>
               ))}
@@ -336,35 +348,70 @@ const BookingDetails: React.FC = () => {
                 </motion.button>
               ))}
             </div>
-            <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl flex items-start">
-              <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 mr-2 mt-0.5" />
-              <p className="text-xs text-amber-800 dark:text-amber-200">Minimum charge of ₹{settings?.pricing.minCharge || 156} applies for up to 4 kg.</p>
+            <div className="mt-4 p-3.5 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200/60 dark:border-amber-800/40 flex items-start gap-2.5">
+              <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+              <div className="text-xs text-amber-800 dark:text-amber-200">
+                <span className="font-bold">Minimum Charge Disclaimer: </span>
+                A minimum charge of ₹{settings?.pricing.minCharge || 156} applies for laundry loads up to 4 kg.
+              </div>
             </div>
           </section>
 
           {/* Garment Instructions */}
           <section>
             <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center">
-              <AlertTriangle className="w-4 h-4 mr-2" /> Special Instructions
+              <AlertTriangle className="w-4 h-4 mr-2" /> Special Instructions & Care
             </h3>
-            <div className="space-y-2">
+            <div className="space-y-3">
               <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Garment Care Details</label>
+              
+              <div className="p-3.5 bg-blue-50/80 dark:bg-blue-950/30 rounded-xl border border-blue-200/60 dark:border-blue-800/40 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                <div className="text-xs text-blue-900 dark:text-blue-200 space-y-1">
+                  <p className="font-bold uppercase tracking-wider text-[11px] text-blue-700 dark:text-blue-300">Garment Care & Color Bleeding Disclaimer:</p>
+                  <p>
+                    Please specify any <strong>color-bleeding garments, white clothes, delicate fabrics, or specific washing needs</strong> below. WashWise is not liable for color bleeding or damage if unflagged in care details.
+                  </p>
+                </div>
+              </div>
+
               <textarea
                 value={bookingData.garmentInstructions}
                 onChange={(e) => setBookingData({ ...bookingData, garmentInstructions: e.target.value })}
-                placeholder="e.g. Handle with care, specific stains, delicate fabric, etc."
+                placeholder="e.g. Red cotton shirt bleeds color (wash separately), white linen shirt needs gentle wash, delicate silk item, remove stain on sleeve..."
                 rows={3}
-                className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 resize-none"
+                className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 resize-none text-xs sm:text-sm"
               />
             </div>
           </section>
         </div>
 
+        {/* Terms and Conditions Checkbox */}
+        <div className="mt-8 p-4 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 flex items-center gap-3">
+          <input
+            type="checkbox"
+            id="termsCheckbox"
+            checked={acceptedTerms}
+            onChange={(e) => setAcceptedTerms(e.target.checked)}
+            className="w-5 h-5 text-blue-600 rounded-md border-gray-300 focus:ring-blue-500 cursor-pointer accent-blue-600 shrink-0"
+          />
+          <label htmlFor="termsCheckbox" className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 font-medium select-none cursor-pointer">
+            I accept the{' '}
+            <button
+              type="button"
+              onClick={() => setIsTermsOpen(true)}
+              className="text-blue-600 dark:text-blue-400 font-bold underline hover:text-blue-700 dark:hover:text-blue-300 focus:outline-none"
+            >
+              Terms and Conditions
+            </button>
+          </label>
+        </div>
+
         <button
           onClick={handleNext}
-          disabled={(bookingData.pickupDrop && (!bookingData.address || !bookingData.phone)) || !bookingData.storeId}
-          className={`w-full mt-10 py-4 font-bold rounded-2xl transition-all shadow-lg flex items-center justify-center ${
-            (bookingData.pickupDrop && (!bookingData.address || !bookingData.phone)) || !bookingData.storeId
+          disabled={(bookingData.pickupDrop && (!bookingData.address || !bookingData.phone)) || !bookingData.storeId || !acceptedTerms}
+          className={`w-full mt-6 py-4 font-bold rounded-2xl transition-all shadow-lg flex items-center justify-center ${
+            (bookingData.pickupDrop && (!bookingData.address || !bookingData.phone)) || !bookingData.storeId || !acceptedTerms
               ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed shadow-none'
               : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200 dark:shadow-none'
           }`}
@@ -372,6 +419,15 @@ const BookingDetails: React.FC = () => {
           Proceed to Billing
           <ArrowLeft className="w-4 h-4 ml-2 rotate-180" />
         </button>
+
+        <TermsModal
+          isOpen={isTermsOpen}
+          onClose={() => setIsTermsOpen(false)}
+          onAccept={() => {
+            setAcceptedTerms(true);
+            setIsTermsOpen(false);
+          }}
+        />
       </motion.div>
     </div>
   );

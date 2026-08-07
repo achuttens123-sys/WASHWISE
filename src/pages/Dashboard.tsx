@@ -248,11 +248,11 @@ const Dashboard: React.FC = () => {
                   <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.3em] leading-none">
                     {user?.name}
                   </p>
-                  {user?.userType === 'subscriber' && (
+                  {(user?.userType === 'subscriber' || !!user?.subscriptionPaid) && (
                     <>
                       <div className="h-1 w-1 bg-gray-300 dark:bg-gray-600 rounded-full" />
-                      <span className="text-[8px] sm:text-[9px] font-black text-primary-electric dark:text-primary-electric-light uppercase tracking-widest">
-                        {user.package} Member
+                      <span className="px-2.5 py-0.5 bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400 text-[9px] font-black uppercase rounded-full tracking-wider border border-green-200 dark:border-green-800">
+                        Subscriber Account • {user.kilosLeft ?? 12} KG Left
                       </span>
                     </>
                   )}

@@ -83,6 +83,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 userData.role = 'admin';
               }
 
+              // Ensure subscriber status consistency
+              if (userData.userType === 'subscriber' || userData.subscriptionPaid) {
+                userData.userType = 'subscriber';
+                userData.subscriptionPaid = true;
+                if (userData.kilosLeft === undefined || userData.kilosLeft === null || isNaN(userData.kilosLeft)) {
+                  userData.kilosLeft = 12;
+                }
+              }
+
               setUser(userData);
             }
           } else {

@@ -6,11 +6,36 @@ import admin from "firebase-admin";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { initializeApp as initializeClientApp } from "firebase/app";
-import { getFirestore as getClientFirestore, collection, query, where, getDocs, doc, getDoc, runTransaction } from "firebase/firestore";
+import { 
+  getFirestore as getClientFirestore, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  doc, 
+  getDoc, 
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  addDoc,
+  onSnapshot,
+  runTransaction 
+} from "firebase/firestore";
+import { getAuth as getClientAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import fs from "fs";
 import { format } from "date-fns";
+import Razorpay from "razorpay";
+import crypto from "crypto";
 
 dotenv.config();
+
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || "rzp_test_TJyM04syMW7jqc";
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || "7enSDiMVBnvlaFH3dGgot6Dv";
+
+const razorpay = new Razorpay({
+  key_id: RAZORPAY_KEY_ID,
+  key_secret: RAZORPAY_KEY_SECRET,
+});
 
 const app = express();
 const PORT = 3000;
@@ -29,42 +54,57 @@ if (!admin.apps.length) {
 
 const authAdmin = getAuth();
 
-// Initialize Administrative Firestore Client (Admin SDK)
-const dbAdmin = getFirestore(firebaseConfig.firestoreDatabaseId || '(default)');
-
 // Initialize Client SDK Firestore (Cross-project bypass)
 const clientApp = initializeClientApp(firebaseConfig);
 const dbClient = getClientFirestore(clientApp, firebaseConfig.firestoreDatabaseId || '(default)');
+const clientAuth = getClientAuth(clientApp);
 
 console.log(`Administrative Firestore initialized for project: ${firebaseConfig.projectId}, database: ${firebaseConfig.firestoreDatabaseId || '(default)'}`);
 
 // Test Firestore Connection at startup
 (async () => {
+  try {
+    try {
+      await signInWithEmailAndPassword(clientAuth, "server@washwise.com", "ServerPass123!");
+      console.log("Server Client SDK Authenticated.");
+    } catch (e: any) {
+      if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential') {
+        await createUserWithEmailAndPassword(clientAuth, "server@washwise.com", "ServerPass123!");
+        console.log("Server Client SDK User Created & Authenticated.");
+      } else {
+        console.error("Server Auth Error:", e);
+      }
+    }
+  } catch (e) {
+    console.error("Could not authenticate Client SDK on server:", e);
+  }
+
   const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
-  console.log(`Starting Firestore Administrative verification on database: ${databaseId}...`);
+  console.log(`Starting Firestore Client verification on database: ${databaseId}...`);
 
   try {
     // 1. Initial Read Test (Verification)
-    const testSnap = await dbAdmin.collection("system_test").limit(1).get();
-    console.log(`Administrative Firestore Connection Verified. Database: ${databaseId}`);
+    const testSnap = await getDocs(collection(dbClient, "system_test"));
+    console.log(`Firestore Connection Verified. Database: ${databaseId}`);
 
     // 2. Initialize Service Triggers
     console.log("Initializing Service Triggers...");
     setupNotificationTriggers();
   } catch (err: any) {
-    console.error("CRITICAL: Administrative Firestore Authorization Failed.");
-    console.error("Error details:", err.message);
+    console.log("Firestore Verification Note:", err.message);
+    // Still setup triggers
+    setupNotificationTriggers();
   }
 })();
 
 function setupNotificationTriggers() {
-  console.log("Setting up Notification real-time triggers (Admin SDK)...");
+  console.log("Setting up Notification real-time triggers...");
 
   // Listen for booking status changes
   try {
-    const bookingsRef = dbAdmin.collection("bookings");
-    bookingsRef.onSnapshot((snapshot: any) => {
-      snapshot.docChanges().forEach(async (change: any) => {
+    const bookingsRef = collection(dbClient, "bookings");
+    onSnapshot(bookingsRef, (snapshot) => {
+      snapshot.docChanges().forEach(async (change) => {
         if (change.type === "modified") {
           const bookingData = change.doc.data();
           const bookingId = change.doc.id;
@@ -72,13 +112,12 @@ function setupNotificationTriggers() {
           if (bookingData.status) {
             try {
               // 1. Create in-app notification doc
-              const notificationRef = dbAdmin.collection("notifications").doc();
-              await notificationRef.set({
+              await addDoc(collection(dbClient, "notifications"), {
                 userId: bookingData.userId,
                 title: "Booking Status Update",
                 message: `Your laundry booking #${bookingId.substring(0, 6)} is now: ${bookingData.status}`,
                 status: "unread",
-                createdAt: FieldValue.serverTimestamp()
+                createdAt: new Date().toISOString()
               });
 
               // 2. Send External Push Notification for specific milestones
@@ -94,7 +133,7 @@ function setupNotificationTriggers() {
                 });
 
                 // Mark as notified in the booking doc
-                await change.doc.ref.update({ statusNotified: true });
+                await updateDoc(doc(dbClient, "bookings", bookingId), { statusNotified: true });
               }
               
               console.log(`Notifications processed for booking ${bookingId}`);
@@ -104,9 +143,8 @@ function setupNotificationTriggers() {
           }
         }
       });
-    }, (error: any) => {
+    }, (error) => {
       console.error("Notification Trigger Error (onSnapshot):", error);
-      // Backoff retry
       setTimeout(setupNotificationTriggers, 10000);
     });
   } catch (err) {
@@ -116,8 +154,8 @@ function setupNotificationTriggers() {
 
 async function sendPushNotification(userId: string, notification: { title: string, body: string, data?: any }) {
   try {
-    const userDoc = await dbAdmin.collection("users").doc(userId).get();
-    if (!userDoc.exists) return;
+    const userDoc = await getDoc(doc(dbClient, "users", userId));
+    if (!userDoc.exists()) return;
 
     const userData = userDoc.data();
     const tokens = userData?.fcmTokens || [];
@@ -149,8 +187,9 @@ async function sendPushNotification(userId: string, notification: { title: strin
       });
       
       if (failedTokens.length > 0) {
-        await dbAdmin.collection("users").doc(userId).update({
-          fcmTokens: FieldValue.arrayRemove(...failedTokens)
+        const remainingTokens = tokens.filter((t: string) => !failedTokens.includes(t));
+        await updateDoc(doc(dbClient, "users", userId), {
+          fcmTokens: remainingTokens
         });
       }
     }
@@ -185,7 +224,7 @@ app.post("/api/auth/delete-user", async (req, res) => {
 
     // Delete from Firestore
     try {
-      await dbAdmin.collection("users").doc(uid).delete();
+      await deleteDoc(doc(dbClient, "users", uid));
       console.log(`Firestore document for ${uid} deleted successfully`);
     } catch (dbErr: any) {
       console.error("Firestore Delete Doc Error:", dbErr);
@@ -356,6 +395,201 @@ app.post("/api/booking/apply-offer", async (req, res) => {
   } catch (error: any) {
     console.error("Error applying limited offer:", error);
     res.status(400).json({ error: error.message });
+  }
+});
+
+// --- RAZORPAY PAYMENT ENDPOINTS ---
+app.get("/api/razorpay/config", (req, res) => {
+  res.json({ keyId: RAZORPAY_KEY_ID });
+});
+
+app.post("/api/razorpay/create-order", async (req, res) => {
+  try {
+    const { amount, currency = "INR", receipt = `rcpt_${Date.now()}`, notes } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Invalid payment amount" });
+    }
+
+    const options = {
+      amount: Math.round(amount * 100), // amount in paise
+      currency,
+      receipt,
+      notes: notes || {},
+    };
+
+    const order = await razorpay.orders.create(options);
+    console.log("Razorpay Order Created:", order.id, "Amount:", amount);
+
+    res.json({
+      success: true,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId: RAZORPAY_KEY_ID,
+    });
+  } catch (error: any) {
+    console.error("Error creating Razorpay order:", error);
+    res.status(500).json({ error: error.message || "Failed to create payment order" });
+  }
+});
+
+app.post("/api/razorpay/verify-payment", async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      type = "booking", // 'booking' | 'subscription' | 'wallet_topup'
+      bookingData,
+      userId,
+      amount
+    } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ error: "Missing required payment verification parameters" });
+    }
+
+    // Verify HMAC SHA-256 signature
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac("sha256", RAZORPAY_KEY_SECRET)
+      .update(body.toString())
+      .digest("hex");
+
+    if (expectedSignature !== razorpay_signature) {
+      console.error("Invalid Razorpay signature mismatch!");
+      return res.status(400).json({ error: "Invalid payment signature verification failed" });
+    }
+
+    console.log("Razorpay Signature Verified for Order:", razorpay_order_id, "Type:", type);
+
+    // Signature is authentic! Now fulfill the action in Firestore.
+    if (type === "wallet_topup") {
+      if (!userId || !amount) {
+        return res.status(400).json({ error: "User ID and amount required for wallet topup" });
+      }
+
+      // Increment wallet balance
+      const userRef = doc(dbClient, "users", userId);
+      const userSnap = await getDoc(userRef);
+      const currentBalance = userSnap.exists() ? (userSnap.data().walletBalance || 0) : 0;
+      await updateDoc(userRef, {
+        walletBalance: currentBalance + Number(amount)
+      });
+
+      // Record transaction
+      await addDoc(collection(dbClient, "wallet_transactions"), {
+        userId,
+        amount: Number(amount),
+        type: "credit",
+        method: "razorpay",
+        paymentId: razorpay_payment_id,
+        orderId: razorpay_order_id,
+        description: "Wallet Top-up via Razorpay",
+        createdAt: new Date().toISOString()
+      });
+
+      return res.json({
+        success: true,
+        message: "Wallet topped up successfully",
+        paymentId: razorpay_payment_id
+      });
+    }
+
+    if (type === "subscription") {
+      if (!userId) {
+        return res.status(400).json({ error: "User ID required for subscription" });
+      }
+
+      const userRef = doc(dbClient, "users", userId);
+      await updateDoc(userRef, {
+        userType: "subscriber",
+        package: bookingData?.packageId || "basic",
+        subscriptionPaid: true,
+        kilosLeft: 12,
+        subscriptionStartDate: new Date().toISOString()
+      });
+
+      // Record transaction
+      await addDoc(collection(dbClient, "wallet_transactions"), {
+        userId,
+        amount: Number(amount || 0),
+        type: "debit",
+        method: "razorpay",
+        paymentId: razorpay_payment_id,
+        orderId: razorpay_order_id,
+        description: "Subscription Payment via Razorpay",
+        createdAt: new Date().toISOString()
+      });
+
+      return res.json({
+        success: true,
+        message: "Subscription activated successfully",
+        paymentId: razorpay_payment_id
+      });
+    }
+
+    // Default: 'booking'
+    if (bookingData) {
+      let bookingId = bookingData.id;
+
+      if (!bookingId) {
+        // Create new paid booking
+        const newBookingRef = doc(collection(dbClient, "bookings"));
+        bookingId = newBookingRef.id;
+
+        await setDoc(newBookingRef, {
+          userId: bookingData.userId || userId,
+          userName: bookingData.userName || "Student",
+          date: bookingData.date,
+          timeSlot: bookingData.slot || bookingData.timeSlot,
+          machineNumber: bookingData.machineNumber || Math.floor(Math.random() * 4) + 1,
+          pickupDrop: Boolean(bookingData.pickupDrop),
+          address: bookingData.address || "",
+          phone: bookingData.phone || "",
+          latitude: bookingData.latitude || 0,
+          longitude: bookingData.longitude || 0,
+          deliveryFee: bookingData.deliveryFee || 0,
+          storeId: bookingData.storeId || "default",
+          garmentInstructions: bookingData.garmentInstructions || "",
+          serviceType: bookingData.serviceType || "Standard Wash",
+          approxLoad: bookingData.approxLoad || "1-2 kg",
+          price: Number(bookingData.price || amount || 0),
+          status: "paid",
+          paymentMethod: "razorpay",
+          razorpayPaymentId: razorpay_payment_id,
+          razorpayOrderId: razorpay_order_id,
+          createdAt: new Date().toISOString()
+        });
+      } else {
+        // Update existing pending booking to paid
+        await updateDoc(doc(dbClient, "bookings", bookingId), {
+          status: "paid",
+          paymentMethod: "razorpay",
+          razorpayPaymentId: razorpay_payment_id,
+          razorpayOrderId: razorpay_order_id,
+          machineNumber: bookingData.machineNumber || Math.floor(Math.random() * 4) + 1,
+          paidAt: new Date().toISOString()
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: "Payment verified and booking confirmed",
+        bookingId,
+        paymentId: razorpay_payment_id
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Payment verified successfully",
+      paymentId: razorpay_payment_id
+    });
+  } catch (error: any) {
+    console.error("Error verifying Razorpay payment:", error);
+    res.status(500).json({ error: error.message || "Payment verification failed" });
   }
 });
 

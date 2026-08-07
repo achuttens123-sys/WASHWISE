@@ -837,7 +837,6 @@ const SuperAdminDashboard: React.FC = () => {
                         data={[
                           { name: 'Wash & Fold', value: bookings.filter(b => b.serviceType === 'Wash & Fold').length },
                           { name: 'Express Wash', value: bookings.filter(b => b.serviceType === 'Express Wash').length },
-                          { name: 'Instant', value: bookings.filter(b => b.serviceType === 'Instant Booking').length },
                           { name: 'Subscription', value: bookings.filter(b => b.serviceType === 'Subscription').length },
                         ]}
                         cx="50%"
@@ -933,12 +932,13 @@ const SuperAdminDashboard: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {Object.entries(globalSettings.pricing).map(([key, value]: [string, any]) => (
+                {Object.entries(globalSettings.pricing)
+                  .filter(([key]) => key !== 'instantBooking')
+                  .map(([key, value]: [string, any]) => (
                   <div key={key} className="space-y-2">
                     <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">
                       {key === 'washFold' ? 'Wash & Fold Rate' :
                        key === 'expressWash' ? 'Express Wash Rate' :
-                       key === 'instantBooking' ? 'Instant Booking Rate' :
                        key === 'minCharge' ? 'Minimum Charge' :
                        key === 'minLoad' ? 'Minimum Load' :
                        key === 'pricePerKg' ? 'Price Per KG' :
@@ -947,10 +947,10 @@ const SuperAdminDashboard: React.FC = () => {
                     </label>
                     <input 
                       type="number"
-                      value={value}
+                      value={Number.isNaN(value) ? '' : value}
                       onChange={(e) => setGlobalSettings({
                         ...globalSettings,
-                        pricing: { ...globalSettings.pricing, [key]: parseFloat(e.target.value) || 0 }
+                        pricing: { ...globalSettings.pricing, [key]: e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0) }
                       })}
                       className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
@@ -1003,10 +1003,10 @@ const SuperAdminDashboard: React.FC = () => {
                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">KG Limit</label>
                       <input 
                         type="number"
-                        value={plan.kgLimit}
+                        value={Number.isNaN(plan.kgLimit) ? '' : plan.kgLimit}
                         onChange={(e) => {
                           const newPlans = [...globalSettings.subscriptionPlans];
-                          newPlans[index].kgLimit = parseFloat(e.target.value);
+                          newPlans[index].kgLimit = e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0);
                           setGlobalSettings({ ...globalSettings, subscriptionPlans: newPlans });
                         }}
                         className="w-full bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
@@ -1016,10 +1016,10 @@ const SuperAdminDashboard: React.FC = () => {
                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Price (₹)</label>
                       <input 
                         type="number"
-                        value={plan.price}
+                        value={Number.isNaN(plan.price) ? '' : plan.price}
                         onChange={(e) => {
                           const newPlans = [...globalSettings.subscriptionPlans];
-                          newPlans[index].price = parseFloat(e.target.value);
+                          newPlans[index].price = e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0);
                           setGlobalSettings({ ...globalSettings, subscriptionPlans: newPlans });
                         }}
                         className="w-full bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
@@ -1029,10 +1029,10 @@ const SuperAdminDashboard: React.FC = () => {
                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Discount (%)</label>
                       <input 
                         type="number"
-                        value={plan.discount}
+                        value={Number.isNaN(plan.discount) ? '' : plan.discount}
                         onChange={(e) => {
                           const newPlans = [...globalSettings.subscriptionPlans];
-                          newPlans[index].discount = parseFloat(e.target.value);
+                          newPlans[index].discount = e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0);
                           setGlobalSettings({ ...globalSettings, subscriptionPlans: newPlans });
                         }}
                         className="w-full bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
@@ -1063,12 +1063,12 @@ const SuperAdminDashboard: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Global Discounts</h3>
-                    <p className="text-sm text-gray-500 font-medium">Manage automatic discounts applied to orders.</p>
+                    <p className="text-sm text-gray-500 font-medium">Manage automatic discounts applied to orders or subscriptions.</p>
                   </div>
                 </div>
                 <button 
                   onClick={() => {
-                    const newDiscount = { id: Date.now().toString(), name: 'New Discount', type: 'percentage', value: 0, active: true };
+                    const newDiscount = { id: Date.now().toString(), name: 'New Discount', type: 'percentage', value: 0, applicableFor: 'all', active: true };
                     setGlobalSettings({ ...globalSettings, discounts: [...globalSettings.discounts, newDiscount] });
                   }}
                   className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-indigo-100 transition-all flex items-center gap-2"
@@ -1081,7 +1081,7 @@ const SuperAdminDashboard: React.FC = () => {
               <div className="space-y-4">
                 {globalSettings.discounts.map((discount: any, index: number) => (
                   <div key={discount.id} className="flex flex-col md:flex-row items-center gap-4 p-6 bg-gray-50 dark:bg-gray-800/50 rounded-[2rem] border border-gray-100 dark:border-gray-800">
-                    <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 w-full">
                       <input 
                         type="text"
                         value={discount.name}
@@ -1107,15 +1107,28 @@ const SuperAdminDashboard: React.FC = () => {
                       </select>
                       <input 
                         type="number"
-                        value={discount.value}
+                        value={Number.isNaN(discount.value) ? '' : discount.value}
                         onChange={(e) => {
                           const newDiscounts = [...globalSettings.discounts];
-                          newDiscounts[index].value = parseFloat(e.target.value);
+                          newDiscounts[index].value = e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0);
                           setGlobalSettings({ ...globalSettings, discounts: newDiscounts });
                         }}
                         placeholder="Value"
                         className="bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
                       />
+                      <select 
+                        value={discount.applicableFor || 'all'}
+                        onChange={(e) => {
+                          const newDiscounts = [...globalSettings.discounts];
+                          newDiscounts[index].applicableFor = e.target.value;
+                          setGlobalSettings({ ...globalSettings, discounts: newDiscounts });
+                        }}
+                        className="bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-xs font-black outline-none text-indigo-600 dark:text-indigo-400"
+                      >
+                        <option value="all">Apply To: All (Wash & Subscription)</option>
+                        <option value="wash">Apply To: Wash Orders Only</option>
+                        <option value="subscription">Apply To: Subscriptions Only</option>
+                      </select>
                     </div>
                     <div className="flex items-center gap-2">
                       <button 
@@ -1157,7 +1170,7 @@ const SuperAdminDashboard: React.FC = () => {
                 </div>
                 <button 
                   onClick={() => {
-                    const newPromo = { id: Date.now().toString(), code: 'NEWPROMO', description: '', discountType: 'percentage', discountValue: 0, expiryDate: '', active: true };
+                    const newPromo = { id: Date.now().toString(), code: 'NEWPROMO', description: '', discountType: 'percentage', discountValue: 0, expiryDate: '', applicableFor: 'all', active: true };
                     setGlobalSettings({ ...globalSettings, promos: [...globalSettings.promos, newPromo] });
                   }}
                   className="px-4 py-2 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-purple-100 transition-all flex items-center gap-2"
@@ -1170,7 +1183,7 @@ const SuperAdminDashboard: React.FC = () => {
               <div className="space-y-4">
                 {globalSettings.promos.map((promo: any, index: number) => (
                   <div key={promo.id} className="flex flex-col gap-4 p-6 bg-gray-50 dark:bg-gray-800/50 rounded-[2rem] border border-gray-100 dark:border-gray-800">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 w-full">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 w-full">
                       <input 
                         type="text"
                         value={promo.code}
@@ -1196,15 +1209,28 @@ const SuperAdminDashboard: React.FC = () => {
                       </select>
                       <input 
                         type="number"
-                        value={promo.discountValue}
+                        value={Number.isNaN(promo.discountValue) ? '' : promo.discountValue}
                         onChange={(e) => {
                           const newPromos = [...globalSettings.promos];
-                          newPromos[index].discountValue = parseFloat(e.target.value);
+                          newPromos[index].discountValue = e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0);
                           setGlobalSettings({ ...globalSettings, promos: newPromos });
                         }}
                         placeholder="Value"
                         className="bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
                       />
+                      <select 
+                        value={promo.applicableFor || 'all'}
+                        onChange={(e) => {
+                          const newPromos = [...globalSettings.promos];
+                          newPromos[index].applicableFor = e.target.value;
+                          setGlobalSettings({ ...globalSettings, promos: newPromos });
+                        }}
+                        className="bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-xs font-black outline-none text-purple-600 dark:text-purple-400"
+                      >
+                        <option value="all">Apply To: All (Wash & Subscription)</option>
+                        <option value="wash">Apply To: Wash Orders Only</option>
+                        <option value="subscription">Apply To: Subscriptions Only</option>
+                      </select>
                       <input 
                         type="date"
                         value={promo.expiryDate}
@@ -2047,8 +2073,8 @@ const SuperAdminDashboard: React.FC = () => {
                     <input 
                       type="number"
                       step="any"
-                      value={storeFormData.latitude}
-                      onChange={(e) => setStoreFormData({ ...storeFormData, latitude: parseFloat(e.target.value) })}
+                      value={Number.isNaN(storeFormData.latitude) ? '' : storeFormData.latitude}
+                      onChange={(e) => setStoreFormData({ ...storeFormData, latitude: e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0) })}
                       className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
                   </div>
@@ -2057,8 +2083,8 @@ const SuperAdminDashboard: React.FC = () => {
                     <input 
                       type="number"
                       step="any"
-                      value={storeFormData.longitude}
-                      onChange={(e) => setStoreFormData({ ...storeFormData, longitude: parseFloat(e.target.value) })}
+                      value={Number.isNaN(storeFormData.longitude) ? '' : storeFormData.longitude}
+                      onChange={(e) => setStoreFormData({ ...storeFormData, longitude: e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0) })}
                       className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                     />
                   </div>
@@ -2166,8 +2192,8 @@ const SuperAdminDashboard: React.FC = () => {
                       <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Number</label>
                       <input 
                         type="number"
-                        value={machineFormData.number}
-                        onChange={(e) => setMachineFormData({ ...machineFormData, number: parseInt(e.target.value) })}
+                        value={Number.isNaN(machineFormData.number) ? '' : machineFormData.number}
+                        onChange={(e) => setMachineFormData({ ...machineFormData, number: e.target.value === '' ? 1 : (parseInt(e.target.value) || 1) })}
                         className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none"
                       />
                     </div>

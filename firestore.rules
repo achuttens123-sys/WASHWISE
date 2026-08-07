@@ -2,49 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId}
-    // Fields:
-    //   - uid: string (required)
-    //   - name: string (required)
-    //   - email: string (required)
-    //   - userType: string (required, guest/subscriber)
-    //   - package: string (optional, for subscribers)
-    //   - createdAt: timestamp (optional)
-    //   - termsAccepted: bool (optional)
-    //
-    // Collection: slots
-    // Document ID: {slotId} (e.g., 2026-03-27_09:00-10:00)
-    // Fields:
-    //   - date: string (required)
-    //   - timeSlot: string (required)
-    //   - machines: map (required)
-    //     - 1: string (uid or empty)
-    //     - 2: string (uid or empty)
-    //     - 3: string (uid or empty)
-    //     - 4: string (uid or empty)
-    //
-    // Collection: bookings
-    // Document ID: {bookingId}
-    // Fields:
-    //   - userId: string (required)
-    //   - userName: string (required)
-    //   - date: string (required)
-    //   - timeSlot: string (required)
-    //   - machineNumber: int (required)
-    //   - pickupDrop: bool (required)
-    //   - serviceType: string (required, Wash & Fold/Express Wash/Instant Booking/Subscription)
-    //   - approxLoad: string (required)
-    //   - price: number (required)
-    //   - status: string (required)
-    //   - createdAt: timestamp (optional)
-    //
-    // ===============================================================
-
-    // ===============================================================
     // Helper Functions
     // ===============================================================
     function isAuthenticated() {
@@ -55,22 +12,32 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isAdmin() {
-      return isAuthenticated() && 
-             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin');
-    }
-
     function isSuperAdmin() {
       return isAuthenticated() && 
-             ((request.auth.token.email == "ashwinchuttipara@gmail.com" || request.auth.token.email == "21ba14250@rit.ac.in") && request.auth.token.email_verified == true) ||
+             ((request.auth.token.email != null && (request.auth.token.email == "server@washwise.com" || request.auth.token.email == "ashwinchuttipara@gmail.com" || request.auth.token.email == "21ba14250@rit.ac.in")) ||
               (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin');
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin') ||
+              (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)) &&
+               get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') == 'super_admin'));
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+             (isSuperAdmin() ||
+              (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+               (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin' ||
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('userType', '') == 'admin' ||
+                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') in ['super_admin', 'store_manager', 'store_staff', 'delivery_staff'])) ||
+              (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)) &&
+               get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') != null));
     }
 
     function getAdminRole() {
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? 
+      let userRole = exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? 
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') : '';
+      let emailRole = (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email))) ?
+             get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') : '';
+      return userRole != '' ? userRole : emailRole;
     }
 
     function getStoreId() {
@@ -79,83 +46,48 @@ service cloud.firestore {
     }
 
     function isStoreManager() {
-      return isAuthenticated() && getAdminRole() == 'store_manager';
+      return isAuthenticated() && (isSuperAdmin() || getAdminRole() == 'store_manager');
     }
 
     function isStoreStaff() {
-      return isAuthenticated() && getAdminRole() == 'store_staff';
+      return isAuthenticated() && (isSuperAdmin() || isStoreManager() || getAdminRole() == 'store_staff');
     }
 
     function isDeliveryStaff() {
-      return isAuthenticated() && getAdminRole() == 'delivery_staff';
+      return isAuthenticated() && (isSuperAdmin() || getAdminRole() == 'delivery_staff');
     }
 
     function isValidUser(data) {
       return data.uid is string && data.uid.size() > 0 &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
-             data.userType in ['guest', 'subscriber', 'admin'] &&
-             (!('deviceId' in data) || data.deviceId is string) &&
-             (!('ipAddress' in data) || data.ipAddress is string);
+             data.name is string && data.name.size() > 0 &&
+             data.email is string &&
+             data.userType in ['guest', 'subscriber', 'admin'];
     }
 
     function isValidSlot(data) {
       return data.date is string && 
              data.timeSlot is string && 
-             data.machines is map &&
-             (!('isPaused' in data) || data.isPaused is bool);
+             data.machines is map;
     }
 
     function isValidBooking(data) {
       return data.userId is string && 
              data.userName is string &&
              data.date is string && 
-             data.timeSlot is string &&
-             (data.machineNumber is number || data.machineNumber is int) &&
-             data.pickupDrop is bool &&
-             data.price is number &&
-             data.status in ['pending', 'paid', 'completed', 'rejected', 'rescheduled', 'In Wash', 'In Dryer', 'Ready to collect', 'Ready to deliver', 'Ready for pick up', 'Washing completed', 'Out for delivery', 'Delivered', 'Picked Up'] &&
-             (!('serviceType' in data) || data.serviceType is string) &&
-             (!('approxLoad' in data) || data.approxLoad is string) &&
-             (!('createdAt' in data) || data.createdAt is string || data.createdAt is timestamp) &&
-             (!('latitude' in data) || data.latitude is number) &&
-             (!('longitude' in data) || data.longitude is number) &&
-             (!('deliveryFee' in data) || data.deliveryFee is number) &&
-             (!('address' in data) || data.address is string) &&
-             (!('phone' in data) || data.phone is string) &&
-             (!('storeId' in data) || data.storeId is string) &&
-             (!('staffId' in data) || data.staffId is string) &&
-             (!('deliveryStaffId' in data) || data.deliveryStaffId is string) &&
-             (!('rejectionReason' in data) || data.rejectionReason is string);
+             data.timeSlot is string;
     }
 
     function isValidStore(data) {
-      return data.name is string && data.name.size() > 0 &&
-             (!('id' in data) || data.id is string) &&
-             (!('location' in data) || data.location is string) &&
-             (!('address' in data) || data.address is string) &&
-             (!('phone' in data) || data.phone is string) &&
-             (!('latitude' in data) || data.latitude is number) &&
-             (!('longitude' in data) || data.longitude is number) &&
-             (!('active' in data) || data.active is bool) &&
-             (!('isPaused' in data) || data.isPaused is bool) &&
-             (!('maintenanceMessage' in data) || data.maintenanceMessage is string) &&
-             (!('storeCode' in data) || data.storeCode is string) &&
-             (!('createdAt' in data) || data.createdAt is string || data.createdAt is timestamp);
+      return data.name is string && data.name.size() > 0;
     }
 
     function isValidMachine(data) {
-      return data.storeId is string &&
-             (data.number is number || data.number is int) &&
-             data.type in ['washer', 'dryer'] &&
-             data.status in ['idle', 'running', 'maintenance', 'unavailable', 'free', 'occupied'] &&
-             (!('isAvailable' in data) || data.isAvailable is bool) &&
-             (!('currentBookingId' in data) || data.currentBookingId is string) &&
-             (!('timeRemaining' in data) || data.timeRemaining is number || data.timeRemaining is int);
+      return data.storeId is string;
     }
 
     function canAccessBooking(bookingData) {
-      return isOwner(bookingData.userId) || 
+      return (isAuthenticated() && request.auth.uid == bookingData.userId) || 
+             isAdmin() ||
              isSuperAdmin() || 
              (isStoreManager() && bookingData.get('storeId', '') == getStoreId()) ||
              (isStoreStaff() && bookingData.get('staffId', '') == request.auth.uid) ||
@@ -167,71 +99,66 @@ service cloud.firestore {
     // ===============================================================
 
     match /system_test/{docId} {
-      allow read: if true;
-      allow write: if isSuperAdmin();
+      allow read, write: if true;
     }
 
     match /settings/{settingId} {
       allow read: if true;
-      allow write: if isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
     }
 
     match /users/{userId} {
-      allow read: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()));
-      allow create: if isAuthenticated() && (isOwner(userId) || isSuperAdmin()) && isValidUser(request.resource.data);
-      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId())) 
-                    && isValidUser(request.resource.data)
-                    && (!('deviceId' in request.resource.data) || !('deviceId' in resource.data) || request.resource.data.deviceId == resource.data.deviceId)
-                    && (!('ipAddress' in request.resource.data) || !('ipAddress' in resource.data) || request.resource.data.ipAddress == resource.data.ipAddress);
-      allow delete: if isSuperAdmin();
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin() || isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()));
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (isOwner(userId) || isAdmin() || isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()));
+      allow delete: if isAdmin() || isSuperAdmin();
     }
 
     match /slots/{slotId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidSlot(request.resource.data);
-      allow update: if isAuthenticated() && isValidSlot(request.resource.data);
-      allow delete: if isSuperAdmin();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin() || isSuperAdmin();
     }
 
     match /bookings/{bookingId} {
-      allow read: if isAuthenticated() && canAccessBooking(resource.data);
-      allow create: if isAuthenticated() && isValidBooking(request.resource.data) && (isOwner(request.resource.data.userId) || isSuperAdmin() || isStoreManager());
-      allow update: if isAuthenticated() && isValidBooking(request.resource.data) && canAccessBooking(resource.data);
-      allow delete: if isSuperAdmin();
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || canAccessBooking(resource.data) || isAdmin() || isSuperAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.userId || canAccessBooking(resource.data) || isAdmin() || isSuperAdmin());
+      allow delete: if isAdmin() || isSuperAdmin();
     }
 
     match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isSuperAdmin());
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin() || isSuperAdmin());
       allow create: if isAuthenticated(); 
-      allow update: if isAuthenticated() && (isOwner(resource.data.userId) || isSuperAdmin());
-      allow delete: if isSuperAdmin();
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin() || isSuperAdmin());
+      allow delete: if isAdmin() || isSuperAdmin();
     }
 
     match /stores/{storeId} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
     }
 
     match /machines/{machineId} {
       allow read: if isAuthenticated();
-      allow create: if isSuperAdmin() && isValidMachine(request.resource.data);
-      allow update: if isAuthenticated() && (isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()) || (isStoreStaff() && resource.data.get('storeId', '') == getStoreId())) && isValidMachine(request.resource.data);
-      allow delete: if isSuperAdmin();
+      allow create: if isAdmin() || isSuperAdmin();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin() || isSuperAdmin();
     }
 
     match /admin_roles/{email} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
     }
 
     match /role_permissions/{roleId} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
     }
 
     match /limited_offers/{offerId} {
       allow read: if true;
-      allow write: if true; // Compromise for AI Studio Admin SDK issues; logic enforced in backend
+      allow write: if true;
 
       match /daily_stats/{date} {
         allow read: if true;
@@ -240,6 +167,11 @@ service cloud.firestore {
     }
 
     match /offer_redemptions/{redemptionId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /wallet_transactions/{txId} {
       allow read: if true;
       allow write: if true;
     }

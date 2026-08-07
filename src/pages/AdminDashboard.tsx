@@ -98,7 +98,7 @@ const AdminDashboard: React.FC = () => {
     startTime: '09:00',
     endTime: '21:00',
     dailyReset: true,
-    applicableServices: ['Wash & Fold', 'Express Wash', 'Instant Booking'],
+    applicableServices: ['Wash & Fold', 'Express Wash'],
     minOrderValue: 0,
     isActive: true,
     newUsersOnly: false,
@@ -748,7 +748,7 @@ const AdminDashboard: React.FC = () => {
                   startTime: '00:00',
                   endTime: '23:59',
                   dailyReset: true,
-                  applicableServices: ['Wash & Fold', 'Express Wash', 'Instant Booking'],
+                  applicableServices: ['Wash & Fold', 'Express Wash'],
                   minOrderValue: 0,
                   isActive: true,
                   newUsersOnly: false,
@@ -869,8 +869,8 @@ const AdminDashboard: React.FC = () => {
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Value</label>
                     <input
                       type="number"
-                      value={offerFormData.discountValue}
-                      onChange={(e) => setOfferFormData({ ...offerFormData, discountValue: parseFloat(e.target.value) })}
+                      value={Number.isNaN(offerFormData.discountValue) ? '' : offerFormData.discountValue}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, discountValue: e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0) })}
                       className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
                     />
                   </div>
@@ -880,8 +880,8 @@ const AdminDashboard: React.FC = () => {
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Max Users</label>
                     <input
                       type="number"
-                      value={offerFormData.maxUsers}
-                      onChange={(e) => setOfferFormData({ ...offerFormData, maxUsers: parseInt(e.target.value) })}
+                      value={Number.isNaN(offerFormData.maxUsers) ? '' : offerFormData.maxUsers}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, maxUsers: e.target.value === '' ? 0 : (parseInt(e.target.value) || 0) })}
                       className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
                     />
                   </div>
@@ -889,8 +889,8 @@ const AdminDashboard: React.FC = () => {
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Per User Limit</label>
                     <input
                       type="number"
-                      value={offerFormData.perUserLimit}
-                      onChange={(e) => setOfferFormData({ ...offerFormData, perUserLimit: parseInt(e.target.value) })}
+                      value={Number.isNaN(offerFormData.perUserLimit) ? '' : offerFormData.perUserLimit}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, perUserLimit: e.target.value === '' ? 0 : (parseInt(e.target.value) || 0) })}
                       className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
                     />
                   </div>
@@ -954,15 +954,15 @@ const AdminDashboard: React.FC = () => {
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Min Order Value (₹)</label>
                     <input
                       type="number"
-                      value={offerFormData.minOrderValue}
-                      onChange={(e) => setOfferFormData({ ...offerFormData, minOrderValue: parseFloat(e.target.value) })}
+                      value={Number.isNaN(offerFormData.minOrderValue) ? '' : offerFormData.minOrderValue}
+                      onChange={(e) => setOfferFormData({ ...offerFormData, minOrderValue: e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0) })}
                       className="w-full p-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl outline-none"
                     />
                   </div>
                   <div className="flex flex-col">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Applicable Services</label>
                     <div className="flex flex-wrap gap-2">
-                      {['Wash & Fold', 'Express Wash', 'Instant Booking'].map(service => (
+                      {['Wash & Fold', 'Express Wash'].map(service => (
                         <button
                           key={service}
                           type="button"
@@ -1900,8 +1900,8 @@ const AdminDashboard: React.FC = () => {
                   <input
                     type="number"
                     step="any"
-                    value={storeFormData.latitude}
-                    onChange={(e) => setStoreFormData({ ...storeFormData, latitude: parseFloat(e.target.value) })}
+                    value={Number.isNaN(storeFormData.latitude) ? '' : storeFormData.latitude}
+                    onChange={(e) => setStoreFormData({ ...storeFormData, latitude: e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0) })}
                     className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-100"
                   />
                 </div>
@@ -1910,8 +1910,8 @@ const AdminDashboard: React.FC = () => {
                   <input
                     type="number"
                     step="any"
-                    value={storeFormData.longitude}
-                    onChange={(e) => setStoreFormData({ ...storeFormData, longitude: parseFloat(e.target.value) })}
+                    value={Number.isNaN(storeFormData.longitude) ? '' : storeFormData.longitude}
+                    onChange={(e) => setStoreFormData({ ...storeFormData, longitude: e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0) })}
                     className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-100"
                   />
                 </div>

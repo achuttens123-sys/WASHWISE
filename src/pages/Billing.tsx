@@ -9,15 +9,16 @@ import { useSettings } from '../context/SettingsContext';
 import { Booking, Slot } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendNotification } from '../services/NotificationService';
+import { initiateRazorpayPayment } from '../services/RazorpayService';
 
 const Billing: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { settings } = useSettings();
   
   const [loading, setLoading] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'upi'>('wallet');
+  const [paymentMethod, setPaymentMethod] = useState<'razorpay' | 'wallet' | 'upi'>('razorpay');
   const [upiStep, setUpiStep] = useState<'id' | 'qr' | 'verify'>('id');
   const [upiId, setUpiId] = useState('');
   const [error, setError] = useState('');
@@ -90,10 +91,18 @@ const Billing: React.FC = () => {
           // If it was a subscription, update the user status
           if (data.serviceType === 'Subscription') {
             try {
-              await updateDoc(doc(db, 'users', user!.uid), {
+              const kgLimit = selectedPackage?.kgLimit ?? 12;
+              const subData = {
+                userType: 'subscriber' as const,
+                package: data.packageId || packageId || 'basic',
                 subscriptionPaid: true,
+                kilosLeft: kgLimit,
                 subscriptionStartDate: new Date().toISOString()
-              });
+              };
+              await updateDoc(doc(db, 'users', user!.uid), subData);
+              if (updateUser) {
+                await updateUser(subData);
+              }
             } catch (err) {
               console.error('Error updating subscription status:', err);
             }
@@ -124,16 +133,22 @@ const Billing: React.FC = () => {
       let totalAutoDiscount = 0;
       settings.discounts.forEach(d => {
         if (d.active) {
-          if (d.type === 'percentage') {
-            totalAutoDiscount += (bookingInfo.price * (d.value / 100));
-          } else {
-            totalAutoDiscount += d.value;
+          const target = d.applicableFor || 'all';
+          const isMatch = target === 'all' || 
+                          (isSubscription && target === 'subscription') || 
+                          (!isSubscription && target === 'wash');
+          if (isMatch) {
+            if (d.type === 'percentage') {
+              totalAutoDiscount += (bookingInfo.price * (d.value / 100));
+            } else {
+              totalAutoDiscount += d.value;
+            }
           }
         }
       });
       setAutoDiscount(totalAutoDiscount);
     }
-  }, [settings?.discounts, bookingInfo.price]);
+  }, [settings?.discounts, bookingInfo.price, isSubscription]);
 
   // Fetch Active Limited Offers
   useEffect(() => {
@@ -211,6 +226,20 @@ const Billing: React.FC = () => {
     const foundPromo = settings.promos.find(p => p.code.toUpperCase() === code && p.active);
 
     if (foundPromo) {
+      const target = foundPromo.applicableFor || 'all';
+      if (target === 'subscription' && !isSubscription) {
+        setPromoError('This promo code is valid for subscription orders only');
+        setDiscount(0);
+        setPromoApplied(false);
+        return;
+      }
+      if (target === 'wash' && isSubscription) {
+        setPromoError('This promo code is valid for wash orders only');
+        setDiscount(0);
+        setPromoApplied(false);
+        return;
+      }
+
       // Check expiry if exists
       if (foundPromo.expiryDate) {
         const expiry = new Date(foundPromo.expiryDate);
@@ -238,6 +267,86 @@ const Billing: React.FC = () => {
   const handlePayment = async () => {
     if (!user) return;
     
+    if (paymentMethod === 'razorpay') {
+      setLoading(true);
+      setError('');
+      try {
+        await initiateRazorpayPayment({
+          amount: finalPrice,
+          description: isSubscription 
+            ? `Subscription: ${selectedPackage?.name || 'WashWise Plan'}`
+            : `Washwise Booking: ${bookingInfo.date} (${bookingInfo.slot})`,
+          type: isSubscription ? 'subscription' : 'booking',
+          userId: user.uid,
+          userName: user.name,
+          userEmail: user.email,
+          userPhone: bookingInfo.phone || user.phone || '',
+          bookingData: {
+            userId: user.uid,
+            userName: user.name,
+            date: isSubscription ? new Date().toISOString().split('T')[0] : bookingInfo.date,
+            timeSlot: isSubscription ? 'Subscription' : bookingInfo.slot,
+            slot: bookingInfo.slot,
+            pickupDrop: bookingInfo.pickupDrop,
+            address: bookingInfo.address,
+            phone: bookingInfo.phone,
+            latitude: bookingInfo.latitude,
+            longitude: bookingInfo.longitude,
+            deliveryFee: bookingInfo.deliveryFee,
+            storeId: bookingInfo.storeId,
+            garmentInstructions: bookingInfo.garmentInstructions,
+            serviceType: isSubscription ? 'Subscription' : bookingInfo.serviceType,
+            approxLoad: isSubscription ? '1-2 kg' : bookingInfo.approxLoad,
+            price: finalPrice
+          },
+          onSuccess: async (data: any) => {
+            if (isSubscription) {
+              try {
+                const kgLimit = selectedPackage?.kgLimit ?? 12;
+                const subData = {
+                  userType: 'subscriber' as const,
+                  package: packageId || 'basic',
+                  subscriptionPaid: true,
+                  kilosLeft: kgLimit,
+                  subscriptionStartDate: new Date().toISOString()
+                };
+                await updateDoc(doc(db, 'users', user.uid), subData);
+                if (updateUser) {
+                  await updateUser(subData);
+                }
+              } catch (e) {
+                console.error('Error updating Razorpay subscription status:', e);
+              }
+            }
+            setLoading(false);
+            if (data.bookingId) {
+              localStorage.setItem('lastBookingId', data.bookingId);
+            }
+            sendNotification(user.uid, user.email, bookingInfo.phone, 'booking_confirmed', data.bookingId || 'SUB', {
+              newSlot: isSubscription ? 'Subscription' : `${bookingInfo.date} at ${bookingInfo.slot}`
+            });
+
+            if (isSubscription) {
+              navigate('/dashboard');
+            } else {
+              navigate('/confirmation');
+            }
+          },
+          onError: (errMsg: string) => {
+            setLoading(false);
+            setError(errMsg);
+          },
+          onDismiss: () => {
+            setLoading(false);
+          }
+        });
+      } catch (err: any) {
+        setLoading(false);
+        setError(err.message || 'Razorpay payment failed');
+      }
+      return;
+    }
+
     if (isSubscription && paymentMethod === 'wallet') {
       if ((user.walletBalance || 0) < finalPrice) {
         setError('Insufficient wallet balance.');
@@ -245,12 +354,19 @@ const Billing: React.FC = () => {
       }
       setLoading(true);
       try {
-        // For wallet subscription, we just update the user's status (instant)
-        await updateDoc(doc(db, 'users', user.uid), {
+        const kgLimit = selectedPackage?.kgLimit ?? 12;
+        const subData = {
+          userType: 'subscriber' as const,
+          package: packageId || 'basic',
           subscriptionPaid: true,
+          kilosLeft: kgLimit,
           subscriptionStartDate: new Date().toISOString(),
           walletBalance: (user.walletBalance || 0) - finalPrice
-        });
+        };
+        await updateDoc(doc(db, 'users', user.uid), subData);
+        if (updateUser) {
+          await updateUser(subData);
+        }
         navigate('/dashboard');
       } catch (err: any) {
         setError(err.message || 'Payment failed. Please try again.');
@@ -424,8 +540,142 @@ const Billing: React.FC = () => {
         status: 'paid',
         machineNumber: Math.floor(Math.random() * 4) + 1 // Simulate machine assignment
       });
+
+      if (isSubscription && user) {
+        const kgLimit = selectedPackage?.kgLimit ?? 12;
+        const subData = {
+          userType: 'subscriber' as const,
+          package: packageId || 'basic',
+          subscriptionPaid: true,
+          kilosLeft: kgLimit,
+          subscriptionStartDate: new Date().toISOString()
+        };
+        await updateDoc(doc(db, 'users', user.uid), subData);
+        if (updateUser) {
+          await updateUser(subData);
+        }
+      }
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isSubscriberBooking = (user?.userType === 'subscriber' || !!user?.subscriptionPaid) && !isSubscription;
+
+  const getLoadKg = (approxLoad: string): number => {
+    if (approxLoad === '5 kg') return 5;
+    if (approxLoad === '6 kg') return 6;
+    if (approxLoad === '7+ kg') return 7;
+    return 4;
+  };
+
+  const subscriberLoadKg = getLoadKg(bookingInfo.approxLoad);
+  const subscriberCurrentKilosLeft = user?.kilosLeft !== undefined && user?.kilosLeft !== null && !isNaN(user.kilosLeft)
+    ? user.kilosLeft
+    : 12;
+  const subscriberRemainingKilos = Math.max(0, subscriberCurrentKilosLeft - subscriberLoadKg);
+
+  const handleSubscriberBook = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      const newKilosLeft = subscriberRemainingKilos;
+
+      await updateDoc(doc(db, 'users', user.uid), {
+        kilosLeft: newKilosLeft
+      });
+      if (updateUser) {
+        await updateUser({ kilosLeft: newKilosLeft });
+      }
+
+      const slotId = `${bookingInfo.date}_${bookingInfo.slot}`;
+      const slotRef = doc(db, 'slots', slotId);
+
+      let assignedMachine = 1;
+      try {
+        await runTransaction(db, async (transaction) => {
+          const slotDoc = await transaction.get(slotRef);
+          let slotData: Slot = slotDoc.exists() 
+            ? slotDoc.data() as Slot 
+            : { date: bookingInfo.date, timeSlot: bookingInfo.slot, machines: { '1': '', '2': '', '3': '', '4': '' } };
+
+          for (let i = 1; i <= 4; i++) {
+            if (!slotData.machines[i.toString()]) {
+              assignedMachine = i;
+              break;
+            }
+          }
+          const updatedMachines = { ...slotData.machines, [assignedMachine.toString()]: user.uid };
+          if (!slotDoc.exists()) {
+            transaction.set(slotRef, { ...slotData, machines: updatedMachines });
+          } else {
+            transaction.update(slotRef, { machines: updatedMachines });
+          }
+
+          const bookingRef = doc(collection(db, 'bookings'));
+          const booking: Booking = {
+            userId: user.uid,
+            userName: user.name,
+            date: bookingInfo.date,
+            timeSlot: bookingInfo.slot,
+            machineNumber: assignedMachine,
+            pickupDrop: bookingInfo.pickupDrop,
+            address: bookingInfo.address,
+            phone: bookingInfo.phone,
+            latitude: bookingInfo.latitude,
+            longitude: bookingInfo.longitude,
+            deliveryFee: 0,
+            storeId: bookingInfo.storeId,
+            garmentInstructions: bookingInfo.garmentInstructions,
+            serviceType: bookingInfo.serviceType as any,
+            approxLoad: bookingInfo.approxLoad as any,
+            price: 0,
+            status: 'paid',
+            createdAt: new Date().toISOString()
+          };
+
+          transaction.set(bookingRef, booking);
+          localStorage.setItem('lastBookingId', bookingRef.id);
+          
+          sendNotification(user.uid, user.email, bookingInfo.phone, 'booking_confirmed', bookingRef.id, {
+            newSlot: `${bookingInfo.date} at ${bookingInfo.slot}`
+          });
+        });
+      } catch (e: any) {
+        console.error('Transaction error, creating direct booking:', e);
+        const bookingRef = doc(collection(db, 'bookings'));
+        const booking: Booking = {
+          userId: user.uid,
+          userName: user.name,
+          date: bookingInfo.date,
+          timeSlot: bookingInfo.slot,
+          machineNumber: 1,
+          pickupDrop: bookingInfo.pickupDrop,
+          address: bookingInfo.address,
+          phone: bookingInfo.phone,
+          latitude: bookingInfo.latitude,
+          longitude: bookingInfo.longitude,
+          deliveryFee: 0,
+          storeId: bookingInfo.storeId,
+          garmentInstructions: bookingInfo.garmentInstructions,
+          serviceType: bookingInfo.serviceType as any,
+          approxLoad: bookingInfo.approxLoad as any,
+          price: 0,
+          status: 'paid',
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(bookingRef, booking);
+        localStorage.setItem('lastBookingId', bookingRef.id);
+      }
+
+      navigate('/confirmation');
+    } catch (err: any) {
+      console.error('Error completing subscriber booking:', err);
+      setError(err.message || 'Failed to complete booking. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -494,20 +744,114 @@ const Billing: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8">
           <div className="md:col-span-8 space-y-4 sm:space-y-6">
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
-            >
+            {isSubscriberBooking ? (
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border-2 border-green-500/30 dark:border-green-500/20"
+              >
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-green-500/10 text-green-600 dark:text-green-400 rounded-2xl">
+                      <Zap className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 uppercase tracking-tight">Subscriber Account</h2>
+                      <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase tracking-wider">Active Subscription Coverage</p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 bg-green-500/10 text-green-600 dark:text-green-400 text-[10px] font-black uppercase rounded-full tracking-widest border border-green-500/20">
+                    {user?.package ? `${user.package.toUpperCase()} PLAN` : 'BASIC PLAN'}
+                  </span>
+                </div>
+
+                <div className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/20 rounded-2xl border border-green-100 dark:border-green-900/40 space-y-4 mb-8">
+                  <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300">
+                    <span>Current Kilos Balance:</span>
+                    <span className="text-xl font-black text-gray-900 dark:text-white">{subscriberCurrentKilosLeft} KG</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300">
+                    <span>Laundry Weight Selected:</span>
+                    <span className="text-xl font-black text-blue-600 dark:text-blue-400">{subscriberLoadKg} KG ({bookingInfo.approxLoad})</span>
+                  </div>
+                  <div className="pt-3 border-t border-green-200 dark:border-green-900/50 flex justify-between items-center">
+                    <span className="text-xs font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">Kilos Left After Booking:</span>
+                    <span className={`text-2xl font-black ${subscriberRemainingKilos >= 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600'}`}>
+                      {subscriberRemainingKilos} KG
+                    </span>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold uppercase tracking-wide">
+                    {error}
+                  </div>
+                )}
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleSubscriberBook}
+                  disabled={loading}
+                  className="w-full py-5 bg-green-600 hover:bg-green-700 text-white font-black text-sm uppercase tracking-widest rounded-2xl shadow-xl shadow-green-600/20 transition-all flex items-center justify-center gap-3 haptic-feedback glow-green"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                      <span>Confirming Booking...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-6 h-6" />
+                      <span>Confirm and Book</span>
+                    </>
+                  )}
+                </motion.button>
+              </motion.div>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
+              >
               <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-6 flex items-center">
                 <CreditCard className="w-6 h-6 mr-2 text-blue-600 dark:text-blue-400" /> Payment Method
               </h2>
               
               <div className="space-y-4">
+                {/* Razorpay Option */}
+                <motion.button
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  onClick={() => { setPaymentMethod('razorpay'); setError(''); }}
+                  className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback relative overflow-hidden ${
+                    paymentMethod === 'razorpay' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'razorpay' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                      <CreditCard className={`w-5 h-5 ${paymentMethod === 'razorpay' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
+                    </div>
+                    <div className="text-left">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-gray-800 dark:text-gray-100">Razorpay Online</p>
+                        <span className="px-2 py-0.5 bg-blue-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">Fast & Secure</span>
+                      </div>
+                      <p className={`text-xs font-medium ${paymentMethod === 'razorpay' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Cards, UPI, NetBanking, Wallets</p>
+                    </div>
+                  </div>
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'razorpay' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
+                    {paymentMethod === 'razorpay' && <motion.div layoutId="payment-dot" className="w-3 h-3 bg-blue-600 rounded-full" />}
+                  </div>
+                </motion.button>
+
                 {/* Wallet Option */}
                 <motion.button
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05 }}
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
                   onClick={() => { setPaymentMethod('wallet'); setError(''); }}
@@ -546,8 +890,8 @@ const Billing: React.FC = () => {
                       <Smartphone className={`w-5 h-5 ${paymentMethod === 'upi' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
                     </div>
                     <div className="text-left">
-                      <p className="font-bold text-gray-800 dark:text-gray-100">UPI Payment</p>
-                      <p className={`text-xs font-medium ${paymentMethod === 'upi' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>GPay, PhonePe, Paytm</p>
+                      <p className="font-bold text-gray-800 dark:text-gray-100">Direct UPI Scan</p>
+                      <p className={`text-xs font-medium ${paymentMethod === 'upi' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>GPay, PhonePe, Paytm QR</p>
                     </div>
                   </div>
                   <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'upi' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
@@ -555,6 +899,7 @@ const Billing: React.FC = () => {
                   </div>
                 </motion.button>
               </div>
+
 
               <AnimatePresence mode="wait">
                 {paymentMethod === 'upi' && (
@@ -684,6 +1029,7 @@ const Billing: React.FC = () => {
                   {loading ? (
                     <Loader2 className="w-6 h-6 animate-spin" />
                   ) : (
+                    paymentMethod === 'razorpay' ? `Pay ₹${finalPrice.toFixed(2)} via Razorpay` :
                     paymentMethod === 'upi' && upiStep === 'id' ? 'Verify UPI ID' : 
                     paymentMethod === 'upi' && upiStep === 'qr' ? 'I have paid' :
                     `Pay ₹${finalPrice.toFixed(2)}`
@@ -691,6 +1037,7 @@ const Billing: React.FC = () => {
                 </motion.button>
               </div>
             </motion.div>
+          )}
           </div>
 
           <div className="md:col-span-4 lg:col-span-4 w-full">
@@ -742,8 +1089,11 @@ const Billing: React.FC = () => {
                     )}
                     {bookingInfo.garmentInstructions && (
                       <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-100 dark:border-amber-800/30">
-                        <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-1">Garment Instructions</p>
+                        <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-1">Garment Instructions & Care</p>
                         <p className="text-xs text-amber-800 dark:text-amber-200 font-medium italic">"{bookingInfo.garmentInstructions}"</p>
+                        <p className="text-[10px] text-amber-700/80 dark:text-amber-300/80 font-medium mt-1.5 pt-1.5 border-t border-amber-200/50 dark:border-amber-800/40">
+                          *Color bleeding, white item segregation & special care details noted for store staff.
+                        </p>
                       </div>
                     )}
                   </>
@@ -828,13 +1178,6 @@ const Billing: React.FC = () => {
                     </div>
                   )}
 
-                  {!isSubscription && bookingInfo.serviceType === 'Instant Booking' && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">Instant Booking Premium</span>
-                      <span className="font-medium text-gray-800 dark:text-gray-200">₹{settings?.pricing.instantBooking.toFixed(2)}</span>
-                    </div>
-                  )}
-
                   {!isSubscription && bookingInfo.pickupDrop && (
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Delivery Fee</span>
@@ -874,8 +1217,15 @@ const Billing: React.FC = () => {
                   
                   <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
                     <span className="text-gray-800 dark:text-gray-100">Total</span>
-                    <span className="text-blue-600 dark:text-blue-400">₹{finalPrice.toFixed(2)}</span>
+                    <span className="text-blue-600 dark:text-blue-400 font-black text-2xl">
+                      {isSubscriberBooking ? '₹0.00' : `₹${finalPrice.toFixed(2)}`}
+                    </span>
                   </div>
+                  {isSubscriberBooking && (
+                    <p className="text-[10px] text-green-600 dark:text-green-400 font-bold uppercase tracking-widest text-right mt-1">
+                      Covered by Subscriber Account
+                    </p>
+                  )}
                 </div>
               </div>
             </motion.div>

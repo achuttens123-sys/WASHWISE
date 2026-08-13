@@ -13,6 +13,8 @@ export interface User {
   staffId?: string;
   isFirstLogin?: boolean;
   address?: string;
+  savedAddresses?: string[];
+  savedPhones?: string[];
   status?: 'active' | 'inactive';
   lastLogin?: any;
   studentId?: string;
@@ -39,6 +41,7 @@ export interface Store {
   address: string;
   phone: string;
   storeCode?: string;
+  districtCode?: string;
   latitude?: number;
   longitude?: number;
   active: boolean;
@@ -46,6 +49,34 @@ export interface Store {
   maintenanceMessage?: string;
   createdAt: any;
 }
+
+export interface DistrictOption {
+  code: string;
+  name: string;
+}
+
+export const KERALA_DISTRICTS: DistrictOption[] = [
+  { code: 'TV', name: 'Thiruvananthapuram' },
+  { code: 'KL', name: 'Kollam' },
+  { code: 'PT', name: 'Pathanamthitta' },
+  { code: 'AL', name: 'Alappuzha' },
+  { code: 'KT', name: 'Kottayam' },
+  { code: 'EK', name: 'Ernakulam' },
+  { code: 'ID', name: 'Idukki' },
+  { code: 'TR', name: 'Thrissur' },
+  { code: 'PL', name: 'Palakkad' },
+  { code: 'ML', name: 'Malappuram' },
+  { code: 'KZ', name: 'Kozhikode' },
+  { code: 'KN', name: 'Kannur' },
+  { code: 'KG', name: 'Kasargod' },
+  { code: 'WY', name: 'Wayanad' }
+];
+
+export const generateStoreId = (storeSequenceNumber: number, districtCode: string): string => {
+  const seq = storeSequenceNumber.toString().padStart(3, '0');
+  const dist = (districtCode || 'KT').toUpperCase();
+  return `WW${seq}${dist}`;
+};
 
 export interface Machine {
   id: string;

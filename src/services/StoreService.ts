@@ -1,4 +1,4 @@
-import { collection, getDocs, query, where, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, where, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Store } from '../types';
 
@@ -54,7 +54,10 @@ export const StoreService = {
     });
   },
 
-  async addStore(store: Omit<Store, 'id'>) {
+  async addStore(store: Partial<Store> & { id?: string }) {
+    if (store.id) {
+      return await setDoc(doc(db, 'stores', store.id), store);
+    }
     return await addDoc(collection(db, 'stores'), store);
   },
 

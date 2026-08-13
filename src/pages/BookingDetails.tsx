@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Check, Package, Truck, Weight, Info, MapPin, Phone, AlertTriangle, Home, Search, Store as StoreIcon } from 'lucide-react';
+import { ArrowLeft, Check, Package, Truck, Weight, Info, MapPin, Phone, AlertTriangle, Home, Search, Store as StoreIcon, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { StoreService } from '../services/StoreService';
@@ -11,11 +11,15 @@ import TermsModal from '../components/TermsModal';
 const BookingDetails: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { settings } = useSettings();
   
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [isTermsOpen, setIsTermsOpen] = useState(false);
+  const [isAddingNewAddress, setIsAddingNewAddress] = useState(false);
+  const [newAddressText, setNewAddressText] = useState('');
+  const [isAddingNewPhone, setIsAddingNewPhone] = useState(false);
+  const [newPhoneText, setNewPhoneText] = useState('');
   
   const dateStr = searchParams.get('date') || '';
   const timeSlot = searchParams.get('slot') || '';
@@ -188,17 +192,86 @@ const BookingDetails: React.FC = () => {
                 >
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Pickup Address</label>
-                    <div className="relative">
-                      <Home className="absolute left-4 top-4 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                      <textarea
-                        required
-                        value={bookingData.address}
-                        onChange={(e) => setBookingData({ ...bookingData, address: e.target.value })}
-                        placeholder="Enter your full address with landmarks..."
-                        rows={3}
-                        className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 resize-none"
-                      />
-                    </div>
+                    
+                    {!isAddingNewAddress && (user?.savedAddresses?.length || user?.address) ? (
+                      <div className="space-y-3">
+                        {Array.from(new Set([...(user?.savedAddresses || []), user?.address].filter(Boolean))).map((addr: string, i) => (
+                          <div 
+                            key={i} 
+                            onClick={() => setBookingData({ ...bookingData, address: addr })}
+                            className={`p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-4 ${
+                              bookingData.address === addr 
+                                ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600' 
+                                : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
+                            }`}
+                          >
+                            <div className="mt-1">
+                              {bookingData.address === addr ? (
+                                <motion.div layoutId="pickup-addr-dot" className="w-4 h-4 bg-blue-600 rounded-full" />
+                              ) : (
+                                <div className="w-4 h-4 border-2 border-gray-300 dark:border-gray-600 rounded-full" />
+                              )}
+                            </div>
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{addr}</span>
+                          </div>
+                        ))}
+                        
+                        <button 
+                          onClick={() => {
+                            setIsAddingNewAddress(true);
+                            setNewAddressText('');
+                          }}
+                          className="flex items-center gap-2 text-sm font-bold text-blue-600 dark:text-blue-400 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-colors w-full"
+                        >
+                          <Plus className="w-4 h-4" /> Add New Address
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="relative">
+                          <Home className="absolute left-4 top-4 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                          <textarea
+                            required
+                            value={newAddressText}
+                            onChange={(e) => {
+                              setNewAddressText(e.target.value);
+                              setBookingData({ ...bookingData, address: e.target.value });
+                            }}
+                            placeholder="Enter your full address with landmarks..."
+                            rows={3}
+                            className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 resize-none"
+                          />
+                        </div>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={async () => {
+                              if (!newAddressText.trim()) return;
+                              const currentSaved = user?.savedAddresses || [];
+                              const newSaved = [...currentSaved, newAddressText.trim()];
+                              if (updateUser) {
+                                await updateUser({ savedAddresses: newSaved, address: user?.address || newAddressText.trim() });
+                              }
+                              setBookingData({ ...bookingData, address: newAddressText.trim() });
+                              setIsAddingNewAddress(false);
+                            }}
+                            className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+                          >
+                            Save & Use This Address
+                          </button>
+                          {(user?.savedAddresses?.length || user?.address) ? (
+                            <button
+                              onClick={() => {
+                                setIsAddingNewAddress(false);
+                                setBookingData({ ...bookingData, address: user.address || user.savedAddresses?.[0] || '' });
+                              }}
+                              className="px-6 py-3 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="p-4 rounded-2xl flex items-start gap-4 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200">
@@ -216,17 +289,86 @@ const BookingDetails: React.FC = () => {
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Contact Phone</label>
-                      <div className="relative">
-                        <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                        <input
-                          type="tel"
-                          required
-                          value={bookingData.phone}
-                          onChange={(e) => setBookingData({ ...bookingData, phone: e.target.value })}
-                          placeholder="Enter your phone number"
-                          className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100"
-                        />
-                      </div>
+                      
+                      {!isAddingNewPhone && (user?.savedPhones?.length || user?.phone) ? (
+                        <div className="space-y-3">
+                          {Array.from(new Set([...(user?.savedPhones || []), user?.phone].filter(Boolean))).map((ph: string, i) => (
+                            <div 
+                              key={i} 
+                              onClick={() => setBookingData({ ...bookingData, phone: ph })}
+                              className={`p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-4 ${
+                                bookingData.phone === ph 
+                                  ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600' 
+                                  : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
+                              }`}
+                            >
+                              <div className="mt-1">
+                                {bookingData.phone === ph ? (
+                                  <motion.div layoutId="contact-phone-dot" className="w-4 h-4 bg-blue-600 rounded-full" />
+                                ) : (
+                                  <div className="w-4 h-4 border-2 border-gray-300 dark:border-gray-600 rounded-full" />
+                                )}
+                              </div>
+                              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{ph}</span>
+                            </div>
+                          ))}
+                          
+                          <button 
+                            onClick={() => {
+                              setIsAddingNewPhone(true);
+                              setNewPhoneText('');
+                            }}
+                            className="flex items-center gap-2 text-sm font-bold text-blue-600 dark:text-blue-400 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-colors w-full"
+                          >
+                            <Plus className="w-4 h-4" /> Add New Phone
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="relative">
+                            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                            <input
+                              type="tel"
+                              required
+                              value={newPhoneText}
+                              onChange={(e) => {
+                                setNewPhoneText(e.target.value);
+                                setBookingData({ ...bookingData, phone: e.target.value });
+                              }}
+                              placeholder="Enter your phone number"
+                              className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100"
+                            />
+                          </div>
+                          <div className="flex gap-3">
+                            <button
+                              onClick={async () => {
+                                if (!newPhoneText.trim()) return;
+                                const currentSaved = user?.savedPhones || [];
+                                const newSaved = [...currentSaved, newPhoneText.trim()];
+                                if (updateUser) {
+                                  await updateUser({ savedPhones: newSaved, phone: user?.phone || newPhoneText.trim() });
+                                }
+                                setBookingData({ ...bookingData, phone: newPhoneText.trim() });
+                                setIsAddingNewPhone(false);
+                              }}
+                              className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors"
+                            >
+                              Save & Use This Number
+                            </button>
+                            {(user?.savedPhones?.length || user?.phone) ? (
+                              <button
+                                onClick={() => {
+                                  setIsAddingNewPhone(false);
+                                  setBookingData({ ...bookingData, phone: user.phone || user.savedPhones?.[0] || '' });
+                                }}
+                                className="px-6 py-3 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>

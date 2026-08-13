@@ -24,7 +24,7 @@ const Login: React.FC = () => {
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
   
   // Auth method selection: 'email' | 'google'
-  const [authMethod, setAuthMethod] = useState<'email' | 'google'>('email');
+  const [authMethod, setAuthMethod] = useState<'email' | 'google'>('google');
 
   // Form State
   const [formData, setFormData] = useState({
@@ -277,17 +277,6 @@ const Login: React.FC = () => {
           <div className="grid grid-cols-2 gap-2 bg-gray-50 dark:bg-surface-low p-1.5 rounded-2xl">
             <button
               type="button"
-              onClick={() => { setAuthMethod('email'); setError(''); }}
-              className={`py-2.5 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all ${
-                authMethod === 'email' 
-                  ? 'bg-white dark:bg-surface-highest text-primary-electric dark:text-primary-electric-light shadow-sm' 
-                  : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
-              }`}
-            >
-              Email & Phone
-            </button>
-            <button
-              type="button"
               onClick={() => { setAuthMethod('google'); setError(''); }}
               className={`py-2.5 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all ${
                 authMethod === 'google' 
@@ -296,6 +285,17 @@ const Login: React.FC = () => {
               }`}
             >
               Google
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMethod('email'); setError(''); }}
+              className={`py-2.5 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all ${
+                authMethod === 'email' 
+                  ? 'bg-white dark:bg-surface-highest text-primary-electric dark:text-primary-electric-light shadow-sm' 
+                  : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
+              }`}
+            >
+              Email & Phone
             </button>
           </div>
 

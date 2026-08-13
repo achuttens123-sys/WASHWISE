@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { User, Mail, GraduationCap, Calendar, Settings, LogOut, Wallet, History, Shield, Loader2, CheckCircle, ArrowLeft, ArrowRight, AlertCircle, Trophy, Zap, Star, Gift, Copy, Share2, TrendingUp, X, Check, MapPin, Trash2, Edit3, PhoneCall } from 'lucide-react';
+import { User, Mail, GraduationCap, Calendar, Settings, LogOut, Wallet, History, Shield, Loader2, CheckCircle, ArrowLeft, ArrowRight, AlertCircle, Trophy, Zap, Star, Gift, Copy, Share2, TrendingUp, X, Check, MapPin, Trash2, Edit3, PhoneCall, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { collection, query, where, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
@@ -33,6 +33,8 @@ const Profile: React.FC = () => {
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
+  const [walletTransactions, setWalletTransactions] = useState<any[]>([]);
+  const [loadingWalletTx, setLoadingWalletTx] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -51,6 +53,28 @@ const Profile: React.FC = () => {
       });
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user || activeTab !== 'wallet') return;
+    
+    setLoadingWalletTx(true);
+    const q = query(
+      collection(db, 'wallet_transactions'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const txs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setWalletTransactions(txs);
+      setLoadingWalletTx(false);
+    }, (error) => {
+      console.error('Error loading wallet transactions:', error);
+      setLoadingWalletTx(false);
+    });
+    
+    return () => unsubscribe();
+  }, [user, activeTab]);
 
   useEffect(() => {
     if (!user || activeTab !== 'history') return;
@@ -149,10 +173,26 @@ const Profile: React.FC = () => {
     setError('');
     setSaveSuccess(false);
     try {
+      const currentSavedAddresses = user?.savedAddresses || [];
+      const newAddress = editForm.address.trim();
+      let updatedSavedAddresses = currentSavedAddresses;
+      if (newAddress && !currentSavedAddresses.includes(newAddress)) {
+        updatedSavedAddresses = [...currentSavedAddresses, newAddress];
+      }
+
+      const currentSavedPhones = user?.savedPhones || [];
+      const newPhone = editForm.phone.trim();
+      let updatedSavedPhones = currentSavedPhones;
+      if (newPhone && !currentSavedPhones.includes(newPhone)) {
+        updatedSavedPhones = [...currentSavedPhones, newPhone];
+      }
+
       await updateUser({
         name: editForm.name.trim(),
-        phone: editForm.phone.trim(),
-        address: editForm.address.trim(),
+        phone: newPhone || user?.phone,
+        address: newAddress || user?.address,
+        savedAddresses: updatedSavedAddresses,
+        savedPhones: updatedSavedPhones
       });
       setIsEditing(false);
       setSaveSuccess(true);
@@ -451,40 +491,64 @@ const Profile: React.FC = () => {
                       <div className="p-8 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low group hover:border-primary-electric/20 transition-all duration-300 flex flex-col justify-between">
                         <div>
                           <div className="flex items-center justify-between mb-3">
-                            <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Delivery Address</p>
+                            <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Delivery Addresses</p>
                             <button
                               onClick={() => {
                                 setIsEditing(true);
-                                setEditForm({ name: user.name || '', phone: user.phone || '', address: user.address || '' });
+                                setEditForm({ name: user.name || '', phone: user.phone || '', address: '' });
                               }}
                               className="text-xs font-bold text-primary-electric hover:underline flex items-center gap-1"
                             >
-                              <Edit3 className="w-3 h-3" />
-                              {user.address ? 'Change Address' : 'Add Address'}
+                              <Plus className="w-3 h-3" />
+                              Add Address
                             </button>
                           </div>
-                          <div className="flex items-start text-gray-800 dark:text-high-contrast">
-                            <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric shrink-0">
-                              <MapPin className="w-5 h-5" />
-                            </div>
-                            <div>
-                              {user.address ? (
-                                <span className="text-sm font-bold tracking-tight text-gray-700 dark:text-gray-200 leading-relaxed block">{user.address}</span>
-                              ) : (
+                          
+                          <div className="space-y-4 mt-4">
+                            {Array.from(new Set([...(user?.savedAddresses || []), user?.address].filter(Boolean))).length > 0 ? (
+                              Array.from(new Set([...(user?.savedAddresses || []), user?.address].filter(Boolean))).map((addr: string, i) => (
+                                <div key={i} className="flex items-start text-gray-800 dark:text-high-contrast bg-white dark:bg-surface-highest p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-surface-low relative group/addr">
+                                  <div className="p-2 bg-primary-electric/10 rounded-xl mr-4 text-primary-electric shrink-0">
+                                    <MapPin className="w-5 h-5" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <span className="text-sm font-bold tracking-tight text-gray-700 dark:text-gray-200 leading-relaxed block">{addr}</span>
+                                  </div>
+                                  <button 
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      const currentSaved = user?.savedAddresses || [];
+                                      const updatedSaved = currentSaved.filter(a => a !== addr);
+                                      const newPrimary = user?.address === addr ? (updatedSaved[0] || '') : user?.address;
+                                      if (updateUser) {
+                                        await updateUser({ savedAddresses: updatedSaved, address: newPrimary });
+                                      }
+                                    }}
+                                    className="opacity-0 group-hover/addr:opacity-100 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all absolute right-2 top-2"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="flex items-start text-gray-800 dark:text-high-contrast">
+                                <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric shrink-0">
+                                  <MapPin className="w-5 h-5" />
+                                </div>
                                 <div>
-                                  <span className="text-sm font-semibold text-gray-400 dark:text-gray-500 block mb-2">No address added yet</span>
+                                  <span className="text-sm font-semibold text-gray-400 dark:text-gray-500 block mb-2">No addresses added yet</span>
                                   <button
                                     onClick={() => {
                                       setIsEditing(true);
-                                      setEditForm({ name: user.name || '', phone: user.phone || '', address: user.address || '' });
+                                      setEditForm({ name: user.name || '', phone: user.phone || '', address: '' });
                                     }}
                                     className="px-4 py-2 bg-primary-electric text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-primary-electric/90 transition-all shadow-md"
                                   >
                                     + Add Address
                                   </button>
                                 </div>
-                              )}
-                            </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -503,23 +567,64 @@ const Profile: React.FC = () => {
                       {/* Phone Card */}
                       <div className="p-8 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low group hover:border-primary-electric/20 transition-all duration-300">
                         <div className="flex items-center justify-between mb-3">
-                          <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Phone Number</p>
+                          <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Phone Numbers</p>
                           <button
                             onClick={() => {
                               setIsEditing(true);
-                              setEditForm({ name: user.name || '', phone: user.phone || '', address: user.address || '' });
+                              setEditForm({ name: user.name || '', phone: '', address: user.address || '' });
                             }}
                             className="text-xs font-bold text-primary-electric hover:underline flex items-center gap-1"
                           >
-                            <Edit3 className="w-3 h-3" />
-                            {user.phone ? 'Change' : 'Add Phone'}
+                            <Plus className="w-3 h-3" />
+                            Add Phone
                           </button>
                         </div>
-                        <div className="flex items-center text-gray-800 dark:text-high-contrast">
-                          <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric">
-                            <PhoneCall className="w-5 h-5" />
-                          </div>
-                          <span className="text-lg font-display font-black tracking-tight uppercase">{user.phone || 'Not provided'}</span>
+                        
+                        <div className="space-y-4 mt-4">
+                          {Array.from(new Set([...(user?.savedPhones || []), user?.phone].filter(Boolean))).length > 0 ? (
+                            Array.from(new Set([...(user?.savedPhones || []), user?.phone].filter(Boolean))).map((ph: string, i) => (
+                              <div key={i} className="flex items-center text-gray-800 dark:text-high-contrast bg-white dark:bg-surface-highest p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-surface-low relative group/phone">
+                                <div className="p-2 bg-primary-electric/10 rounded-xl mr-4 text-primary-electric shrink-0">
+                                  <PhoneCall className="w-5 h-5" />
+                                </div>
+                                <div className="flex-1">
+                                  <span className="text-lg font-display font-black tracking-tight uppercase">{ph}</span>
+                                </div>
+                                <button 
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const currentSaved = user?.savedPhones || [];
+                                    const updatedSaved = currentSaved.filter(p => p !== ph);
+                                    const newPrimary = user?.phone === ph ? (updatedSaved[0] || '') : user?.phone;
+                                    if (updateUser) {
+                                      await updateUser({ savedPhones: updatedSaved, phone: newPrimary });
+                                    }
+                                  }}
+                                  className="opacity-0 group-hover/phone:opacity-100 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all absolute right-2"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="flex items-center text-gray-800 dark:text-high-contrast">
+                              <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric shrink-0">
+                                <PhoneCall className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <span className="text-sm font-semibold text-gray-400 dark:text-gray-500 block mb-2">No phone numbers added yet</span>
+                                <button
+                                  onClick={() => {
+                                    setIsEditing(true);
+                                    setEditForm({ name: user.name || '', phone: '', address: user.address || '' });
+                                  }}
+                                  className="px-4 py-2 bg-primary-electric text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-primary-electric/90 transition-all shadow-md"
+                                >
+                                  + Add Phone
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -797,7 +902,7 @@ const Profile: React.FC = () => {
 
               {activeTab === 'wallet' && (
                 <div className="space-y-16 relative z-10">
-                  <div className="relative p-16 bg-gray-900 dark:bg-surface-highest rounded-[3rem] text-white shadow-2xl overflow-hidden group">
+                  <div className="relative p-16 bg-white dark:bg-surface-highest rounded-[3rem] text-gray-900 dark:text-white shadow-2xl overflow-hidden group border border-gray-100 dark:border-white/10">
                     {/* Card Pattern Overlay */}
                     <div className="absolute inset-0 opacity-10 pointer-events-none">
                       <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white/20 via-transparent to-transparent" />
@@ -815,11 +920,11 @@ const Profile: React.FC = () => {
                       <div className="flex flex-col sm:flex-row gap-6">
                         <button 
                           onClick={() => setShowAddFundsModal(true)}
-                          className="flex-1 py-6 bg-white text-black text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-gray-50 transition-all active:scale-95 haptic-feedback"
+                          className="flex-1 py-6 bg-primary-electric text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-primary-electric/90 transition-all active:scale-95 haptic-feedback shadow-lg shadow-primary-electric/20"
                         >
                           Add Funds via Razorpay
                         </button>
-                        <button className="flex-1 py-6 bg-white/10 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-white/20 transition-all backdrop-blur-md active:scale-95 haptic-feedback">
+                        <button className="flex-1 py-6 bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-gray-200 dark:hover:bg-white/20 transition-all backdrop-blur-md active:scale-95 haptic-feedback">
                           Transfer
                         </button>
                       </div>
@@ -832,26 +937,39 @@ const Profile: React.FC = () => {
                       <button className="text-[10px] font-black text-primary-electric dark:text-primary-electric-light uppercase tracking-widest hover:underline haptic-feedback">View All</button>
                     </div>
                     <div className="space-y-6">
-                      {[
-                        { title: 'Laundry Booking', date: '24 Mar 2026', amount: -250, status: 'Completed' },
-                        { title: 'Wallet Top-up', date: '20 Mar 2026', amount: 500, status: 'Completed' },
-                        { title: 'Laundry Booking', date: '18 Mar 2026', amount: -200, status: 'Completed' },
-                      ].map((tx, i) => (
+                      {loadingWalletTx ? (
+                        <div className="flex flex-col items-center justify-center py-16">
+                          <Loader2 className="w-8 h-8 animate-spin text-primary-electric" />
+                          <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-4">Loading Transactions...</p>
+                        </div>
+                      ) : walletTransactions.length === 0 ? (
+                        <div className="text-center py-16 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-dashed border-gray-100 dark:border-surface-low">
+                          <div className="p-8 bg-white dark:bg-surface-highest rounded-3xl w-24 h-24 flex items-center justify-center mx-auto mb-8 shadow-sm">
+                            <Wallet className="w-12 h-12 text-gray-200 dark:text-gray-700" />
+                          </div>
+                          <p className="text-xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase">No Transactions</p>
+                          <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-3">Add funds to see activity here</p>
+                        </div>
+                      ) : (
+                        walletTransactions.map((tx, i) => (
                         <div key={i} className="flex items-center justify-between p-8 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low group hover:border-primary-electric/20 transition-all duration-500">
                           <div className="flex items-center">
                             <div className={`p-5 rounded-2xl mr-8 transition-transform group-hover:scale-110 ${tx.amount > 0 ? 'bg-green-50 dark:bg-green-900/20 text-green-600' : 'bg-red-50 dark:bg-red-900/20 text-red-600'}`}>
                               <Wallet className="w-8 h-8" />
                             </div>
                             <div>
-                              <p className="font-display font-black text-gray-800 dark:text-high-contrast uppercase text-base tracking-tight mb-1">{tx.title}</p>
-                              <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">{tx.date}</p>
+                              <p className="font-display font-black text-gray-800 dark:text-high-contrast uppercase text-base tracking-tight mb-1">{tx.description || tx.type}</p>
+                              <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+                                {new Date(tx.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </p>
                             </div>
                           </div>
                           <p className={`text-2xl font-display font-black tracking-tighter italic ${tx.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {tx.amount > 0 ? '+' : ''}₹{Math.abs(tx.amount)}
                           </p>
                         </div>
-                      ))}
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>

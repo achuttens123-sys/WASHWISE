@@ -463,19 +463,6 @@ const Dashboard: React.FC = () => {
 
                   <div className="relative overflow-hidden pt-2 pb-2 sm:pb-4">
                     <div className="w-full relative min-h-[75px] sm:min-h-[96px] flex flex-col justify-center">
-                      {/* Progress Line Track */}
-                      <div className="absolute top-3.5 sm:top-5 left-5 right-5 sm:left-11 sm:right-11 h-0.5 sm:h-1 -z-0">
-                        {/* Background line */}
-                        <div className="absolute inset-0 bg-gray-100 dark:bg-surface-low rounded-full" />
-                        {/* Active line */}
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: isEffectivelyComplete ? '100%' : `${(currentStepIndex / (steps.length - 1)) * 100}%` }}
-                          transition={{ type: "spring", stiffness: 50, damping: 20 }}
-                          className="absolute inset-y-0 left-0 bg-primary-electric rounded-full shadow-[0_0_10px_rgba(var(--primary-electric),0.5)]" 
-                        />
-                      </div>
-
                       <div className="flex justify-between items-start relative z-10 w-full">
                         {steps.map((step, idx) => {
                           const isCompleted = idx < displayStepIndex;
@@ -487,12 +474,27 @@ const Dashboard: React.FC = () => {
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ delay: 0.3 + idx * 0.1 }}
-                              className="flex flex-col items-center flex-1 text-center group min-w-0"
+                              className="flex flex-col items-center flex-1 text-center group min-w-0 relative"
                             >
+                              {/* Background line to next step */}
+                              {idx < steps.length - 1 && (
+                                <div className="absolute top-3.5 sm:top-5 left-1/2 w-full h-0.5 sm:h-1 bg-gray-100 dark:bg-surface-low -z-10" />
+                              )}
+                              {/* Active line to next step */}
+                              {idx < steps.length - 1 && (
+                                <motion.div 
+                                  initial={{ width: '0%' }}
+                                  animate={{ 
+                                    width: (idx < currentStepIndex || isEffectivelyComplete) ? '100%' : '0%' 
+                                  }}
+                                  transition={{ type: "spring", stiffness: 50, damping: 20 }}
+                                  className="absolute top-3.5 sm:top-5 left-1/2 h-0.5 sm:h-1 bg-primary-electric shadow-[0_0_10px_rgba(var(--primary-electric),0.5)] -z-10 origin-left" 
+                                />
+                              )}
                               <motion.div 
                                 animate={isCurrent ? { scale: [1, 1.15, 1] } : {}}
                                 transition={isCurrent ? { repeat: Infinity, duration: 2 } : {}}
-                                className={`w-7 h-7 sm:w-10 sm:h-10 rounded-full shrink-0 flex items-center justify-center transition-all duration-700 ${
+                                className={`w-7 h-7 sm:w-10 sm:h-10 rounded-full shrink-0 flex items-center justify-center transition-all duration-700 relative z-10 ${
                                   isCompleted ? 'bg-primary-electric text-white' : 
                                   isCurrent ? 'bg-white dark:bg-surface-container border-2 sm:border-4 border-primary-electric text-primary-electric shadow-md sm:shadow-xl shadow-primary-electric/20' : 
                                   'bg-white dark:bg-surface-container border-2 sm:border-4 border-gray-100 dark:border-surface-low text-gray-200 dark:text-gray-700'

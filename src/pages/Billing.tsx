@@ -494,6 +494,16 @@ const Billing: React.FC = () => {
       if (paymentMethod === 'wallet') {
         if (currentWallet < finalPrice) throw new Error('Insufficient wallet balance.');
         transaction.update(userRef, { walletBalance: currentWallet - finalPrice });
+        
+        const walletTxRef = doc(collection(db, 'wallet_transactions'));
+        transaction.set(walletTxRef, {
+          userId: user.uid,
+          amount: -finalPrice,
+          type: 'debit',
+          method: 'wallet',
+          description: 'Laundry Booking',
+          createdAt: new Date().toISOString()
+        });
       }
 
       const bookingRef = doc(collection(db, 'bookings'));

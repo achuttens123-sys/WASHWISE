@@ -49,7 +49,7 @@ import {
 } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, updateDoc, doc, getDoc, runTransaction, where, limit, addDoc, deleteDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { Booking, AdminRole, User as AppUser, Store, Package, Slot, TIME_SLOTS, Machine } from '../../types';
+import { Booking, AdminRole, User as AppUser, Store, Package, Slot, TIME_SLOTS, Machine, KERALA_DISTRICTS, generateStoreId } from '../../types';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { StoreService } from '../../services/StoreService';
@@ -89,11 +89,13 @@ const SuperAdminDashboard: React.FC = () => {
   const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
   const [editingStore, setEditingStore] = useState<Store | null>(null);
   const [storeFormData, setStoreFormData] = useState({ 
+    customStoreId: '',
+    districtCode: 'KT',
     name: '', 
     location: '', 
     address: '', 
     phone: '', 
-    storeCode: '', 
+    storeCode: 'KT', 
     latitude: 0, 
     longitude: 0, 
     active: true,
@@ -357,43 +359,172 @@ const SuperAdminDashboard: React.FC = () => {
     }
   };
 
-  // Store Management Handlers
-  const handleSaveStore = async () => {
-    try {
-      if (editingStore) {
-        await updateDoc(doc(db, 'stores', editingStore.id), storeFormData);
-      } else {
-        // Generate WW#### ID by finding the max existing ID
-        let nextNumber = 1;
-        if (stores.length > 0) {
-          const ids = stores
-            .map(s => parseInt(s.id.replace('WW', '')))
-            .filter(n => !isNaN(n));
-          if (ids.length > 0) {
-            nextNumber = Math.max(...ids) + 1;
+  // Automatic migration check for store ID 'RIT' -> 'WW001KT'
+  useEffect(() => {
+    const checkAndMigrateRIT = async () => {
+      try {
+        const ritDoc = await getDoc(doc(db, 'stores', 'RIT'));
+        if (ritDoc.exists()) {
+          console.log('Migrating RIT store to WW001KT...');
+          const ritData = ritDoc.data();
+          const newStoreData = {
+            ...ritData,
+            id: 'WW001KT',
+            storeCode: 'KT',
+            districtCode: 'KT',
+            location: ritData.location || 'Kottayam',
+            address: ritData.address || 'RIT Campus, Pampady, Kottayam'
+          };
+          await setDoc(doc(db, 'stores', 'WW001KT'), newStoreData);
+          await deleteDoc(doc(db, 'stores', 'RIT'));
+          await migrateStoreReferences('RIT', 'WW001KT');
+          console.log('Successfully migrated store RIT to WW001KT');
+        } else {
+          const ritUsersQuery = query(collection(db, 'users'), where('storeId', '==', 'RIT'));
+          const ritUsersSnap = await getDocs(ritUsersQuery);
+          if (!ritUsersSnap.empty) {
+            await migrateStoreReferences('RIT', 'WW001KT');
           }
         }
-        const nextId = 'WW' + nextNumber.toString().padStart(4, '0');
-        await setDoc(doc(db, 'stores', nextId), { 
-          ...storeFormData, 
-          id: nextId,
+      } catch (err) {
+        console.error('Auto migration of RIT store failed:', err);
+      }
+    };
+    checkAndMigrateRIT();
+  }, []);
+
+  // Store Management Handlers
+  const migrateStoreReferences = async (oldId: string, newId: string) => {
+    try {
+      // Update users
+      const usersQuery = query(collection(db, 'users'), where('storeId', '==', oldId));
+      const usersSnap = await getDocs(usersQuery);
+      for (const uDoc of usersSnap.docs) {
+        await updateDoc(doc(db, 'users', uDoc.id), { storeId: newId });
+      }
+
+      // Update machines
+      const machinesQuery = query(collection(db, 'machines'), where('storeId', '==', oldId));
+      const machinesSnap = await getDocs(machinesQuery);
+      for (const mDoc of machinesSnap.docs) {
+        await updateDoc(doc(db, 'machines', mDoc.id), { storeId: newId });
+      }
+
+      // Update bookings
+      const bookingsQuery = query(collection(db, 'bookings'), where('storeId', '==', oldId));
+      const bookingsSnap = await getDocs(bookingsQuery);
+      for (const bDoc of bookingsSnap.docs) {
+        await updateDoc(doc(db, 'bookings', bDoc.id), { storeId: newId });
+      }
+
+      // Update admin_roles
+      const adminRolesQuery = query(collection(db, 'admin_roles'), where('storeId', '==', oldId));
+      const adminRolesSnap = await getDocs(adminRolesQuery);
+      for (const aDoc of adminRolesSnap.docs) {
+        await updateDoc(doc(db, 'admin_roles', aDoc.id), { storeId: newId });
+      }
+    } catch (err) {
+      console.error('Error migrating store references:', err);
+    }
+  };
+
+  const handleOpenAddStoreModal = () => {
+    setEditingStore(null);
+    const defaultDistrict = 'KT';
+    const storeSeq = stores.length + 1;
+    const autoId = generateStoreId(storeSeq, defaultDistrict);
+    setStoreFormData({ 
+      customStoreId: autoId,
+      districtCode: defaultDistrict,
+      name: '', 
+      location: '', 
+      address: '', 
+      phone: '', 
+      storeCode: defaultDistrict, 
+      latitude: 0, 
+      longitude: 0, 
+      active: true,
+      isPaused: false,
+      maintenanceMessage: 'Store is temporarily closed for maintenance.'
+    });
+    setIsStoreModalOpen(true);
+  };
+
+  const handleOpenEditStoreModal = (store: Store) => {
+    setEditingStore(store);
+    let dist = store.districtCode || store.storeCode || '';
+    if (!dist && store.id && store.id.length >= 2) {
+      dist = store.id.slice(-2);
+    }
+    if (!KERALA_DISTRICTS.some(d => d.code === dist)) {
+      dist = 'KT';
+    }
+    setStoreFormData({ 
+      customStoreId: store.id || '',
+      districtCode: dist,
+      name: store.name || '', 
+      location: store.location || '', 
+      address: store.address || '', 
+      phone: store.phone || '',
+      storeCode: store.storeCode || dist,
+      latitude: (store as any).latitude || 0, 
+      longitude: (store as any).longitude || 0, 
+      active: store.active ?? true,
+      isPaused: store.isPaused || false,
+      maintenanceMessage: store.maintenanceMessage || 'Store is temporarily closed for maintenance.'
+    });
+    setIsStoreModalOpen(true);
+  };
+
+  const handleSaveStore = async () => {
+    try {
+      const finalStoreId = (storeFormData.customStoreId || '').trim().toUpperCase();
+      if (!finalStoreId) {
+        alert('Please specify a valid Store ID (e.g. WW001KT)');
+        return;
+      }
+
+      const storePayload = {
+        id: finalStoreId,
+        name: storeFormData.name,
+        location: storeFormData.location,
+        address: storeFormData.address,
+        phone: storeFormData.phone,
+        storeCode: storeFormData.storeCode || storeFormData.districtCode,
+        districtCode: storeFormData.districtCode,
+        latitude: storeFormData.latitude,
+        longitude: storeFormData.longitude,
+        active: storeFormData.active,
+        isPaused: storeFormData.isPaused,
+        maintenanceMessage: storeFormData.maintenanceMessage
+      };
+
+      if (editingStore) {
+        if (editingStore.id !== finalStoreId) {
+          // Store ID changed! Migrate doc
+          await setDoc(doc(db, 'stores', finalStoreId), {
+            ...storePayload,
+            createdAt: editingStore.createdAt || new Date().toISOString()
+          });
+          await deleteDoc(doc(db, 'stores', editingStore.id));
+          await migrateStoreReferences(editingStore.id, finalStoreId);
+        } else {
+          await updateDoc(doc(db, 'stores', editingStore.id), storePayload);
+        }
+      } else {
+        const existingDoc = await getDoc(doc(db, 'stores', finalStoreId));
+        if (existingDoc.exists()) {
+          alert(`Store ID "${finalStoreId}" already exists. Please choose a unique Store ID.`);
+          return;
+        }
+        await setDoc(doc(db, 'stores', finalStoreId), { 
+          ...storePayload, 
           createdAt: new Date().toISOString() 
         });
       }
+
       setIsStoreModalOpen(false);
       setEditingStore(null);
-      setStoreFormData({ 
-        name: '', 
-        location: '', 
-        address: '', 
-        phone: '', 
-        storeCode: '', 
-        latitude: 0, 
-        longitude: 0, 
-        active: true,
-        isPaused: false,
-        maintenanceMessage: 'Store is temporarily closed for maintenance.'
-      });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'stores');
     }
@@ -611,22 +742,7 @@ const SuperAdminDashboard: React.FC = () => {
             <span className="hidden sm:inline">Report</span>
           </button>
           <button 
-            onClick={() => {
-              setEditingStore(null);
-              setStoreFormData({ 
-                name: '', 
-                location: '', 
-                address: '', 
-                phone: '', 
-                storeCode: '', 
-                latitude: 0, 
-                longitude: 0, 
-                active: true,
-                isPaused: false,
-                maintenanceMessage: 'Store is temporarily closed for maintenance.'
-              });
-              setIsStoreModalOpen(true);
-            }}
+            onClick={handleOpenAddStoreModal}
             className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg sm:rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
@@ -1298,22 +1414,7 @@ const SuperAdminDashboard: React.FC = () => {
                   <p className="text-sm text-gray-500 font-medium">Manage all laundry outlets and their operational status.</p>
                 </div>
                 <button 
-                  onClick={() => {
-                    setEditingStore(null);
-                    setStoreFormData({ 
-                      name: '', 
-                      location: '', 
-                      address: '', 
-                      phone: '', 
-                      storeCode: '', 
-                      latitude: 0, 
-                      longitude: 0, 
-                      active: true,
-                      isPaused: false,
-                      maintenanceMessage: 'Store is temporarily closed for maintenance.'
-                    });
-                    setIsStoreModalOpen(true);
-                  }}
+                  onClick={handleOpenAddStoreModal}
                   className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center gap-2"
                 >
                   <Plus className="w-5 h-5" />
@@ -1326,7 +1427,7 @@ const SuperAdminDashboard: React.FC = () => {
                   <thead>
                     <tr className="text-left border-b border-gray-50 dark:border-gray-800">
                       <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Store Info</th>
-                      <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Code</th>
+                      <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Store ID</th>
                       <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Location</th>
                       <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
                       <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Daily Orders</th>
@@ -1346,6 +1447,11 @@ const SuperAdminDashboard: React.FC = () => {
                               <p className="text-xs text-gray-500 font-medium">{store.address}</p>
                             </div>
                           </div>
+                        </td>
+                        <td className="py-6">
+                          <span className="px-3 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 rounded-xl text-xs font-black font-mono border border-blue-100 dark:border-blue-900/30">
+                            {store.id}
+                          </span>
                         </td>
                         <td className="py-6">
                           <div className="flex items-center gap-2 text-sm font-bold text-gray-600 dark:text-gray-400">
@@ -1375,22 +1481,7 @@ const SuperAdminDashboard: React.FC = () => {
                         <td className="py-6 text-right">
                           <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
                             <button 
-                              onClick={() => {
-                                setEditingStore(store);
-                                setStoreFormData({ 
-                                  name: store.name || '', 
-                                  location: store.location || '', 
-                                  address: store.address || '', 
-                                  phone: store.phone || '',
-                                  storeCode: store.storeCode || '',
-                                  latitude: (store as any).latitude || 0, 
-                                  longitude: (store as any).longitude || 0, 
-                                  active: store.active ?? true,
-                                  isPaused: store.isPaused || false,
-                                  maintenanceMessage: store.maintenanceMessage || 'Store is temporarily closed for maintenance.'
-                                });
-                                setIsStoreModalOpen(true);
-                              }}
+                              onClick={() => handleOpenEditStoreModal(store)}
                               className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
                               title="Edit Store"
                             >
@@ -2016,6 +2107,63 @@ const SuperAdminDashboard: React.FC = () => {
                 </button>
               </div>
               <div className="p-8 space-y-6 overflow-y-auto flex-1 custom-scrollbar">
+                {/* District and Store ID section */}
+                <div className="p-6 bg-blue-50/50 dark:bg-blue-950/20 rounded-3xl border border-blue-100 dark:border-blue-900/30 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-blue-900 dark:text-blue-200 uppercase tracking-wider">
+                      Store Identification & District Selection
+                    </span>
+                    <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/50 px-2.5 py-1 rounded-lg">
+                      Washwise Convention
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">
+                        District (Kerala)
+                      </label>
+                      <select
+                        value={storeFormData.districtCode}
+                        onChange={(e) => {
+                          const newDist = e.target.value;
+                          const seq = stores.length + (editingStore ? 0 : 1);
+                          const suggested = generateStoreId(seq, newDist);
+                          setStoreFormData({
+                            ...storeFormData,
+                            districtCode: newDist,
+                            storeCode: newDist,
+                            customStoreId: suggested
+                          });
+                        }}
+                        className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-5 py-3.5 text-gray-800 dark:text-gray-100 font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+                      >
+                        {KERALA_DISTRICTS.map((d) => (
+                          <option key={d.code} value={d.code}>
+                            {d.code} - {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">
+                        Store ID (Inputted by Super Admin)
+                      </label>
+                      <input 
+                        type="text"
+                        value={storeFormData.customStoreId}
+                        onChange={(e) => setStoreFormData({ ...storeFormData, customStoreId: e.target.value.toUpperCase() })}
+                        className="w-full bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-800/60 rounded-2xl px-5 py-3.5 text-blue-700 dark:text-blue-300 font-black font-mono tracking-wider outline-none focus:ring-2 focus:ring-blue-500 transition-all text-base"
+                        placeholder="e.g. WW001KT"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-blue-600/80 dark:text-blue-400/80 font-medium">
+                    Naming rule: <strong>WW</strong> + 3-digit sequence number + District Code (e.g. <strong>WW001KT</strong> for 1st store in Kottayam). Super Admin can edit this ID directly.
+                  </p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="space-y-2">
                     <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Store Name</label>
@@ -2034,17 +2182,7 @@ const SuperAdminDashboard: React.FC = () => {
                       value={storeFormData.location}
                       onChange={(e) => setStoreFormData({ ...storeFormData, location: e.target.value })}
                       className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                      placeholder="e.g. Mumbai, Bandra"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Store Code (e.g. KOT, TVM)</label>
-                    <input 
-                      type="text"
-                      value={storeFormData.storeCode}
-                      onChange={(e) => setStoreFormData({ ...storeFormData, storeCode: e.target.value.toUpperCase() })}
-                      className="w-full bg-gray-50 dark:bg-gray-800 border-none rounded-2xl px-6 py-4 text-gray-800 dark:text-gray-100 font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                      placeholder="e.g. KOT"
+                      placeholder="e.g. Kottayam, Pampady"
                     />
                   </div>
                   <div className="space-y-2">

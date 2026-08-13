@@ -18,25 +18,40 @@ import {
   ChevronRight,
   MoreVertical,
   MapPin,
-  User
+  User,
+  Trash2,
+  Ban
 } from 'lucide-react';
-import { collection, query, where, onSnapshot, updateDoc, doc, orderBy, limit, getDocs, getDoc, runTransaction } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, updateDoc, doc, orderBy, limit, getDocs, getDoc, runTransaction, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
-import { Booking, Machine, User as AppUser, TIME_SLOTS } from '../../types';
+import { Booking, Machine, User as AppUser, TIME_SLOTS, Slot } from '../../types';
 import { format } from 'date-fns';
 
 const StoreManagerDashboard: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'today' | 'machines' | 'status' | 'logistics' | 'issues'>('today');
+  const [activeTab, setActiveTab] = useState<'today' | 'machines' | 'status' | 'logistics' | 'issues' | 'availability'>('today');
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
   const [storeStaff, setStoreStaff] = useState<AppUser[]>([]);
+  const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Machine Availability State
+  const [availabilityDate, setAvailabilityDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState(TIME_SLOTS[0]);
+  const [currentSlotData, setCurrentSlotData] = useState<Slot | null>(null);
+  const [isClearingSlot, setIsClearingSlot] = useState(false);
+
   useEffect(() => {
     if (!user?.storeId) return;
+
+    // Fetch all users for resolving booking user ids
+    const usersQuery = query(collection(db, 'users'));
+    const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
+      setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() })) as AppUser[]);
+    });
 
     // Fetch store bookings
     const bookingsQuery = query(
@@ -70,6 +85,7 @@ const StoreManagerDashboard: React.FC = () => {
     return () => {
       unsubscribeBookings();
       unsubscribeMachines();
+      unsubscribeUsers();
     };
   }, [user?.storeId]);
 
@@ -113,6 +129,90 @@ const StoreManagerDashboard: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (activeTab !== 'availability') return;
+
+    const slotId = `${availabilityDate}_${selectedTimeSlot}`;
+    const unsubSlot = onSnapshot(doc(db, 'slots', slotId), (snapshot) => {
+      if (snapshot.exists()) {
+        setCurrentSlotData({ id: snapshot.id, ...snapshot.data() } as Slot);
+      } else {
+        setCurrentSlotData({
+          date: availabilityDate,
+          timeSlot: selectedTimeSlot,
+          machines: { '1': '', '2': '', '3': '', '4': '' }
+        });
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `slots/${slotId}`);
+    });
+
+    return () => unsubSlot();
+  }, [activeTab, availabilityDate, selectedTimeSlot]);
+
+  const handleClearSlot = async (machineNumber: string) => {
+    if (!currentSlotData) return;
+    
+    setIsClearingSlot(true);
+    try {
+      const slotId = `${availabilityDate}_${selectedTimeSlot}`;
+      const slotRef = doc(db, 'slots', slotId);
+      
+      await runTransaction(db, async (transaction) => {
+        const slotSnap = await transaction.get(slotRef);
+        if (!slotSnap.exists()) return;
+        
+        const machines = slotSnap.data().machines;
+        const updatedMachines = { ...machines };
+        delete updatedMachines[machineNumber];
+        
+        transaction.update(slotRef, { machines: updatedMachines });
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `slots/${availabilityDate}_${selectedTimeSlot}`);
+    } finally {
+      setIsClearingSlot(false);
+    }
+  };
+
+  const handleToggleSlotMachineAvailability = async (machineNumber: string, isCurrentlyAvailable: boolean) => {
+    setIsClearingSlot(true);
+    try {
+      const slotId = `${availabilityDate}_${selectedTimeSlot}`;
+      const slotRef = doc(db, 'slots', slotId);
+      
+      await runTransaction(db, async (transaction) => {
+        const slotSnap = await transaction.get(slotRef);
+        
+        let updatedMachines: Record<string, string> = {};
+        if (slotSnap.exists()) {
+          updatedMachines = { ...slotSnap.data().machines };
+        }
+        
+        if (isCurrentlyAvailable) {
+          updatedMachines[machineNumber] = 'unavailable';
+        } else {
+          delete updatedMachines[machineNumber];
+        }
+        
+        if (slotSnap.exists()) {
+          transaction.update(slotRef, { machines: updatedMachines });
+        } else {
+          transaction.set(slotRef, { 
+            date: availabilityDate,
+            timeSlot: selectedTimeSlot,
+            machines: updatedMachines,
+            createdAt: new Date().toISOString()
+          });
+        }
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `slots/${availabilityDate}_${selectedTimeSlot}`);
+    } finally {
+      setIsClearingSlot(false);
+    }
+  };
+
   const stats = {
     today: bookings.filter(b => b.date === format(new Date(), 'yyyy-MM-dd')).length,
     pending: bookings.filter(b => b.status === 'pending').length,
@@ -124,10 +224,11 @@ const StoreManagerDashboard: React.FC = () => {
     if (pickupDrop) {
       return [
         { value: 'paid', label: 'Order Confirmed' },
-        { value: 'Ready for pick up', label: 'Ready for Pickup' },
+        { value: 'Ready for pick up', label: 'Ready for Pickup (Driver)' },
         { value: 'In Wash', label: 'In wash' },
         { value: 'In Dryer', label: 'In wash (Drying)' },
         { value: 'Washing completed', label: 'Completed' },
+        { value: 'Ready to deliver', label: 'Ready for Delivery' },
         { value: 'Out for delivery', label: 'Out for Delivery' },
         { value: 'completed', label: 'Finalized' },
         { value: 'cancelled', label: 'Cancelled' }
@@ -217,6 +318,7 @@ const StoreManagerDashboard: React.FC = () => {
         {[
           { id: 'today', label: "Today's Orders", icon: Calendar },
           { id: 'machines', label: 'Machines', icon: Monitor },
+          { id: 'availability', label: 'Machine Slots', icon: Clock },
           { id: 'status', label: 'Status Board', icon: LayoutDashboard },
           { id: 'logistics', label: 'Logistics', icon: Truck },
           { id: 'issues', label: 'Issues', icon: AlertCircle },
@@ -457,20 +559,25 @@ const StoreManagerDashboard: React.FC = () => {
                   Ready for Pickup
                 </h3>
                 <div className="space-y-4">
-                  {bookings.filter(b => b.status === 'Ready for pick up').length === 0 ? (
+                  {bookings.filter(b => ['Ready for pick up', 'Ready to collect'].includes(b.status)).length === 0 ? (
                     <p className="text-sm text-gray-500 font-medium text-center py-8">No orders ready for pickup.</p>
                   ) : (
-                    bookings.filter(b => b.status === 'Ready for pick up').map(b => (
+                    bookings.filter(b => ['Ready for pick up', 'Ready to collect'].includes(b.status)).map(b => (
                       <div key={b.id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-800">
                         <div>
                           <p className="text-sm font-black text-gray-800 dark:text-gray-100">{b.userName}</p>
-                          <p className="text-xs text-gray-500 font-bold">{b.address?.slice(0, 30)}...</p>
+                          <p className="text-xs text-gray-500 font-bold">
+                            {b.status === 'Ready to collect' ? 'Customer Pickup' : 'Driver Pickup'}
+                          </p>
+                          {b.address && (
+                            <p className="text-[10px] text-gray-400 mt-1 truncate max-w-[150px]">{b.address}</p>
+                          )}
                         </div>
                         <button 
-                          onClick={() => updateBookingStatus(b.id!, 'In Wash')}
+                          onClick={() => updateBookingStatus(b.id!, b.status === 'Ready to collect' ? 'completed' : 'In Wash')}
                           className="px-4 py-2 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-700 transition-colors"
                         >
-                          Picked Up
+                          {b.status === 'Ready to collect' ? 'Handed Over' : 'Picked Up'}
                         </button>
                       </div>
                     ))
@@ -522,6 +629,119 @@ const StoreManagerDashboard: React.FC = () => {
               <Plus className="w-8 h-8 mb-2 group-hover:scale-110 transition-transform" />
               <span className="text-xs font-black uppercase tracking-widest">Add Machine</span>
             </button>
+          </motion.div>
+        )}
+        {activeTab === 'availability' && (
+          <motion.div
+            key="availability"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="space-y-8"
+          >
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Machine Availability Management</h2>
+                <p className="text-gray-500 dark:text-gray-400 font-medium">View and manually clear booked slots for machines.</p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Select Date</label>
+                  <input
+                    type="date"
+                    value={availabilityDate}
+                    onChange={(e) => setAvailabilityDate(e.target.value)}
+                    className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Select Time Slot</label>
+                  <select
+                    value={selectedTimeSlot}
+                    onChange={(e) => setSelectedTimeSlot(e.target.value)}
+                    className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {TIME_SLOTS.map(slot => (
+                      <option key={slot} value={slot}>{slot}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((num) => {
+                const machineNum = num.toString();
+                const bookedUserId = currentSlotData?.machines[machineNum];
+                const bookedUser = users.find(u => u.uid === bookedUserId);
+                
+                return (
+                  <div key={machineNum} className="bg-white dark:bg-gray-900 p-8 rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col items-center text-center relative overflow-hidden group">
+                    <div className={`w-20 h-20 rounded-[2rem] flex items-center justify-center mb-6 transition-all duration-500 ${
+                      bookedUserId ? (bookedUserId === 'unavailable' ? 'bg-red-50 text-red-600 dark:bg-red-900/20' : 'bg-blue-50 text-blue-600 dark:bg-blue-900/20') : 'bg-green-50 text-green-600 dark:bg-green-900/20'
+                    }`}>
+                      <Monitor className="w-10 h-10" />
+                    </div>
+                    
+                    <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 mb-1">Machine #{machineNum}</h3>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-6">Standard Washer</p>
+                    
+                    {bookedUserId ? (
+                      <div className="space-y-4 w-full">
+                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-800">
+                          {bookedUserId === 'unavailable' ? (
+                            <div className="flex flex-col items-center py-2">
+                              <Ban className="w-6 h-6 text-red-500 mb-2" />
+                              <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">Marked Unavailable</p>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Booked By</p>
+                              <p className="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">{bookedUser?.name || 'Unknown User'}</p>
+                              <p className="text-[10px] font-mono text-gray-500 truncate">{bookedUserId}</p>
+                            </>
+                          )}
+                        </div>
+                        
+                        <button
+                          onClick={() => bookedUserId === 'unavailable' ? handleToggleSlotMachineAvailability(machineNum, false) : handleClearSlot(machineNum)}
+                          disabled={isClearingSlot}
+                          className={`w-full py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border flex items-center justify-center gap-2 ${
+                            bookedUserId === 'unavailable' 
+                              ? 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white' 
+                              : 'bg-red-50 text-red-600 border-red-100 hover:bg-red-600 hover:text-white'
+                          }`}
+                        >
+                          {isClearingSlot ? <Loader2 className="w-3 h-3 animate-spin" /> : bookedUserId === 'unavailable' ? <CheckCircle2 className="w-3 h-3" /> : <Trash2 className="w-3 h-3" />}
+                          {bookedUserId === 'unavailable' ? 'Make Available' : 'Clear Slot'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3 w-full">
+                        <div className="py-2">
+                          <span className="px-4 py-2 bg-green-100 text-green-700 text-[10px] font-black uppercase tracking-widest rounded-full">
+                            Available
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleToggleSlotMachineAvailability(machineNum, true)}
+                          disabled={isClearingSlot}
+                          className="w-full py-3 bg-gray-50 text-gray-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-gray-800 hover:text-white transition-all border border-gray-100 dark:border-gray-800 flex items-center justify-center gap-2"
+                        >
+                          {isClearingSlot ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />}
+                          Mark Unavailable
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Decorative background element */}
+                    <div className={`absolute -right-4 -bottom-4 w-24 h-24 rounded-full blur-3xl opacity-10 transition-all duration-500 ${
+                      bookedUserId ? (bookedUserId === 'unavailable' ? 'bg-red-600' : 'bg-blue-600') : 'bg-green-600'
+                    }`} />
+                  </div>
+                );
+              })}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

@@ -18,7 +18,11 @@
         "status": { "type": "string", "enum": ["active", "inactive"], "description": "Staff status" },
         "studentId": { "type": "string", "description": "User's student ID" },
         "isRegistered": { "type": "boolean", "description": "Whether the user is registered" },
+        "emailVerified": { "type": "boolean", "description": "Whether the user has verified their email address" },
         "walletBalance": { "type": "number", "description": "User's current wallet balance in INR" },
+        "laundryCredits": { "type": "number", "description": "Available laundry credits balance" },
+        "totalLoyaltyCreditsEarned": { "type": "number", "description": "Total loyalty credits accumulated from completed washes" },
+        "completedWashCount": { "type": "number", "description": "Number of completed washes" },
         "fcmTokens": {
           "type": "array",
           "items": { "type": "string" },
@@ -65,6 +69,9 @@
         "approxLoad": { "type": "string", "enum": ["1-2 kg", "3-4 kg", "5-6 kg"], "description": "Approximate load" },
         "price": { "type": "number", "description": "Total price in INR" },
         "status": { "type": "string", "enum": ["pending", "paid", "completed", "rejected", "rescheduled", "In Wash", "In Dryer", "Ready to collect", "Ready to deliver", "Ready for pick up", "Washing completed", "Out for delivery"], "description": "Booking status" },
+        "loyaltyRewarded": { "type": "boolean", "description": "Whether loyalty credits have been awarded for this completed wash" },
+        "loyaltyCreditsAwarded": { "type": "number", "description": "Number of loyalty credits awarded" },
+        "loyaltyRewardedAt": { "type": "string", "description": "Timestamp when loyalty credits were awarded" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Booking creation timestamp" }
       },
       "required": ["userId", "date", "timeSlot", "machineNumber", "price", "status"]
@@ -218,9 +225,31 @@
         "manage_inventory": { "type": "boolean" },
         "view_reports": { "type": "boolean" }
       }
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "Customer reviews, inquiries, and staff responses.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "category": { "type": "string" },
+        "adminReply": { "type": "string" },
+        "repliedAt": { "type": "string" },
+        "repliedBy": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      }
     }
   },
   "firestore": {
+    "/feedback/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "Customer feedback and inquiries"
+    },
     "/users/{userId}": {
       "schema": "User",
       "description": "User profiles"

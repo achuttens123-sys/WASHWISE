@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { CheckCircle2, Calendar, Clock, Monitor, ArrowRight, Download, Share2, Printer, ReceiptText, User, Hash, CreditCard, AlertCircle, RefreshCw, Check } from 'lucide-react';
+import { CheckCircle2, Calendar, Clock, Monitor, ArrowRight, Download, Share2, Printer, ReceiptText, User, Hash, CreditCard, AlertCircle, RefreshCw, Check, MessageSquare, Star, Sparkles } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Booking } from '../types';
 import { jsPDF } from 'jspdf';
+import FeedbackModal from '../components/FeedbackModal';
 
 const Confirmation: React.FC = () => {
   const navigate = useNavigate();
@@ -15,6 +16,7 @@ const Confirmation: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
 
   useEffect(() => {
     const fetchBooking = async () => {
@@ -82,6 +84,8 @@ const Confirmation: React.FC = () => {
       doc.text('LAUNDRY & DRY CLEANING CHALLAN SLIP', margin, 31);
 
       // Invoice metadata (top-right)
+      const displayId = booking.bookingId || bookingId?.toUpperCase() || 'N/A';
+
       doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
@@ -90,7 +94,7 @@ const Confirmation: React.FC = () => {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(107, 114, 128); // Gray 500
-      doc.text(`Invoice No: ${bookingId?.toUpperCase() || 'N/A'}`, width - margin - 55, 25);
+      doc.text(`Invoice No: ${displayId}`, width - margin - 55, 25);
       doc.text(`Date Issued: ${new Date().toLocaleDateString()}`, width - margin - 55, 30);
       doc.text(`Service Date: ${booking.date}`, width - margin - 55, 35);
 
@@ -147,18 +151,27 @@ const Confirmation: React.FC = () => {
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(75, 85, 99);
       
+      const isCreditPayment = booking.paymentType === 'laundry_credits' || (booking.creditsUsed !== undefined && booking.creditsUsed > 0);
       const deliveryFee = booking.pickupDrop ? (booking.deliveryFee ?? 30) : 0;
       const basePrice = booking.price - deliveryFee;
 
       doc.text(`${booking.serviceType}`, margin + 4, rowY);
       doc.text(`${booking.approxLoad}`, margin + 100, rowY);
-      doc.text(`₹${basePrice.toFixed(2)}`, width - margin - 25, rowY);
+      if (isCreditPayment) {
+        doc.text(`${booking.creditsUsed} Credits (Covered)`, width - margin - 35, rowY);
+      } else {
+        doc.text(`₹${basePrice.toFixed(2)}`, width - margin - 25, rowY);
+      }
 
       // If pickupDrop is enabled, show the delivery fee line
       let totalY = rowY + 12;
       if (booking.pickupDrop) {
         doc.text('Pickup & Drop Service Fee', margin + 4, rowY + 8);
-        doc.text(`₹${deliveryFee.toFixed(2)}`, width - margin - 25, rowY + 8);
+        if (isCreditPayment) {
+          doc.text('FREE (Subscriber)', width - margin - 35, rowY + 8);
+        } else {
+          doc.text(`₹${deliveryFee.toFixed(2)}`, width - margin - 25, rowY + 8);
+        }
         totalY += 8;
       }
 
@@ -169,10 +182,14 @@ const Confirmation: React.FC = () => {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.text('TOTAL AMOUNT PAID (INR)', margin + 4, totalY + 4);
+      doc.text('TOTAL AMOUNT PAID', margin + 4, totalY + 4);
       doc.setFontSize(13);
       doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-      doc.text(`₹${booking.price.toFixed(2)}`, width - margin - 25, totalY + 4);
+      if (isCreditPayment) {
+        doc.text(`${booking.creditsUsed} CREDITS (₹0.00)`, width - margin - 45, totalY + 4);
+      } else {
+        doc.text(`₹${booking.price.toFixed(2)}`, width - margin - 25, totalY + 4);
+      }
 
       // Footer Notes
       doc.setFont('helvetica', 'normal');
@@ -186,7 +203,8 @@ const Confirmation: React.FC = () => {
       doc.text('THANK YOU FOR CHOOSING WASHWISE!', margin, height - 18);
 
       // Save PDF
-      doc.save(`Washwise_Invoice_${bookingId?.toUpperCase() || 'Booking'}.pdf`);
+      const pdfId = (booking.bookingId || bookingId || 'Booking').replace(/\//g, '_');
+      doc.save(`Washwise_Invoice_${pdfId}.pdf`);
     } catch (err) {
       console.error('Failed to generate PDF invoice:', err);
     } finally {
@@ -197,7 +215,10 @@ const Confirmation: React.FC = () => {
   const handleShareReceipt = async () => {
     if (!booking) return;
 
-    const shareText = `WASHWISE LAUNDRY CHALLAN\n\nBooking ID: ${bookingId?.toUpperCase()}\nCustomer: ${booking.userName}\nService: ${booking.serviceType} (${booking.approxLoad})\nDate: ${booking.date} at ${booking.timeSlot}\nAssigned Machine: Machine #${booking.machineNumber || 'Pending'}\nTotal Paid: ₹${booking.price.toFixed(2)}\nStatus: ${booking.status.toUpperCase()}\n\nThank you for choosing Washwise!`;
+    const isCreditPayment = booking.paymentType === 'laundry_credits' || (booking.creditsUsed !== undefined && booking.creditsUsed > 0);
+    const displayId = booking.bookingId || bookingId?.toUpperCase() || 'N/A';
+    const amountStr = isCreditPayment ? `${booking.creditsUsed} Laundry Credits (₹0.00)` : `₹${booking.price.toFixed(2)}`;
+    const shareText = `WASHWISE LAUNDRY CHALLAN\n\nBooking ID: ${displayId}\nCustomer: ${booking.userName}\nService: ${booking.serviceType} (${booking.approxLoad})\nDate: ${booking.date} at ${booking.timeSlot}\nAssigned Machine: Machine #${booking.machineNumber || 'Pending'}\nTotal Paid: ${amountStr}\nStatus: ${booking.status.toUpperCase()}\n\nThank you for choosing Washwise!`;
 
     if (navigator.share) {
       try {
@@ -315,7 +336,7 @@ const Confirmation: React.FC = () => {
                   <Hash className="w-3 h-3 mr-1" />
                   <span className="text-[10px] font-bold uppercase tracking-wider">Booking ID</span>
                 </div>
-                <p className="text-sm font-black text-gray-800 dark:text-gray-100 break-all">{bookingId?.toUpperCase()}</p>
+                <p className="text-sm font-black text-gray-800 dark:text-gray-100 break-all">{booking.bookingId || bookingId?.toUpperCase()}</p>
               </motion.div>
 
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.7 }} className="space-y-1">
@@ -375,23 +396,73 @@ const Confirmation: React.FC = () => {
                 <span className="text-xs font-bold uppercase tracking-wider">Service Summary</span>
               </div>
               <div className="bg-gray-50 dark:bg-gray-800/50 rounded-2xl p-4 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">{booking.serviceType} ({booking.approxLoad})</span>
-                  <span className="font-bold text-gray-800 dark:text-gray-200">₹{basePrice.toFixed(2)}</span>
-                </div>
-                {booking.pickupDrop && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500 dark:text-gray-400">Pickup & Drop Service</span>
-                    <span className="font-bold text-gray-800 dark:text-gray-200">₹{deliveryFee.toFixed(2)}</span>
-                  </div>
+                {booking.paymentType === 'laundry_credits' || (booking.creditsUsed !== undefined && booking.creditsUsed > 0) ? (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">{booking.serviceType} ({booking.approxLoad})</span>
+                      <span className="font-bold text-green-600 dark:text-green-400">{booking.creditsUsed} Credits</span>
+                    </div>
+                    {booking.serviceType === 'Wash & Fold (Per Piece)' && booking.pieceBreakdown && booking.pieceBreakdown.length > 0 && (
+                      <div className="py-2 px-3 my-1 bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 space-y-1">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Itemized Garments</p>
+                        {booking.pieceBreakdown.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                            <span>{item.count}x {item.name}</span>
+                            <span className="font-semibold text-green-600 dark:text-green-400">
+                              {item.totalCredits || (item.subscriberCredits ? item.subscriberCredits * item.count : (item.unitCredits ? item.unitCredits * item.count : item.count * 3))} Credits
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {booking.pickupDrop && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">Pickup & Drop Service</span>
+                        <span className="font-bold text-green-600 dark:text-green-400">FREE (Subscriber Benefit)</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center pt-3 border-t border-gray-200 dark:border-gray-700 mt-2">
+                      <div className="flex items-center text-green-600 dark:text-green-400">
+                        <CreditCard className="w-4 h-4 mr-2" />
+                        <span className="text-xs font-bold uppercase tracking-wider">Total Paid</span>
+                      </div>
+                      <span className="text-lg font-black text-green-600 dark:text-green-400">
+                        {booking.creditsUsed} Credits (₹0.00)
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">{booking.serviceType} ({booking.approxLoad})</span>
+                      <span className="font-bold text-gray-800 dark:text-gray-200">₹{basePrice.toFixed(2)}</span>
+                    </div>
+                    {booking.serviceType === 'Wash & Fold (Per Piece)' && booking.pieceBreakdown && booking.pieceBreakdown.length > 0 && (
+                      <div className="py-2 px-3 my-1 bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 space-y-1">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Itemized Garments</p>
+                        {booking.pieceBreakdown.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                            <span>{item.count}x {item.name}</span>
+                            <span>₹{item.totalPrice}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {booking.pickupDrop && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">Pickup & Drop Service</span>
+                        <span className="font-bold text-gray-800 dark:text-gray-200">₹{deliveryFee.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center pt-3 border-t border-gray-200 dark:border-gray-700 mt-2">
+                      <div className="flex items-center text-blue-600 dark:text-blue-400">
+                        <CreditCard className="w-4 h-4 mr-2" />
+                        <span className="text-xs font-bold uppercase tracking-wider">Total Amount Paid</span>
+                      </div>
+                      <span className="text-xl font-black text-gray-800 dark:text-gray-100">₹{booking.price.toFixed(2)}</span>
+                    </div>
+                  </>
                 )}
-                <div className="flex justify-between items-center pt-3 border-t border-gray-200 dark:border-gray-700 mt-2">
-                  <div className="flex items-center text-blue-600 dark:text-blue-400">
-                    <CreditCard className="w-4 h-4 mr-2" />
-                    <span className="text-xs font-bold uppercase tracking-wider">Total Amount Paid</span>
-                  </div>
-                  <span className="text-xl font-black text-gray-800 dark:text-gray-100">₹{booking.price.toFixed(2)}</span>
-                </div>
               </div>
             </div>
 
@@ -412,6 +483,35 @@ const Confirmation: React.FC = () => {
             ))}
           </div>
         </motion.div>
+
+        {/* Optional Post-Payment Feedback Card */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border border-blue-100 dark:border-blue-900/40 rounded-3xl p-5 sm:p-6 shadow-sm no-print flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3 text-center sm:text-left">
+            <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
+              <MessageSquare className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 justify-center sm:justify-start">
+                <span className="text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">
+                  Optional Feedback
+                </span>
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              </div>
+              <h4 className="text-sm font-bold text-gray-900 dark:text-white">
+                How was your payment & booking process?
+              </h4>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Help us improve WashWise! Takes less than 15 seconds.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsFeedbackModalOpen(true)}
+            className="w-full sm:w-auto px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-2xl transition-all shadow-md shadow-blue-200 dark:shadow-none flex items-center justify-center gap-2 uppercase tracking-wider shrink-0"
+          >
+            <Star className="w-4 h-4 fill-amber-300 text-amber-300" /> Rate & Feedback
+          </button>
+        </div>
 
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row gap-4 no-print">
@@ -456,6 +556,16 @@ const Confirmation: React.FC = () => {
           </button>
         </div>
       </motion.div>
+
+      {/* Optional Post-Payment Feedback Modal */}
+      <FeedbackModal
+        isOpen={isFeedbackModalOpen}
+        onClose={() => setIsFeedbackModalOpen(false)}
+        bookingId={booking?.bookingId || bookingId || undefined}
+        title="Payment & Booking Feedback"
+        subtitle="How was your booking & payment experience? This is completely optional."
+        isOptional={true}
+      />
 
       {/* Print Styles */}
       <style>{`

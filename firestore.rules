@@ -13,23 +13,30 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return isAuthenticated() && 
-             ((request.auth.token.email != null && (request.auth.token.email == "server@washwise.com" || request.auth.token.email == "ashwinchuttipara@gmail.com" || request.auth.token.email == "21ba14250@rit.ac.in")) ||
-              (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin') ||
-              (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)) &&
-               get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') == 'super_admin'));
+      return isAuthenticated() && (
+             request.auth.uid == 'gjbVlTdjgYPIHvfuukPpdAmkJb43' ||
+             (request.auth.token.email != null && (
+               request.auth.token.email.matches('(?i)^(server@washwise\\.com|ashwinchuttipara@gmail\\.com|21ba14250@rit\\.ac\\.in)$') ||
+               request.auth.token.email in ["server@washwise.com", "ashwinchuttipara@gmail.com", "21ba14250@rit.ac.in", "SERVER@WASHWISE.COM", "ASHWINCHUTTIPARA@GMAIL.COM", "21BA14250@RIT.AC.IN"]
+             )) ||
+             (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)) &&
+              get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') == 'super_admin') ||
+             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin' ||
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'
+             ))
+      );
     }
 
     function isAdmin() {
-      return isAuthenticated() && 
-             (isSuperAdmin() ||
-              (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-               (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin' ||
-                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('userType', '') == 'admin' ||
-                get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') in ['super_admin', 'store_manager', 'store_staff', 'delivery_staff'])) ||
-              (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)) &&
-               get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') != null));
+      return isAuthenticated() && (
+             isSuperAdmin() ||
+             (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email))) ||
+             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') != '' ||
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'
+             ))
+      );
     }
 
     function getAdminRole() {
@@ -99,7 +106,8 @@ service cloud.firestore {
     // ===============================================================
 
     match /system_test/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin() || isSuperAdmin();
     }
 
     match /settings/{settingId} {
@@ -107,11 +115,39 @@ service cloud.firestore {
       allow write: if isAdmin() || isSuperAdmin();
     }
 
-    match /users/{userId} {
-      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin() || isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()));
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (isOwner(userId) || isAdmin() || isSuperAdmin() || (isStoreManager() && resource.data.get('storeId', '') == getStoreId()));
+    match /counters/{counterId} {
+      allow read, create, update: if isAuthenticated();
       allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        isOwner(userId) || 
+        isAdmin() || 
+        isSuperAdmin() || 
+        (isStoreManager() && resource.data.get('storeId', '') == getStoreId())
+      );
+      
+      allow create: if isAuthenticated() && request.auth.uid == userId && (
+        isSuperAdmin() || (
+          request.resource.data.get('role', 'user') != 'admin' &&
+          (request.resource.data.get('adminRole', null) == null || request.resource.data.get('adminRole', '') == '') &&
+          request.resource.data.get('isSuspended', false) == false
+        )
+      );
+
+      allow update: if isAuthenticated() && (
+        isAdmin() || 
+        isSuperAdmin() || 
+        (isStoreManager() && resource.data.get('storeId', '') == getStoreId()) ||
+        (isOwner(userId) && (
+          (request.resource.data.get('role', 'user') != 'admin' || resource.data.get('role', 'user') == 'admin') &&
+          (request.resource.data.get('adminRole', null) == null || request.resource.data.get('adminRole', '') == '' || request.resource.data.get('adminRole', '') == resource.data.get('adminRole', '')) &&
+          (request.resource.data.get('isSuspended', false) == resource.data.get('isSuspended', false))
+        ))
+      );
+
+      allow delete: if isAuthenticated() && (isOwner(userId) || isAdmin() || isSuperAdmin());
     }
 
     match /slots/{slotId} {
@@ -122,7 +158,7 @@ service cloud.firestore {
 
     match /bookings/{bookingId} {
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || canAccessBooking(resource.data) || isAdmin() || isSuperAdmin());
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.userId || isAdmin() || isSuperAdmin());
       allow update: if isAuthenticated() && (request.auth.uid == resource.data.userId || canAccessBooking(resource.data) || isAdmin() || isSuperAdmin());
       allow delete: if isAdmin() || isSuperAdmin();
     }
@@ -142,7 +178,7 @@ service cloud.firestore {
     match /machines/{machineId} {
       allow read: if isAuthenticated();
       allow create: if isAdmin() || isSuperAdmin();
-      allow update: if isAuthenticated();
+      allow update: if isAdmin() || isSuperAdmin() || isStoreManager() || isStoreStaff();
       allow delete: if isAdmin() || isSuperAdmin();
     }
 
@@ -158,22 +194,49 @@ service cloud.firestore {
 
     match /limited_offers/{offerId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if isAdmin() || isSuperAdmin();
 
       match /daily_stats/{date} {
         allow read: if true;
-        allow write: if true;
+        allow write: if isAuthenticated();
       }
     }
 
     match /offer_redemptions/{redemptionId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if isAuthenticated() && (resource == null || request.auth.uid == resource.data.userId || isAdmin() || isSuperAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.userId || isAdmin() || isSuperAdmin());
+      allow update, delete: if isAdmin() || isSuperAdmin();
     }
 
     match /wallet_transactions/{txId} {
-      allow read: if true;
-      allow write: if true;
+      allow read: if isAuthenticated() && (resource == null || request.auth.uid == resource.data.userId || isAdmin() || isSuperAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.userId || isAdmin() || isSuperAdmin());
+      allow update, delete: if isAdmin() || isSuperAdmin();
+    }
+
+    match /feedback/{feedbackId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+    match /referrals/{referralId} {
+      allow read: if isAuthenticated() && (
+        resource == null || 
+        request.auth.uid == resource.data.referrerId || 
+        request.auth.uid == resource.data.referredUserId || 
+        isAdmin() || 
+        isSuperAdmin()
+      );
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.referrerId || 
+        request.auth.uid == resource.data.referredUserId || 
+        isAdmin() || 
+        isSuperAdmin()
+      );
+      allow delete: if isAdmin() || isSuperAdmin();
     }
   }
 }

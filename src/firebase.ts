@@ -15,7 +15,7 @@ export const auth = initializeAuth(app, {
 
 // Initialize Firestore with settings to handle proxy/iframe connection issues
 const firestoreSettings = {
-  experimentalForceLongPolling: true,
+  experimentalAutoDetectLongPolling: true,
   ignoreUndefinedProperties: true,
 };
 
@@ -23,7 +23,7 @@ let dbInstance;
 try {
   const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
   dbInstance = initializeFirestore(app, firestoreSettings, dbId);
-  console.log(`Firestore initialized with database ${dbId} and long polling settings`);
+  console.log(`Firestore initialized with database ${dbId}`);
 } catch (error) {
   console.error("Error initializing Firestore, falling back to default:", error);
   dbInstance = initializeFirestore(app, firestoreSettings);
@@ -31,24 +31,6 @@ try {
 
 export const db = dbInstance;
 export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
-
-// Validate Connection to Firestore
-import { getDocFromServer, doc } from 'firebase/firestore';
-async function validateConnection() {
-  try {
-    await getDocFromServer(doc(db, 'system_test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && (error.message.includes('the client is offline') || (error as any).code === 'unavailable')) {
-      console.warn("Firestore connection check deferred (operating in offline/reconnecting mode).");
-    } else {
-      console.warn("Firestore connection test info:", error);
-    }
-  }
-}
-
-if (typeof window !== 'undefined') {
-  setTimeout(validateConnection, 2000);
-}
 
 export enum OperationType {
   CREATE = 'create',

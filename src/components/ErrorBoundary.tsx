@@ -21,6 +21,16 @@ class ErrorBoundary extends Component<Props, State> {
   public static getDerivedStateFromError(error: Error): State {
     let userMessage = 'Something went wrong. Please try again.';
     
+    // Catch dynamic module import failures (e.g. after code update or network hiccup)
+    const isDynamicImportError = 
+      error.message?.includes('Failed to fetch dynamically imported module') ||
+      error.message?.includes('error loading dynamically imported module') ||
+      error.name === 'ChunkLoadError';
+
+    if (isDynamicImportError) {
+      userMessage = 'A fresh app update is available. Click below or refresh to load the latest version.';
+    }
+
     try {
       // Check if the error message is a JSON string from handleFirestoreError
       const errorInfo = JSON.parse(error.message);
@@ -28,7 +38,7 @@ class ErrorBoundary extends Component<Props, State> {
         userMessage = errorInfo.userMessage;
       }
     } catch (e) {
-      // Not a JSON error message, use default
+      // Not a JSON error message, use default or dynamic import message
     }
 
     return { hasError: true, error, userMessage };

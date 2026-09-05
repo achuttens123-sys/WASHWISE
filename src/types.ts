@@ -23,15 +23,63 @@ export interface User {
   package?: string;
   subscriptionPaid?: boolean;
   subscriptionStartDate?: string;
+  subscriptionSnapshot?: SubscriptionSnapshot;
   kilosLeft?: number;
+  laundryCredits?: number;
+  totalMonthlyCredits?: number;
+  creditResetDate?: string;
   isSuspended?: boolean;
   walletBalance?: number;
   photoURL?: string;
+  referralCode?: string;
+  referredBy?: string;
+  referralCount?: number;
+  totalReferralCreditsEarned?: number;
+  totalReferralCashEarned?: number;
+  totalLoyaltyCreditsEarned?: number;
+  completedWashCount?: number;
   createdAt?: any;
   termsAccepted?: boolean;
+  emailVerified?: boolean;
   deviceIds?: string[];
   deviceId?: string;
   ipAddress?: string;
+}
+
+export interface LoyaltySettings {
+  enabled: boolean;
+  creditsPerWash: number; // e.g. 5
+  redemptionThreshold: number; // e.g. 40
+  rewardOnFreeWash?: boolean;
+}
+
+export interface ReferralSettings {
+  enabled: boolean;
+  referrerCredits: number;
+  referrerWalletCash: number;
+  refereeBonusCredits: number;
+  refereeDiscountRupees: number;
+  minBookingAmountToReward?: number;
+  rewardTrigger?: 'first_order' | 'subscription_purchase' | 'immediate';
+}
+
+export interface ReferralRecord {
+  id: string;
+  referrerId: string;
+  referrerName: string;
+  referrerEmail?: string;
+  referralCode: string;
+  referredUserId: string;
+  referredUserName: string;
+  referredUserEmail?: string;
+  status: 'pending' | 'completed' | 'expired';
+  rewardCredits: number;
+  rewardWalletCash: number;
+  refereeBonusCredits: number;
+  refereeDiscountRupees: number;
+  orderId?: string;
+  createdAt: string;
+  completedAt?: string;
 }
 
 export interface Store {
@@ -96,12 +144,65 @@ export interface Bag {
   tagId: string;
 }
 
+export interface PricingSettings {
+  regular_price_per_kg: number;
+  offer_price_per_kg: number;
+  express_regular_price_per_kg: number;
+  express_offer_price_per_kg: number;
+  limited_time_offer: boolean;
+  pricePerKg?: number;
+  expressWash?: number;
+  washFold?: number;
+  instantBooking?: number;
+  minCharge: number;
+  minLoad: number;
+  deliveryFee: number;
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  name: string;
+  regular_price: number;
+  offer_price: number;
+  price: number;
+  originalPrice: number;
+  credits: number;
+  monthlyCredits?: number;
+  kg_equivalent: number;
+  kgLimit?: number;
+  discount: number;
+  savings?: number;
+  mostPopular?: boolean;
+  isMaxSavings?: boolean;
+  active?: boolean;
+  features?: string[];
+  description?: string;
+}
+
+export interface SubscriptionSnapshot {
+  plan_name: string;
+  regular_price: number;
+  offer_price: number;
+  price_paid: number;
+  credits: number;
+  kg_equivalent: number;
+  offer_active: boolean;
+  purchase_date: string;
+}
+
 export interface Package {
   id: string;
   name: string;
   price: number;
   originalPrice: number;
+  regular_price?: number;
+  offer_price?: number;
+  credits?: number;
+  kg_equivalent?: number;
   description: string;
+  features?: string[];
+  mostPopular?: boolean;
+  isMaxSavings?: boolean;
 }
 
 export interface Slot {
@@ -114,8 +215,64 @@ export interface Slot {
   isPaused?: boolean;
 }
 
+export interface GarmentPieceItem {
+  id: string;
+  category: 'Tops' | 'Bottoms' | 'Combos & Sets' | 'Activewear' | 'Whites' | string;
+  subCategory?: string;
+  name: string;
+  description?: string;
+  includes?: string;
+  regular_price: number; // Regular reference price
+  offer_price: number; // Promotional offer price
+  price: number; // Active price
+  avgWeight?: string; // e.g. "250g", "700g"
+  approxWeightKg?: number;
+  subscriberCredits?: number; // credits deducted for active subscribers (e.g. 3, 8, 5)
+  unitCredits?: number;
+  active?: boolean;
+  offer_active?: boolean;
+}
+
+export interface GarmentPieceSnapshot {
+  garment_id: string;
+  garment_name: string;
+  quantity: number;
+  regular_unit_price: number;
+  offer_unit_price: number;
+  price_used: number;
+  offer_active: boolean;
+  total_price: number;
+  timestamp: string;
+}
+
+export interface SelectedPieceItem {
+  id: string;
+  category: string;
+  subCategory?: string;
+  name: string;
+  description?: string;
+  includes?: string;
+  count: number;
+  unitPrice: number;
+  regularUnitPrice?: number;
+  offerUnitPrice?: number;
+  regular_unit_price?: number;
+  offer_unit_price?: number;
+  price_used?: number;
+  offer_active?: boolean;
+  totalPrice: number;
+  totalRegularPrice?: number;
+  savings?: number;
+  totalSavings?: number;
+  unitCredits?: number;
+  subscriberCredits?: number;
+  totalCredits?: number;
+  avgWeight?: string;
+}
+
 export interface Booking {
   id?: string;
+  bookingId?: string; // Formatted ID: e.g. 0001/AUG/26/1007
   userId: string;
   userName: string;
   date: string;
@@ -130,10 +287,23 @@ export interface Booking {
   storeId?: string;
   staffId?: string;
   deliveryStaffId?: string;
-  serviceType: 'Wash & Fold' | 'Express Wash' | 'Instant Booking' | 'Subscription';
-  approxLoad: '1-4 kg' | '5 kg' | '6 kg' | '7+ kg';
+  serviceType: 'Wash & Fold' | 'Express Wash' | 'Wash & Fold (Per Piece)' | 'Instant Booking' | 'Subscription';
+  approxLoad?: '1-4 kg' | '5 kg' | '6 kg' | '7+ kg' | string;
+  garmentPieces?: Record<string, number>;
+  pieceBreakdown?: SelectedPieceItem[];
+  garmentPieceSnapshots?: GarmentPieceSnapshot[];
+  totalPieces?: number;
   price: number;
+  regular_price_per_kg?: number;
+  offer_price_per_kg?: number;
+  price_used?: number;
+  offer_active?: boolean;
+  creditsUsed?: number;
+  paymentType?: 'direct_inr' | 'laundry_credits' | 'wallet' | 'card' | 'netbanking' | 'pay_at_store';
   status: 'pending' | 'paid' | 'completed' | 'rejected' | 'rescheduled' | 'In Wash' | 'In Dryer' | 'Ready to collect' | 'Ready to deliver' | 'Ready for pick up' | 'Washing completed' | 'Out for delivery';
+  loyaltyRewarded?: boolean;
+  loyaltyCreditsAwarded?: number;
+  loyaltyRewardedAt?: string;
   packageId?: string;
   garmentInstructions?: string;
   createdAt?: any;

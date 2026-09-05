@@ -92,6 +92,13 @@ const StoreManagerDashboard: React.FC = () => {
   const updateBookingStatus = async (id: string, status: Booking['status']) => {
     try {
       await updateDoc(doc(db, 'bookings', id), { status });
+      if (status === 'completed' || status === 'Washing completed') {
+        fetch('/api/loyalty/trigger-reward', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookingId: id })
+        }).catch(() => {});
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${id}`);
     }
@@ -368,7 +375,13 @@ const StoreManagerDashboard: React.FC = () => {
             <div className="grid grid-cols-1 gap-4">
               {bookings
                 .filter(b => b.date === format(new Date(), 'yyyy-MM-dd'))
-                .filter(b => b.userName.toLowerCase().includes(searchTerm.toLowerCase()) || b.id?.toLowerCase().includes(searchTerm.toLowerCase()))
+                .filter(b => {
+                  const search = (searchTerm || '').toLowerCase();
+                  return (b.userName || '').toLowerCase().includes(search) || 
+                         (b.id || '').toLowerCase().includes(search) || 
+                         (b.bookingId || '').toLowerCase().includes(search) ||
+                         (b.userId || '').toLowerCase().includes(search);
+                })
                 .map((booking) => (
                   <div key={booking.id} className="bg-white dark:bg-gray-900 p-6 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
                     <div className="flex items-center gap-4">
@@ -376,7 +389,12 @@ const StoreManagerDashboard: React.FC = () => {
                         <User className="w-6 h-6 text-blue-600" />
                       </div>
                       <div>
-                        <p className="text-sm font-black text-gray-800 dark:text-gray-100">{booking.userName}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-black text-gray-800 dark:text-gray-100">{booking.userName}</p>
+                          <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
+                            {booking.bookingId || `#${booking.id?.slice(-6).toUpperCase()}`}
+                          </span>
+                        </div>
                         <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">{booking.timeSlot}</p>
                       </div>
                     </div>
@@ -465,11 +483,17 @@ const StoreManagerDashboard: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
                   {bookings
-                    .filter(b => b.userName.toLowerCase().includes(searchTerm.toLowerCase()) || b.id?.toLowerCase().includes(searchTerm.toLowerCase()))
+                    .filter(b => {
+                      const search = (searchTerm || '').toLowerCase();
+                      return (b.userName || '').toLowerCase().includes(search) || 
+                             (b.id || '').toLowerCase().includes(search) || 
+                             (b.bookingId || '').toLowerCase().includes(search) ||
+                             (b.userId || '').toLowerCase().includes(search);
+                    })
                     .map((booking) => (
                       <tr key={booking.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-all">
                         <td className="px-6 py-4">
-                          <span className="text-xs font-black text-gray-800 dark:text-gray-100">#{booking.id?.slice(-6).toUpperCase()}</span>
+                          <span className="text-xs font-black text-gray-800 dark:text-gray-100">{booking.bookingId || `#${booking.id?.slice(-6).toUpperCase()}`}</span>
                         </td>
                         <td className="px-6 py-4">
                           <p className="text-sm font-bold text-gray-800 dark:text-gray-100">{booking.userName}</p>

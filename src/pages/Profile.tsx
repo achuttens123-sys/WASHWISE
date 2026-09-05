@@ -1,19 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { User, Mail, GraduationCap, Calendar, Settings, LogOut, Wallet, History, Shield, Loader2, CheckCircle, ArrowLeft, ArrowRight, AlertCircle, Trophy, Zap, Star, Gift, Copy, Share2, TrendingUp, X, Check, MapPin, Trash2, Edit3, PhoneCall, Plus } from 'lucide-react';
+import { User, Mail, GraduationCap, Calendar, Settings, LogOut, Wallet, History, Shield, Loader2, CheckCircle, ArrowLeft, ArrowRight, AlertCircle, Trophy, Zap, Star, Gift, Copy, Share2, TrendingUp, X, Check, MapPin, Trash2, Edit3, PhoneCall, Plus, HelpCircle, MessageSquare, Send, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { collection, query, where, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { Booking } from '../types';
 import SubscriptionPlansModal from '../components/SubscriptionPlansModal';
-import { initiateRazorpayPayment } from '../services/RazorpayService';
+import FeedbackModal from '../components/FeedbackModal';
+import { ReferralCard } from '../components/ReferralCard';
+import { useSettings } from '../context/SettingsContext';
+import { getReferralShareUrl, getReferralShareText } from '../utils/referral';
+import { ReferralRecord } from '../types';
 
 const Profile: React.FC = () => {
   const { user, logout, updateUser } = useAuth();
+  const { settings } = useSettings();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'profile' | 'wallet' | 'history'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'wallet' | 'referrals' | 'history' | 'support'>('profile');
   const [isUpgrading, setIsUpgrading] = useState(false);
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [userFeedbacks, setUserFeedbacks] = useState<any[]>([]);
+  const [loadingFeedbacks, setLoadingFeedbacks] = useState(false);
+
+  // Referral states
+  const [userReferrals, setUserReferrals] = useState<ReferralRecord[]>([]);
+  const [loadingReferrals, setLoadingReferrals] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
 
   const [isPlansModalOpen, setIsPlansModalOpen] = useState(false);
   const [showAddFundsModal, setShowAddFundsModal] = useState(false);
@@ -98,36 +111,77 @@ const Profile: React.FC = () => {
     return () => unsubscribe();
   }, [user, activeTab]);
 
+  useEffect(() => {
+    if (!user || activeTab !== 'support') return;
+    
+    setLoadingFeedbacks(true);
+    const q = query(
+      collection(db, 'feedback'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setUserFeedbacks(list);
+      setLoadingFeedbacks(false);
+    }, (error) => {
+      console.error('Error loading feedback:', error);
+      setLoadingFeedbacks(false);
+    });
+
+    return () => unsubscribe();
+  }, [user, activeTab]);
+
+  useEffect(() => {
+    if (!user || activeTab !== 'referrals') return;
+
+    setLoadingReferrals(true);
+    const q = query(
+      collection(db, 'referrals'),
+      where('referrerId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as ReferralRecord[];
+      setUserReferrals(list);
+      setLoadingReferrals(false);
+    }, (error) => {
+      console.error('Error loading referrals:', error);
+      setLoadingReferrals(false);
+    });
+
+    return () => unsubscribe();
+  }, [user, activeTab]);
+
   if (!user) return null;
 
-  const handleTopUpWithRazorpay = async (amount: number) => {
+  const handleTopUpWallet = async (amount: number) => {
     if (!user) return;
     setTopUpLoading(true);
     setTopUpError('');
     try {
-      await initiateRazorpayPayment({
-        amount: amount,
-        description: `Student Wallet Top-up (₹${amount})`,
-        type: 'wallet_topup',
-        userId: user.uid,
-        userName: user.name,
-        userEmail: user.email,
-        userPhone: user.phone || '',
-        onSuccess: async () => {
-          setTopUpLoading(false);
-          setShowAddFundsModal(false);
-          if (updateUser) {
-            await updateUser({ walletBalance: (user.walletBalance || 0) + amount });
-          }
-        },
-        onError: (err) => {
-          setTopUpLoading(false);
-          setTopUpError(err);
-        },
-        onDismiss: () => {
-          setTopUpLoading(false);
-        }
+      const response = await fetch('/api/payments/wallet-topup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          amount,
+          paymentMethod: 'card'
+        })
       });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to top up wallet');
+      }
+
+      setTopUpLoading(false);
+      setShowAddFundsModal(false);
+      if (updateUser) {
+        await updateUser({ walletBalance: data.newBalance });
+      }
     } catch (err: any) {
       setTopUpLoading(false);
       setTopUpError(err.message || 'Top-up failed');
@@ -266,7 +320,9 @@ const Profile: React.FC = () => {
               {[
                 { id: 'profile', label: 'My Profile', icon: User },
                 { id: 'wallet', label: 'Wallet', icon: Wallet },
+                { id: 'referrals', label: 'Refer & Earn', icon: Gift },
                 { id: 'history', label: 'Booking History', icon: History },
+                { id: 'support', label: 'Queries & Feedback', icon: HelpCircle },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -776,6 +832,39 @@ const Profile: React.FC = () => {
                     </div>
                   )}
 
+                  {!(user.userType === 'subscriber' || !!user.subscriptionPaid) && (user.laundryCredits && user.laundryCredits > 0) && (
+                    <div className="relative p-6 sm:p-8 bg-gradient-to-br from-emerald-600 via-teal-700 to-slate-900 rounded-2xl sm:rounded-[2.5rem] text-white overflow-hidden shadow-2xl border border-emerald-400/30">
+                      <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none" />
+                      <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                          <div className="p-3 sm:p-4 bg-emerald-500/20 rounded-2xl border border-emerald-400/30 shrink-0">
+                            <Gift className="w-6 h-6 sm:w-8 sm:h-8 text-emerald-300" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 bg-emerald-500/20 px-3 py-0.5 rounded-full border border-emerald-400/30">
+                                Promotional & Referral Credits
+                              </span>
+                            </div>
+                            <h3 className="text-xl sm:text-2xl font-display font-black uppercase tracking-tight text-white mt-1">
+                              {user.laundryCredits} Free Laundry Credits
+                            </h3>
+                            <p className="text-xs text-emerald-100 font-medium mt-0.5">
+                              Equivalent to approx. {((user.laundryCredits || 0) / 10).toFixed(1)} kg wash • Usable on any wash booking
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => navigate('/dashboard')}
+                          className="px-6 py-3 bg-white text-emerald-800 hover:bg-emerald-50 font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 shrink-0"
+                        >
+                          <span>Redeem on Wash</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {!(user.userType === 'subscriber' || !!user.subscriptionPaid) && (
                     <div className="relative p-6 sm:p-12 md:p-16 bg-primary-electric rounded-2xl sm:rounded-[3rem] text-white overflow-hidden shadow-2xl shadow-primary-electric/20 dark:shadow-none group">
                       <div className="absolute top-0 right-0 p-6 sm:p-12 opacity-10 rotate-12 group-hover:scale-110 transition-transform duration-1000">
@@ -922,7 +1011,7 @@ const Profile: React.FC = () => {
                           onClick={() => setShowAddFundsModal(true)}
                           className="flex-1 py-6 bg-primary-electric text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-primary-electric/90 transition-all active:scale-95 haptic-feedback shadow-lg shadow-primary-electric/20"
                         >
-                          Add Funds via Razorpay
+                          Add Funds to Wallet
                         </button>
                         <button className="flex-1 py-6 bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-gray-200 dark:hover:bg-white/20 transition-all backdrop-blur-md active:scale-95 haptic-feedback">
                           Transfer
@@ -1006,7 +1095,7 @@ const Profile: React.FC = () => {
                           <div className="space-y-6">
                             <div className="flex flex-wrap items-center gap-4">
                               <span className="text-[10px] font-black text-primary-electric dark:text-primary-electric-light bg-primary-electric/5 dark:bg-primary-electric/10 px-4 py-2 rounded-full border border-primary-electric/10 uppercase tracking-widest">
-                                ID: {booking.id?.slice(-6).toUpperCase()}
+                                ID: {booking.bookingId || booking.id?.slice(-6).toUpperCase()}
                               </span>
                               <span className={`text-[10px] font-black px-4 py-2 rounded-full uppercase tracking-widest border ${
                                 booking.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
@@ -1046,9 +1135,338 @@ const Profile: React.FC = () => {
                 </div>
               )}
 
-               {/* Removed Rewards Tab */}
+              {activeTab === 'support' && (
+                <div className="space-y-8 relative z-10">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 dark:border-surface-low pb-6">
+                    <div>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800/50 mb-2">
+                        <Sparkles className="w-3 h-3" /> Customer Support & Feedback
+                      </span>
+                      <h3 className="text-3xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none">
+                        Queries & Feedback
+                      </h3>
+                      <p className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">
+                        Have a question, issue, or feedback? Inform our team directly.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => setIsFeedbackModalOpen(true)}
+                      className="px-6 py-4 bg-primary-electric text-white text-xs font-black uppercase tracking-widest rounded-2xl hover:bg-primary-electric/90 transition-all shadow-lg shadow-primary-electric/20 shrink-0 flex items-center justify-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" /> Submit Query / Feedback
+                    </button>
+                  </div>
+
+                  {/* Quick Action Card */}
+                  <div className="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-3xl p-6 sm:p-8 text-white shadow-xl flex flex-col sm:flex-row items-center justify-between gap-6">
+                    <div className="space-y-2 text-center sm:text-left">
+                      <h4 className="text-xl font-black uppercase tracking-tight flex items-center justify-center sm:justify-start gap-2">
+                        Need Instant Help with a Booking? <HelpCircle className="w-5 h-5 text-yellow-300" />
+                      </h4>
+                      <p className="text-xs text-blue-100 max-w-xl font-medium">
+                        Whether it is a machine issue, payment query, or timing change, share your details and our store manager will review it.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setIsFeedbackModalOpen(true)}
+                      className="px-6 py-3.5 bg-white text-blue-600 font-bold rounded-2xl hover:bg-blue-50 transition-all shadow-md text-xs uppercase tracking-wider shrink-0"
+                    >
+                      Write To Us
+                    </button>
+                  </div>
+
+                  {/* List of Previous Feedbacks / Queries */}
+                  <div>
+                    <h4 className="text-lg font-black text-gray-800 dark:text-white uppercase tracking-tight mb-4">
+                      Your Submitted Queries & Feedback
+                    </h4>
+
+                    {loadingFeedbacks ? (
+                      <div className="flex flex-col items-center justify-center py-16">
+                        <Loader2 className="w-8 h-8 animate-spin text-primary-electric" />
+                        <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-4">
+                          Loading submitted queries...
+                        </p>
+                      </div>
+                    ) : userFeedbacks.length === 0 ? (
+                      <div className="text-center py-12 bg-gray-50/50 dark:bg-surface-low/30 rounded-3xl border border-dashed border-gray-200 dark:border-surface-low p-6">
+                        <MessageSquare className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                        <p className="text-base font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+                          No Queries or Feedback Submitted Yet
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Click "Submit Query / Feedback" above to inform us of any issue or suggestion.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {userFeedbacks.map((fb) => (
+                          <div
+                            key={fb.id}
+                            className="p-5 sm:p-6 bg-gray-50 dark:bg-surface-low/50 rounded-2xl border border-gray-100 dark:border-surface-low space-y-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                  {fb.category ? fb.category.replace('_', ' ') : 'Query'}
+                                </span>
+                                {fb.rating && (
+                                  <span className="flex items-center text-xs font-bold text-amber-500 gap-1 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1 rounded-full">
+                                    <Star className="w-3.5 h-3.5 fill-amber-400" /> {fb.rating}/5
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                {new Date(fb.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </span>
+                            </div>
+
+                            {fb.subject && (
+                              <h5 className="font-bold text-sm text-gray-900 dark:text-white">
+                                {fb.subject}
+                              </h5>
+                            )}
+
+                            <p className="text-xs font-medium text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
+                              {fb.message}
+                            </p>
+
+                            <div className="pt-1 flex items-center justify-between text-[10px] font-bold text-gray-400 border-t border-gray-100 dark:border-surface-low">
+                              <span>Status: <span className="text-blue-600 dark:text-blue-400 uppercase">{fb.status || 'Received'}</span></span>
+                              {fb.bookingId && <span>Booking ID: #{fb.bookingId.slice(-6).toUpperCase()}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'referrals' && !isUpgrading && (
+                <div className="space-y-8 sm:space-y-12 relative z-10">
+                  {/* Hero Banner */}
+                  <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-900 via-primary-electric to-[#3323cc] text-white p-6 sm:p-10 shadow-2xl">
+                    <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+                    
+                    <div className="relative z-10 space-y-3 max-w-xl">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-black uppercase tracking-wider">
+                        <Gift className="w-3.5 h-3.5" /> WashWise Referral Network
+                      </div>
+                      <h2 className="text-2xl sm:text-4xl font-display font-black tracking-tight leading-tight">
+                        Give ₹{settings?.referral?.refereeDiscountRupees ?? 50}, Earn {settings?.referral?.referrerCredits ?? 20} Credits + ₹{settings?.referral?.referrerWalletCash ?? 50}
+                      </h2>
+                      <p className="text-xs sm:text-sm text-indigo-100 font-medium leading-relaxed">
+                        Share your referral code with college friends and hostel mates. When they complete their first wash, you automatically earn laundry credits and real wallet cash!
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Share Code Section */}
+                  <div className="p-6 sm:p-8 bg-gray-50 dark:bg-surface-low rounded-3xl border border-gray-100 dark:border-surface-low space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-black uppercase tracking-wider text-gray-900 dark:text-high-contrast">
+                          Your Exclusive Referral Code
+                        </h3>
+                        <p className="text-xs text-gray-400">
+                          Friends enter this code during signup to get ₹{settings?.referral?.refereeDiscountRupees ?? 50} OFF instantly.
+                        </p>
+                      </div>
+                      <span className="text-xs font-black text-primary-electric flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5" /> Unlimited Rewarded Invites
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-3">
+                      <div className="w-full flex-1 bg-white dark:bg-surface-highest border-2 border-dashed border-primary-electric/40 rounded-2xl py-4 px-6 flex items-center justify-between shadow-sm">
+                        <span className="font-mono font-black text-2xl text-gray-900 dark:text-high-contrast tracking-widest">
+                          {user.referralCode || 'WASHWISE'}
+                        </span>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(user.referralCode || 'WASHWISE');
+                            setCodeCopied(true);
+                            setTimeout(() => setCodeCopied(false), 2500);
+                          }}
+                          className="p-2.5 text-primary-electric hover:bg-primary-electric/10 rounded-xl transition-all"
+                          title="Copy Code"
+                        >
+                          {codeCopied ? <Check className="w-5 h-5 text-emerald-500" /> : <Copy className="w-5 h-5" />}
+                        </button>
+                      </div>
+
+                      <div className="w-full sm:w-auto flex gap-2">
+                        <button
+                          onClick={() => {
+                            const shareText = getReferralShareText(user.referralCode || 'WASHWISE', user.name);
+                            const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+                            window.open(waUrl, '_blank');
+                          }}
+                          className="flex-1 sm:flex-none px-5 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+                        >
+                          <Share2 className="w-4 h-4" />
+                          <span>WhatsApp</span>
+                        </button>
+
+                        <button
+                          onClick={async () => {
+                            const code = user.referralCode || 'WASHWISE';
+                            const shareUrl = getReferralShareUrl(code);
+                            const shareText = getReferralShareText(code, user.name);
+                            if (navigator.share) {
+                              try {
+                                await navigator.share({
+                                  title: 'WashWise Laundry Referral',
+                                  text: shareText,
+                                  url: shareUrl
+                                });
+                              } catch (e) {}
+                            } else {
+                              navigator.clipboard.writeText(shareUrl);
+                              setCodeCopied(true);
+                              setTimeout(() => setCodeCopied(false), 2500);
+                            }
+                          }}
+                          className="flex-1 sm:flex-none px-5 py-4 bg-gray-900 dark:bg-surface-highest hover:bg-gray-800 text-white rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+                        >
+                          <Copy className="w-4 h-4" />
+                          <span>Copy Link</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {codeCopied && (
+                      <p className="text-center text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                        ✓ Referral code copied to clipboard!
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Summary Metric Counters */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="p-6 rounded-3xl bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 text-center">
+                      <div className="w-10 h-10 mx-auto mb-2 rounded-2xl bg-indigo-500/10 text-primary-electric flex items-center justify-center">
+                        <User className="w-5 h-5" />
+                      </div>
+                      <div className="text-3xl font-display font-black text-gray-900 dark:text-high-contrast">
+                        {userReferrals.length}
+                      </div>
+                      <div className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">
+                        Friends Invited
+                      </div>
+                    </div>
+
+                    <div className="p-6 rounded-3xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 text-center">
+                      <div className="w-10 h-10 mx-auto mb-2 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
+                        <Zap className="w-5 h-5" />
+                      </div>
+                      <div className="text-3xl font-display font-black text-gray-900 dark:text-high-contrast">
+                        {user.totalReferralCreditsEarned || (userReferrals.filter(r => r.status === 'completed').length * (settings?.referral?.referrerCredits ?? 20))}
+                      </div>
+                      <div className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">
+                        Laundry Credits Earned
+                      </div>
+                    </div>
+
+                    <div className="p-6 rounded-3xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 text-center">
+                      <div className="w-10 h-10 mx-auto mb-2 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                        <Wallet className="w-5 h-5" />
+                      </div>
+                      <div className="text-3xl font-display font-black text-gray-900 dark:text-high-contrast">
+                        ₹{user.totalReferralCashEarned || (userReferrals.filter(r => r.status === 'completed').length * (settings?.referral?.referrerWalletCash ?? 50))}
+                      </div>
+                      <div className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">
+                        Wallet Cash Won
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Referral Ledger / Friends History */}
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-lg font-black text-gray-800 dark:text-white uppercase tracking-tight">
+                        Invited Friends & Referral Status
+                      </h4>
+                      {userReferrals.filter(r => r.status === 'pending').length > 0 && (
+                        <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-3 py-1 rounded-full">
+                          {userReferrals.filter(r => r.status === 'pending').length} pending first wash
+                        </span>
+                      )}
+                    </div>
+
+                    {loadingReferrals ? (
+                      <div className="flex flex-col items-center justify-center py-16">
+                        <Loader2 className="w-8 h-8 animate-spin text-primary-electric" />
+                        <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-4">
+                          Loading referral history...
+                        </p>
+                      </div>
+                    ) : userReferrals.length === 0 ? (
+                      <div className="text-center py-12 bg-gray-50/50 dark:bg-surface-low/30 rounded-3xl border border-dashed border-gray-200 dark:border-surface-low p-6">
+                        <Gift className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                        <p className="text-base font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+                          No Friends Invited Yet
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Share your code via WhatsApp to start accumulating laundry credits and wallet cash!
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {userReferrals.map((item) => (
+                          <div
+                            key={item.id}
+                            className="p-5 bg-gray-50 dark:bg-surface-low/50 rounded-2xl border border-gray-100 dark:border-surface-low flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                          >
+                            <div className="flex items-center gap-3.5">
+                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${
+                                item.status === 'completed' 
+                                  ? 'bg-emerald-500/10 text-emerald-600' 
+                                  : 'bg-amber-500/10 text-amber-600'
+                              }`}>
+                                {item.status === 'completed' ? <CheckCircle className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
+                              </div>
+                              <div>
+                                <p className="font-bold text-sm text-gray-900 dark:text-high-contrast">
+                                  {item.referredUserName || 'Friend'}
+                                </p>
+                                <p className="text-[11px] text-gray-400">
+                                  Joined on {new Date(item.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between sm:justify-end gap-3">
+                              {item.status === 'completed' ? (
+                                <span className="inline-flex items-center gap-1.5 font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100/80 dark:bg-emerald-950/40 px-3 py-1.5 rounded-xl text-xs uppercase tracking-wider">
+                                  ✓ +{item.rewardCredits || 20} Credits & +₹{item.rewardWalletCash || 50} Cash
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-950/40 px-3 py-1.5 rounded-xl text-xs uppercase tracking-wider">
+                                  ⏳ Awaiting First Wash Order
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </motion.div>
           </AnimatePresence>
+
+          {/* Feedback Modal for User Profile */}
+          <FeedbackModal
+            isOpen={isFeedbackModalOpen}
+            onClose={() => setIsFeedbackModalOpen(false)}
+            title="Help, Queries & Feedback"
+            subtitle="Send us your questions, report issues, or provide feedback."
+            isOptional={false}
+          />
         </div>
       </div>
       <AnimatePresence>
@@ -1071,7 +1489,7 @@ const Profile: React.FC = () => {
                 <div className="flex justify-between items-start mb-12">
                   <div>
                     <h2 className="text-4xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none mb-3">Booking Details</h2>
-                    <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Transaction ID: {selectedBooking.id?.toUpperCase()}</p>
+                    <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Booking ID: {selectedBooking.bookingId || selectedBooking.id?.toUpperCase()}</p>
                   </div>
                   <button 
                     onClick={() => setShowDetailsModal(false)}
@@ -1198,13 +1616,13 @@ const Profile: React.FC = () => {
 
                 <button
                   disabled={topUpLoading || topUpAmount <= 0}
-                  onClick={() => handleTopUpWithRazorpay(topUpAmount)}
+                  onClick={() => handleTopUpWallet(topUpAmount)}
                   className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {topUpLoading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
-                    `Proceed to Pay ₹${topUpAmount} via Razorpay`
+                    `Proceed to Add ₹${topUpAmount}`
                   )}
                 </button>
               </div>

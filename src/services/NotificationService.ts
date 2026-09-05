@@ -77,19 +77,20 @@ export const sendNotification = async (
 ) => {
   let title = '';
   let message = '';
+  const displayBookingId = bookingId ? (bookingId.includes('/') ? bookingId : bookingId.slice(-6).toUpperCase()) : '';
 
   switch (type) {
     case 'booking_confirmed':
       title = 'Booking Confirmed! 🧺';
-      message = `Your laundry booking (${bookingId.slice(-6).toUpperCase()}) has been confirmed. See you at ${details.newSlot}!`;
+      message = `Your laundry booking (${displayBookingId}) has been confirmed. See you at ${details.newSlot}!`;
       break;
     case 'booking_rejected':
       title = 'Booking Rejected ❌';
-      message = `Your booking (${bookingId.slice(-6).toUpperCase()}) was rejected. Reason: ${details.reason || 'No reason provided.'}`;
+      message = `Your booking (${displayBookingId}) was rejected. Reason: ${details.reason || 'No reason provided.'}`;
       break;
     case 'booking_rescheduled':
       title = 'Booking Rescheduled 🔄';
-      message = `Your booking was rescheduled from ${details.oldSlot} to ${details.newSlot}. Reason: ${details.reason || 'Scheduling conflict.'}`;
+      message = `Your booking (${displayBookingId}) was rescheduled from ${details.oldSlot} to ${details.newSlot}. Reason: ${details.reason || 'Scheduling conflict.'}`;
       break;
   }
 

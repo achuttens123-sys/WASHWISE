@@ -54,6 +54,13 @@ const DeliveryStaffDashboard: React.FC = () => {
   const updateStatus = async (id: string, status: Booking['status']) => {
     try {
       await updateDoc(doc(db, 'bookings', id), { status });
+      if (status === 'completed' || status === 'Washing completed') {
+        fetch('/api/loyalty/trigger-reward', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookingId: id })
+        }).catch(() => {});
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${id}`);
     }

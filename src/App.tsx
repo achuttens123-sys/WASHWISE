@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AnimatePresence } from 'motion/react';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -7,21 +7,24 @@ import { SettingsProvider } from './context/SettingsContext';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import BookingDetails from './pages/BookingDetails';
-import Billing from './pages/Billing';
-import Confirmation from './pages/Confirmation';
-import Profile from './pages/Profile';
-import AdminDashboard from './pages/AdminDashboard';
-import SuperAdminDashboard from './pages/dashboards/SuperAdminDashboard';
-import StoreManagerDashboard from './pages/dashboards/StoreManagerDashboard';
-import StoreStaffDashboard from './pages/dashboards/StoreStaffDashboard';
-import DeliveryStaffDashboard from './pages/dashboards/DeliveryStaffDashboard';
 import ErrorBoundary from './components/ErrorBoundary';
 import PageTransition from './components/PageTransition';
 import LoadingScreen from './components/LoadingScreen';
 import { requestNotificationPermission, onMessageListener } from './services/NotificationService';
 import { Toaster, toast } from 'react-hot-toast';
+import { lazyWithRetry } from './utils/lazyWithRetry';
+
+// Code-split route components with automatic retry and reload resilience
+const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'));
+const BookingDetails = lazyWithRetry(() => import('./pages/BookingDetails'));
+const Billing = lazyWithRetry(() => import('./pages/Billing'));
+const Confirmation = lazyWithRetry(() => import('./pages/Confirmation'));
+const Profile = lazyWithRetry(() => import('./pages/Profile'));
+const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard'));
+const SuperAdminDashboard = lazyWithRetry(() => import('./pages/dashboards/SuperAdminDashboard'));
+const StoreManagerDashboard = lazyWithRetry(() => import('./pages/dashboards/StoreManagerDashboard'));
+const StoreStaffDashboard = lazyWithRetry(() => import('./pages/dashboards/StoreStaffDashboard'));
+const DeliveryStaffDashboard = lazyWithRetry(() => import('./pages/dashboards/DeliveryStaffDashboard'));
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode; adminOnly?: boolean }> = ({ children, adminOnly }) => {
   const { user, loading, isAdmin } = useAuth();
@@ -56,63 +59,65 @@ const AnimatedRoutes: React.FC = () => {
   const location = useLocation();
   
   return (
-    <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
-        <Route element={<Layout />}>
-          <Route path="/" element={<PageTransition><Home /></PageTransition>} />
-          <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
-          
-          <Route 
-            path="/dashboard" 
-            element={
-              <ProtectedRoute>
-                <PageTransition><Dashboard /></PageTransition>
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/booking-details" 
-            element={
-              <ProtectedRoute>
-                <PageTransition><BookingDetails /></PageTransition>
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/billing" 
-            element={
-              <ProtectedRoute>
-                <PageTransition><Billing /></PageTransition>
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/confirmation" 
-            element={
-              <ProtectedRoute>
-                <PageTransition><Confirmation /></PageTransition>
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/profile" 
-            element={
-              <ProtectedRoute>
-                <PageTransition><Profile /></PageTransition>
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/admin" 
-            element={
-              <ProtectedRoute adminOnly>
-                <PageTransition><AdminRouter /></PageTransition>
-              </ProtectedRoute>
-            } 
-          />
-        </Route>
-      </Routes>
-    </AnimatePresence>
+    <Suspense fallback={<LoadingScreen />}>
+      <AnimatePresence mode="wait">
+        <Routes location={location} key={location.pathname}>
+          <Route element={<Layout />}>
+            <Route path="/" element={<PageTransition><Home /></PageTransition>} />
+            <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
+            
+            <Route 
+              path="/dashboard" 
+              element={
+                <ProtectedRoute>
+                  <PageTransition><Dashboard /></PageTransition>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/booking-details" 
+              element={
+                <ProtectedRoute>
+                  <PageTransition><BookingDetails /></PageTransition>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/billing" 
+              element={
+                <ProtectedRoute>
+                  <PageTransition><Billing /></PageTransition>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/confirmation" 
+              element={
+                <ProtectedRoute>
+                  <PageTransition><Confirmation /></PageTransition>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/profile" 
+              element={
+                <ProtectedRoute>
+                  <PageTransition><Profile /></PageTransition>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/admin" 
+              element={
+                <ProtectedRoute adminOnly>
+                  <PageTransition><AdminRouter /></PageTransition>
+                </ProtectedRoute>
+              } 
+            />
+          </Route>
+        </Routes>
+      </AnimatePresence>
+    </Suspense>
   );
 };
 

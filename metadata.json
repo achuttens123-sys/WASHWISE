@@ -3,5 +3,8 @@
   "description": "A student-friendly laundry booking service with slot-based machine assignment.",
   "requestFramePermissions": [
     "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

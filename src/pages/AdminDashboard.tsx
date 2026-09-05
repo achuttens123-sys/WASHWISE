@@ -429,10 +429,12 @@ const AdminDashboard: React.FC = () => {
   };
 
   const filteredBookings = bookings.filter(booking => {
+    const search = (searchTerm || '').toLowerCase();
     const matchesSearch = 
-      booking.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      booking.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      booking.userId.toLowerCase().includes(searchTerm.toLowerCase());
+      (booking.userName || '').toLowerCase().includes(search) ||
+      (booking.id || '').toLowerCase().includes(search) ||
+      (booking.bookingId || '').toLowerCase().includes(search) ||
+      (booking.userId || '').toLowerCase().includes(search);
     
     const matchesStatus = statusFilter === 'all' || booking.status === statusFilter;
     
@@ -962,7 +964,7 @@ const AdminDashboard: React.FC = () => {
                   <div className="flex flex-col">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Applicable Services</label>
                     <div className="flex flex-wrap gap-2">
-                      {['Wash & Fold', 'Express Wash'].map(service => (
+                      {['Wash & Fold', 'Express Wash', 'Wash & Fold (Per Piece)'].map(service => (
                         <button
                           key={service}
                           type="button"
@@ -1132,7 +1134,7 @@ const AdminDashboard: React.FC = () => {
                   >
                     <td className="px-6 py-4">
                       <span className="text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded-lg">
-                        {booking.id?.slice(-6).toUpperCase()}
+                        {booking.bookingId || booking.id?.slice(-6).toUpperCase()}
                       </span>
                     </td>
                     <td className="px-6 py-4">
@@ -1393,11 +1395,12 @@ const AdminDashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                  {users.filter(u => 
-                    u.email.toLowerCase().includes(userSearchTerm.toLowerCase()) || 
-                    u.uid.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
-                    u.name.toLowerCase().includes(userSearchTerm.toLowerCase())
-                  ).map((u) => (
+                  {users.filter(u => {
+                    const search = (userSearchTerm || '').toLowerCase();
+                    return (u.email || '').toLowerCase().includes(search) || 
+                           (u.uid || '').toLowerCase().includes(search) ||
+                           (u.name || '').toLowerCase().includes(search);
+                  }).map((u) => (
                     <tr key={u.uid} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">

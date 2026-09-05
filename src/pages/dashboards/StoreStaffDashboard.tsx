@@ -51,6 +51,13 @@ const StoreStaffDashboard: React.FC = () => {
   const updateStatus = async (id: string, status: Booking['status']) => {
     try {
       await updateDoc(doc(db, 'bookings', id), { status });
+      if (status === 'completed' || status === 'Washing completed') {
+        fetch('/api/loyalty/trigger-reward', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookingId: id })
+        }).catch(() => {});
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${id}`);
     }
@@ -124,16 +131,33 @@ const StoreStaffDashboard: React.FC = () => {
                     <User className="w-10 h-10" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full">
                         M#{task.machineNumber}
                       </span>
                       <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-500 text-[10px] font-black uppercase tracking-widest rounded-full">
                         {task.timeSlot}
                       </span>
+                      <span className="px-3 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] font-black uppercase tracking-widest rounded-full">
+                        ID: {task.bookingId || `#${task.id?.slice(-6).toUpperCase()}`}
+                      </span>
                     </div>
                     <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">{task.userName}</h3>
                     <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">{task.serviceType} • {task.approxLoad}</p>
+                    {task.pieceBreakdown && task.pieceBreakdown.length > 0 && (
+                      <div className="mt-2 p-3 bg-blue-50/70 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800/30">
+                        <p className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-1.5">
+                          Garment Checklist ({task.totalPieces || task.pieceBreakdown.reduce((s, i) => s + (i.count || 0), 0)} items)
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {task.pieceBreakdown.map((item, idx) => (
+                            <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded-md bg-white dark:bg-gray-800 border border-blue-200/50 dark:border-blue-700/50 text-[11px] font-bold text-gray-800 dark:text-gray-200">
+                              {item.count}x {item.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {task.garmentInstructions && (
                       <div className="mt-2 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-100 dark:border-amber-800/30">
                         <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-1">Garment Instructions</p>

@@ -1,15 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, CreditCard, Loader2, CheckCircle2, ShieldCheck, Wallet, QrCode, Smartphone, Check, Copy, ExternalLink, Zap } from 'lucide-react';
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, runTransaction, onSnapshot } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { ArrowLeft, CreditCard, Loader2, CheckCircle2, ShieldCheck, Wallet, Store, Zap, Check, Sparkles, Coins } from 'lucide-react';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { Booking, Slot } from '../types';
-import { QRCodeSVG } from 'qrcode.react';
-import { sendNotification } from '../services/NotificationService';
-import { initiateRazorpayPayment } from '../services/RazorpayService';
+import { Booking } from '../types';
 
 const Billing: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -18,16 +15,12 @@ const Billing: React.FC = () => {
   const { settings } = useSettings();
   
   const [loading, setLoading] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'razorpay' | 'wallet' | 'upi'>('razorpay');
-  const [upiStep, setUpiStep] = useState<'id' | 'qr' | 'verify'>('id');
-  const [upiId, setUpiId] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'card' | 'pay_at_store' | 'subscription_credits'>('wallet');
   const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
   const [promoCode, setPromoCode] = useState('');
   const [discount, setDiscount] = useState(0);
   const [promoError, setPromoError] = useState('');
   const [promoApplied, setPromoApplied] = useState(false);
-  const [activeBookingId, setActiveBookingId] = useState<string | null>(null);
   const [storeName, setStoreName] = useState<string>('Loading...');
   const [autoDiscount, setAutoDiscount] = useState(0);
   const [limitedOffers, setLimitedOffers] = useState<any[]>([]);
@@ -38,12 +31,37 @@ const Billing: React.FC = () => {
   const packageId = searchParams.get('packageId');
   const selectedPackage = (settings?.subscriptionPlans || []).find(p => p.id === packageId);
 
+  let parsedPieceBreakdown: any[] = [];
+  try {
+    const rawBreakdown = searchParams.get('pieceBreakdown');
+    if (rawBreakdown) {
+      parsedPieceBreakdown = JSON.parse(rawBreakdown);
+    }
+  } catch (e) {
+    console.error('Failed to parse pieceBreakdown:', e);
+  }
+
+  let parsedGarmentPieces: Record<string, number> = {};
+  try {
+    const rawPieces = searchParams.get('garmentPieces');
+    if (rawPieces) {
+      parsedGarmentPieces = JSON.parse(rawPieces);
+    }
+  } catch (e) {
+    console.error('Failed to parse garmentPieces:', e);
+  }
+
+  const parsedTotalPieces = parseInt(searchParams.get('totalPieces') || '0', 10);
+
   const bookingInfo = {
     date: searchParams.get('date') || '',
     slot: searchParams.get('slot') || '',
     pickupDrop: searchParams.get('pickupDrop') === 'true',
     serviceType: searchParams.get('serviceType') || '',
     approxLoad: searchParams.get('approxLoad') || '',
+    totalPieces: parsedTotalPieces,
+    garmentPieces: parsedGarmentPieces,
+    pieceBreakdown: parsedPieceBreakdown,
     price: isSubscription ? (selectedPackage?.price || 0) : parseFloat(searchParams.get('price') || '0'),
     address: searchParams.get('address') || '',
     phone: searchParams.get('phone') || '',
@@ -75,57 +93,6 @@ const Billing: React.FC = () => {
       fetchStore();
     }
   }, [bookingInfo.storeId]);
-
-  // Listen for real-time status updates (The Protocol)
-  useEffect(() => {
-    if (!activeBookingId) return;
-
-    console.log('Protocol: Listening for payment confirmation on:', activeBookingId);
-    const unsubscribe = onSnapshot(doc(db, 'bookings', activeBookingId), async (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.status === 'paid') {
-          console.log('Protocol: Payment confirmed! Autoloading...');
-          localStorage.setItem('lastBookingId', activeBookingId);
-          
-          // If it was a subscription, update the user status
-          if (data.serviceType === 'Subscription') {
-            try {
-              const kgLimit = selectedPackage?.kgLimit ?? 12;
-              const subData = {
-                userType: 'subscriber' as const,
-                package: data.packageId || packageId || 'basic',
-                subscriptionPaid: true,
-                kilosLeft: kgLimit,
-                subscriptionStartDate: new Date().toISOString()
-              };
-              await updateDoc(doc(db, 'users', user!.uid), subData);
-              if (updateUser) {
-                await updateUser(subData);
-              }
-            } catch (err) {
-              console.error('Error updating subscription status:', err);
-            }
-          }
-
-          // Send confirmation notification/email
-          sendNotification(user!.uid, user!.email, bookingInfo.phone, 'booking_confirmed', activeBookingId, {
-            newSlot: data.serviceType === 'Subscription' ? 'Subscription' : `${data.date} at ${data.timeSlot}`
-          });
-
-          if (data.serviceType === 'Subscription') {
-            navigate('/dashboard');
-          } else {
-            navigate('/confirmation');
-          }
-        }
-      }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `bookings/${activeBookingId}`);
-    });
-
-    return () => unsubscribe();
-  }, [activeBookingId, navigate, user, bookingInfo.phone]);
 
   // Calculate Auto Discounts (Global)
   useEffect(() => {
@@ -197,22 +164,92 @@ const Billing: React.FC = () => {
     }
   };
 
-  const finalPrice = appliedLimitedOffer 
-    ? appliedLimitedOffer.discountedPrice
-    : Math.max(0, (bookingInfo.price - autoDiscount) * (1 - discount));
+  const isOfferActive = settings?.pricing?.limited_time_offer !== false;
+  const normalActiveRate = isOfferActive 
+    ? (settings?.pricing?.offer_price_per_kg ?? settings?.pricing?.pricePerKg ?? 39) 
+    : (settings?.pricing?.regular_price_per_kg ?? 69);
+  const expressActiveRate = isOfferActive 
+    ? (settings?.pricing?.express_offer_price_per_kg ?? settings?.pricing?.expressWash ?? 45) 
+    : (settings?.pricing?.express_regular_price_per_kg ?? 89);
 
-  // UPI Payment Link
-  const upiIdToUse = '9048270616@slc';
-  const transactionNote = isSubscription 
-    ? `Washwise Subscription ${selectedPackage?.name}` 
-    : `Washwise Booking ${bookingInfo.date} ${bookingInfo.slot}`;
-  const upiLink = `upi://pay?pa=${upiIdToUse}&pn=WASHWISE%20Laundry&am=${finalPrice.toFixed(2)}&cu=INR&tn=${encodeURIComponent(transactionNote)}`;
-
-  const handleCopyUPI = () => {
-    navigator.clipboard.writeText(upiIdToUse);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const getLoadKg = (approxLoad: string): number => {
+    if (approxLoad === '5 kg') return 5;
+    if (approxLoad === '6 kg') return 6;
+    if (approxLoad === '7+ kg') return 7;
+    return 4;
   };
+
+  const subscriberLoadKg = getLoadKg(bookingInfo.approxLoad);
+
+  // Compute base direct price (fallback if query param was missing)
+  const computedBasePrice = isSubscription 
+    ? (selectedPackage?.price || 0)
+    : (bookingInfo.price > 0 ? bookingInfo.price : (
+        bookingInfo.serviceType === 'Wash & Fold (Per Piece)'
+          ? (bookingInfo.pieceBreakdown || []).reduce((s: number, i: any) => s + (i.totalPrice || 0), 0)
+          : bookingInfo.serviceType === 'Express Wash'
+            ? (subscriberLoadKg * expressActiveRate)
+            : (subscriberLoadKg * normalActiveRate)
+      ));
+
+  const isSubscriber = (user?.userType === 'subscriber' || !!user?.subscriptionPaid);
+  const directDeliveryFee = (!isSubscription && bookingInfo.pickupDrop && !isSubscriber)
+    ? (bookingInfo.deliveryFee > 0 ? bookingInfo.deliveryFee : (settings?.pricing?.deliveryFee ?? 30))
+    : 0;
+
+  const appliedDiscountAmount = appliedLimitedOffer 
+    ? Math.max(0, computedBasePrice - appliedLimitedOffer.discountedPrice)
+    : Math.max(0, autoDiscount + (computedBasePrice - autoDiscount) * discount);
+
+  const directPriceWithoutDelivery = appliedLimitedOffer 
+    ? appliedLimitedOffer.discountedPrice
+    : Math.max(0, (computedBasePrice - autoDiscount) * (1 - discount));
+
+  const finalPrice = isSubscription 
+    ? directPriceWithoutDelivery 
+    : directPriceWithoutDelivery + directDeliveryFee;
+
+  const isPerPiece = bookingInfo.serviceType === 'Wash & Fold (Per Piece)';
+  const parsedTotalCreditsParam = searchParams.get('totalCredits');
+
+  // Calculate credits needed for this booking
+  let bookingCreditsNeeded = 0;
+  if (isPerPiece) {
+    if (parsedTotalCreditsParam && !isNaN(parseInt(parsedTotalCreditsParam, 10))) {
+      bookingCreditsNeeded = parseInt(parsedTotalCreditsParam, 10);
+    } else {
+      bookingCreditsNeeded = (bookingInfo.pieceBreakdown || []).reduce((sum: number, item: any) => {
+        return sum + (item.totalCredits || (item.unitCredits ? item.unitCredits * item.count : (item.subscriberCredits || 3) * item.count) || 0);
+      }, 0);
+    }
+  } else {
+    bookingCreditsNeeded = subscriberLoadKg * 10;
+  }
+
+  // Available credits balance (from Subscription or Loyalty wash rewards)
+  const userCurrentCredits = user?.laundryCredits !== undefined && user?.laundryCredits !== null && !isNaN(user.laundryCredits)
+    ? user.laundryCredits
+    : (user?.kilosLeft !== undefined ? user.kilosLeft * 10 : 0);
+
+  const subscriberTotalMonthlyCredits = user?.totalMonthlyCredits || (
+    user?.package === 'super_premium' ? 320 :
+    user?.package === 'premium' ? 200 :
+    user?.package === 'standard' ? 160 : 120
+  );
+
+  const userRemainingCredits = Math.max(0, userCurrentCredits - bookingCreditsNeeded);
+  const userDeficitCredits = Math.max(0, bookingCreditsNeeded - userCurrentCredits);
+  const hasInsufficientCredits = userDeficitCredits > 0;
+  const userRemainingKilos = Math.floor(userRemainingCredits / 10);
+
+  // Selection state for payment option: 'credits' vs 'direct'
+  const [paymentOption, setPaymentOption] = useState<'credits' | 'direct'>(() => {
+    if (isSubscription) return 'direct';
+    if (userCurrentCredits >= bookingCreditsNeeded) return 'credits';
+    return 'direct';
+  });
+
+  const isPayingWithCredits = !isSubscription && paymentOption === 'credits';
 
   const applyPromoCode = () => {
     setPromoError('');
@@ -252,8 +289,7 @@ const Billing: React.FC = () => {
       if (foundPromo.discountType === 'percentage') {
         setDiscount(foundPromo.discountValue / 100);
       } else {
-        // For fixed discount, we'll calculate the fraction of base price to keep calculation consistent
-        const fraction = foundPromo.discountValue / (bookingInfo.price || 1);
+        const fraction = foundPromo.discountValue / (computedBasePrice || 1);
         setDiscount(fraction);
       }
       setPromoApplied(true);
@@ -264,428 +300,156 @@ const Billing: React.FC = () => {
     }
   };
 
-  const handlePayment = async () => {
-    if (!user) return;
-    
-    if (paymentMethod === 'razorpay') {
-      setLoading(true);
-      setError('');
-      try {
-        await initiateRazorpayPayment({
-          amount: finalPrice,
-          description: isSubscription 
-            ? `Subscription: ${selectedPackage?.name || 'WashWise Plan'}`
-            : `Washwise Booking: ${bookingInfo.date} (${bookingInfo.slot})`,
-          type: isSubscription ? 'subscription' : 'booking',
-          userId: user.uid,
-          userName: user.name,
-          userEmail: user.email,
-          userPhone: bookingInfo.phone || user.phone || '',
-          bookingData: {
-            userId: user.uid,
-            userName: user.name,
-            date: isSubscription ? new Date().toISOString().split('T')[0] : bookingInfo.date,
-            timeSlot: isSubscription ? 'Subscription' : bookingInfo.slot,
-            slot: bookingInfo.slot,
-            pickupDrop: bookingInfo.pickupDrop,
-            address: bookingInfo.address,
-            phone: bookingInfo.phone,
-            latitude: bookingInfo.latitude,
-            longitude: bookingInfo.longitude,
-            deliveryFee: bookingInfo.deliveryFee,
-            storeId: bookingInfo.storeId,
-            garmentInstructions: bookingInfo.garmentInstructions,
-            serviceType: isSubscription ? 'Subscription' : bookingInfo.serviceType,
-            approxLoad: isSubscription ? '1-2 kg' : bookingInfo.approxLoad,
-            price: finalPrice
-          },
-          onSuccess: async (data: any) => {
-            if (isSubscription) {
-              try {
-                const kgLimit = selectedPackage?.kgLimit ?? 12;
-                const subData = {
-                  userType: 'subscriber' as const,
-                  package: packageId || 'basic',
-                  subscriptionPaid: true,
-                  kilosLeft: kgLimit,
-                  subscriptionStartDate: new Date().toISOString()
-                };
-                await updateDoc(doc(db, 'users', user.uid), subData);
-                if (updateUser) {
-                  await updateUser(subData);
-                }
-              } catch (e) {
-                console.error('Error updating Razorpay subscription status:', e);
-              }
-            }
-            setLoading(false);
-            if (data.bookingId) {
-              localStorage.setItem('lastBookingId', data.bookingId);
-            }
-            sendNotification(user.uid, user.email, bookingInfo.phone, 'booking_confirmed', data.bookingId || 'SUB', {
-              newSlot: isSubscription ? 'Subscription' : `${bookingInfo.date} at ${bookingInfo.slot}`
-            });
-
-            if (isSubscription) {
-              navigate('/dashboard');
-            } else {
-              navigate('/confirmation');
-            }
-          },
-          onError: (errMsg: string) => {
-            setLoading(false);
-            setError(errMsg);
-          },
-          onDismiss: () => {
-            setLoading(false);
-          }
-        });
-      } catch (err: any) {
-        setLoading(false);
-        setError(err.message || 'Razorpay payment failed');
-      }
-      return;
-    }
-
-    if (isSubscription && paymentMethod === 'wallet') {
-      if ((user.walletBalance || 0) < finalPrice) {
-        setError('Insufficient wallet balance.');
-        return;
-      }
-      setLoading(true);
-      try {
-        const kgLimit = selectedPackage?.kgLimit ?? 12;
-        const subData = {
-          userType: 'subscriber' as const,
-          package: packageId || 'basic',
-          subscriptionPaid: true,
-          kilosLeft: kgLimit,
-          subscriptionStartDate: new Date().toISOString(),
-          walletBalance: (user.walletBalance || 0) - finalPrice
-        };
-        await updateDoc(doc(db, 'users', user.uid), subData);
-        if (updateUser) {
-          await updateUser(subData);
-        }
-        navigate('/dashboard');
-      } catch (err: any) {
-        setError(err.message || 'Payment failed. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
-    if (paymentMethod === 'upi' && upiStep === 'id') {
-      if (!upiId.includes('@')) {
-        setError('Please enter a valid UPI ID');
-        return;
-      }
-      setLoading(true);
-      
-      // Step 1: Create the "Pending" booking first (The Protocol)
-      const bookingId = await createPendingBooking();
-      if (bookingId) {
-        setLoading(false);
-        setUpiStep('verify');
-        setActiveBookingId(bookingId);
-        setError('');
-      }
-      return;
-    }
-
-    if (paymentMethod === 'upi' && upiStep === 'qr') {
-      setLoading(true);
-      const bookingId = await createPendingBooking();
-      if (bookingId) {
-        setLoading(false);
-        setUpiStep('verify');
-        setActiveBookingId(bookingId);
-      }
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-
-    try {
-      // For Wallet, we do a direct transaction
-      await completeInstantBooking();
-    } catch (err: any) {
-      setError(err.message || 'Payment failed. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const createPendingBooking = async () => {
-    try {
-      const bookingRef = doc(collection(db, 'bookings'));
-      
-      const booking: Booking = {
-        userId: user!.uid,
-        userName: user!.name,
-        date: isSubscription ? new Date().toISOString().split('T')[0] : bookingInfo.date,
-        timeSlot: isSubscription ? 'Subscription' : bookingInfo.slot,
-        machineNumber: 0, // Will be assigned on confirmation
-        pickupDrop: isSubscription ? false : bookingInfo.pickupDrop,
-        address: bookingInfo.address,
-        phone: bookingInfo.phone,
-        latitude: bookingInfo.latitude,
-        longitude: bookingInfo.longitude,
-        deliveryFee: bookingInfo.deliveryFee,
-        storeId: bookingInfo.storeId,
-        garmentInstructions: bookingInfo.garmentInstructions,
-        serviceType: isSubscription ? 'Subscription' : bookingInfo.serviceType as any,
-        approxLoad: isSubscription ? '1-2 kg' : bookingInfo.approxLoad as any,
-        packageId: isSubscription ? packageId || undefined : undefined,
-        price: finalPrice,
-        status: 'pending',
-        createdAt: new Date().toISOString()
-      };
-
-      await setDoc(bookingRef, booking);
-      return bookingRef.id;
-    } catch (err) {
-      console.error('Error creating pending booking:', err);
-      setError('Could not initiate booking. Please try again.');
-      return null;
-    }
-  };
-
-  const completeInstantBooking = async () => {
-    if (!user) return;
-    
-    const slotId = `${bookingInfo.date}_${bookingInfo.slot}`;
-    const slotRef = doc(db, 'slots', slotId);
-
-    await runTransaction(db, async (transaction) => {
-      // 1. ALL READS FIRST
-      const slotDoc = await transaction.get(slotRef);
-      const userRef = doc(db, 'users', user.uid);
-      const userDoc = await transaction.get(userRef);
-
-      // 2. ALL WRITES LAST
-      let slotData: Slot = slotDoc.exists() 
-        ? slotDoc.data() as Slot 
-        : { date: bookingInfo.date, timeSlot: bookingInfo.slot, machines: { '1': '', '2': '', '3': '', '4': '' } };
-
-      let assignedMachine = -1;
-      for (let i = 1; i <= 4; i++) {
-        if (!slotData.machines[i.toString()]) {
-          assignedMachine = i;
-          break;
-        }
-      }
-
-      if (assignedMachine === -1) throw new Error('Slot is full.');
-
-      const updatedMachines = { ...slotData.machines, [assignedMachine.toString()]: user.uid };
-      if (!slotDoc.exists()) {
-        transaction.set(slotRef, { ...slotData, machines: updatedMachines });
-      } else {
-        transaction.update(slotRef, { machines: updatedMachines });
-      }
-
-      // Update Wallet
-      const userData = userDoc.exists() ? userDoc.data() : {};
-      const currentWallet = userData.walletBalance || 0;
-      
-      if (paymentMethod === 'wallet') {
-        if (currentWallet < finalPrice) throw new Error('Insufficient wallet balance.');
-        transaction.update(userRef, { walletBalance: currentWallet - finalPrice });
-        
-        const walletTxRef = doc(collection(db, 'wallet_transactions'));
-        transaction.set(walletTxRef, {
-          userId: user.uid,
-          amount: -finalPrice,
-          type: 'debit',
-          method: 'wallet',
-          description: 'Laundry Booking',
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      const bookingRef = doc(collection(db, 'bookings'));
-      const booking: Booking = {
-        userId: user.uid,
-        userName: user.name,
-        date: bookingInfo.date,
-        timeSlot: bookingInfo.slot,
-        machineNumber: assignedMachine,
-        pickupDrop: bookingInfo.pickupDrop,
-        address: bookingInfo.address,
-        phone: bookingInfo.phone,
-        latitude: bookingInfo.latitude,
-        longitude: bookingInfo.longitude,
-        deliveryFee: bookingInfo.deliveryFee,
-        storeId: bookingInfo.storeId,
-        garmentInstructions: bookingInfo.garmentInstructions,
-        serviceType: bookingInfo.serviceType as any,
-        approxLoad: bookingInfo.approxLoad as any,
-        price: finalPrice,
-        status: 'paid',
-        createdAt: new Date().toISOString()
-      };
-
-      transaction.set(bookingRef, booking);
-      localStorage.setItem('lastBookingId', bookingRef.id);
-      
-      // Send confirmation notification/email
-      sendNotification(user.uid, user.email, bookingInfo.phone, 'booking_confirmed', bookingRef.id, {
-        newSlot: `${bookingInfo.date} at ${bookingInfo.slot}`
-      });
-    });
-
-    navigate('/confirmation');
-  };
-
-  // Simulated Webhook Trigger (For Testing the Protocol)
-  const simulateIncomingPayment = async () => {
-    if (!activeBookingId) return;
-    setLoading(true);
-    try {
-      // In a real app, this update happens via a server-side Webhook from the Bank
-      await updateDoc(doc(db, 'bookings', activeBookingId), {
-        status: 'paid',
-        machineNumber: Math.floor(Math.random() * 4) + 1 // Simulate machine assignment
-      });
-
-      if (isSubscription && user) {
-        const kgLimit = selectedPackage?.kgLimit ?? 12;
-        const subData = {
-          userType: 'subscriber' as const,
-          package: packageId || 'basic',
-          subscriptionPaid: true,
-          kilosLeft: kgLimit,
-          subscriptionStartDate: new Date().toISOString()
-        };
-        await updateDoc(doc(db, 'users', user.uid), subData);
-        if (updateUser) {
-          await updateUser(subData);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const isSubscriberBooking = (user?.userType === 'subscriber' || !!user?.subscriptionPaid) && !isSubscription;
-
-  const getLoadKg = (approxLoad: string): number => {
-    if (approxLoad === '5 kg') return 5;
-    if (approxLoad === '6 kg') return 6;
-    if (approxLoad === '7+ kg') return 7;
-    return 4;
-  };
-
-  const subscriberLoadKg = getLoadKg(bookingInfo.approxLoad);
-  const subscriberCurrentKilosLeft = user?.kilosLeft !== undefined && user?.kilosLeft !== null && !isNaN(user.kilosLeft)
-    ? user.kilosLeft
-    : 12;
-  const subscriberRemainingKilos = Math.max(0, subscriberCurrentKilosLeft - subscriberLoadKg);
-
   const handleSubscriberBook = async () => {
     if (!user) return;
+    if (hasInsufficientCredits) {
+      setError(`Insufficient Laundry Credits. This order requires ${bookingCreditsNeeded} Credits, but you have ${userCurrentCredits} Credits available.`);
+      return;
+    }
+
     setLoading(true);
     setError('');
 
     try {
-      const newKilosLeft = subscriberRemainingKilos;
-
-      await updateDoc(doc(db, 'users', user.uid), {
-        kilosLeft: newKilosLeft
+      const response = await fetch('/api/payments/process-booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          paymentMethod: 'subscription_credits',
+          bookingDetails: {
+            ...bookingInfo,
+            price: 0,
+            discountAmount: 0
+          }
+        })
       });
-      if (updateUser) {
-        await updateUser({ kilosLeft: newKilosLeft });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to book using credits');
       }
 
-      const slotId = `${bookingInfo.date}_${bookingInfo.slot}`;
-      const slotRef = doc(db, 'slots', slotId);
-
-      let assignedMachine = 1;
-      try {
-        await runTransaction(db, async (transaction) => {
-          const slotDoc = await transaction.get(slotRef);
-          let slotData: Slot = slotDoc.exists() 
-            ? slotDoc.data() as Slot 
-            : { date: bookingInfo.date, timeSlot: bookingInfo.slot, machines: { '1': '', '2': '', '3': '', '4': '' } };
-
-          for (let i = 1; i <= 4; i++) {
-            if (!slotData.machines[i.toString()]) {
-              assignedMachine = i;
-              break;
-            }
-          }
-          const updatedMachines = { ...slotData.machines, [assignedMachine.toString()]: user.uid };
-          if (!slotDoc.exists()) {
-            transaction.set(slotRef, { ...slotData, machines: updatedMachines });
-          } else {
-            transaction.update(slotRef, { machines: updatedMachines });
-          }
-
-          const bookingRef = doc(collection(db, 'bookings'));
-          const booking: Booking = {
-            userId: user.uid,
-            userName: user.name,
-            date: bookingInfo.date,
-            timeSlot: bookingInfo.slot,
-            machineNumber: assignedMachine,
-            pickupDrop: bookingInfo.pickupDrop,
-            address: bookingInfo.address,
-            phone: bookingInfo.phone,
-            latitude: bookingInfo.latitude,
-            longitude: bookingInfo.longitude,
-            deliveryFee: 0,
-            storeId: bookingInfo.storeId,
-            garmentInstructions: bookingInfo.garmentInstructions,
-            serviceType: bookingInfo.serviceType as any,
-            approxLoad: bookingInfo.approxLoad as any,
-            price: 0,
-            status: 'paid',
-            createdAt: new Date().toISOString()
-          };
-
-          transaction.set(bookingRef, booking);
-          localStorage.setItem('lastBookingId', bookingRef.id);
-          
-          sendNotification(user.uid, user.email, bookingInfo.phone, 'booking_confirmed', bookingRef.id, {
-            newSlot: `${bookingInfo.date} at ${bookingInfo.slot}`
-          });
+      const newCreditsLeft = userRemainingCredits;
+      const newKilosLeft = userRemainingKilos;
+      if (updateUser) {
+        await updateUser({ 
+          laundryCredits: newCreditsLeft,
+          kilosLeft: newKilosLeft 
         });
-      } catch (e: any) {
-        console.error('Transaction error, creating direct booking:', e);
-        const bookingRef = doc(collection(db, 'bookings'));
-        const booking: Booking = {
-          userId: user.uid,
-          userName: user.name,
-          date: bookingInfo.date,
-          timeSlot: bookingInfo.slot,
-          machineNumber: 1,
-          pickupDrop: bookingInfo.pickupDrop,
-          address: bookingInfo.address,
-          phone: bookingInfo.phone,
-          latitude: bookingInfo.latitude,
-          longitude: bookingInfo.longitude,
-          deliveryFee: 0,
-          storeId: bookingInfo.storeId,
-          garmentInstructions: bookingInfo.garmentInstructions,
-          serviceType: bookingInfo.serviceType as any,
-          approxLoad: bookingInfo.approxLoad as any,
-          price: 0,
-          status: 'paid',
-          createdAt: new Date().toISOString()
-        };
-        await setDoc(bookingRef, booking);
-        localStorage.setItem('lastBookingId', bookingRef.id);
+      }
+
+      if (data.bookingDocId || data.bookingId) {
+        localStorage.setItem('lastBookingId', data.bookingDocId || data.bookingId);
       }
 
       navigate('/confirmation');
     } catch (err: any) {
-      console.error('Error completing subscriber booking:', err);
+      console.error('Error completing credit booking:', err);
       setError(err.message || 'Failed to complete booking. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePayment = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      if (isSubscription) {
+        if (paymentMethod === 'wallet' && (user.walletBalance || 0) < finalPrice) {
+          setError('Insufficient wallet balance for this subscription.');
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch('/api/payments/process-subscription', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.uid,
+            packageId: packageId || 'basic',
+            paymentMethod
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Subscription activation failed');
+        }
+
+        const kgLimit = selectedPackage?.kgLimit ?? 12;
+        const creditsLimit = (selectedPackage?.kgLimit ?? 12) * 10;
+        const subData: any = {
+          userType: 'subscriber' as const,
+          package: packageId || 'basic',
+          subscriptionPaid: true,
+          kilosLeft: kgLimit,
+          laundryCredits: creditsLimit,
+          totalMonthlyCredits: creditsLimit,
+          subscriptionStartDate: new Date().toISOString()
+        };
+        if (paymentMethod === 'wallet') {
+          subData.walletBalance = Math.max(0, (user.walletBalance || 0) - finalPrice);
+        }
+        if (updateUser) {
+          await updateUser(subData);
+        }
+
+        navigate('/dashboard');
+        return;
+      }
+
+      // If paying through credits
+      if (isPayingWithCredits || paymentMethod === 'subscription_credits') {
+        await handleSubscriberBook();
+        return;
+      }
+
+      // Regular direct payment wash booking
+      if (paymentMethod === 'wallet' && (user.walletBalance || 0) < finalPrice) {
+        setError('Insufficient wallet balance. Please choose another payment method or top up your wallet.');
+        setLoading(false);
+        return;
+      }
+
+      const response = await fetch('/api/payments/process-booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          paymentMethod,
+          bookingDetails: {
+            ...bookingInfo,
+            price: computedBasePrice,
+            deliveryFee: directDeliveryFee,
+            discountAmount: appliedDiscountAmount,
+            appliedPromoCode: promoApplied ? promoCode : undefined,
+            appliedOfferId: appliedLimitedOffer?.offerId || undefined
+          }
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to process booking');
+      }
+
+      if (paymentMethod === 'wallet' && updateUser) {
+        await updateUser({
+          walletBalance: Math.max(0, (user.walletBalance || 0) - finalPrice)
+        });
+      }
+
+      if (data.bookingDocId || data.bookingId) {
+        localStorage.setItem('lastBookingId', data.bookingDocId || data.bookingId);
+      }
+
+      navigate('/confirmation');
+    } catch (err: any) {
+      setError(err.message || 'Payment failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -708,53 +472,184 @@ const Billing: React.FC = () => {
             <p className="text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-[10px] sm:text-sm">Choose the perfect subscription for your laundry needs</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
-            {(settings?.subscriptionPlans || []).map((plan) => (
-              <motion.div
-                key={plan.id}
-                whileHover={{ y: -8 }}
-                className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-[3rem] border-2 border-gray-100 dark:border-gray-800 shadow-xl hover:border-blue-500 transition-all flex flex-col"
-              >
-                <div className="mb-8">
-                  <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight uppercase mb-2">{plan.name}</h3>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-4xl font-black tracking-tighter italic text-blue-600">₹{plan.price}</span>
-                    <span className="text-gray-400 font-bold uppercase text-[10px]">/ month</span>
-                  </div>
-                  {plan.originalPrice && (
-                    <p className="text-xs text-gray-400 line-through mt-1">₹{plan.originalPrice}</p>
-                  )}
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
+            {(settings?.subscriptionPlans || []).map((plan) => {
+              const regPrice = plan.regular_price || plan.originalPrice || ((plan.kgLimit || 12) * (settings?.pricing?.regular_price_per_kg || 69));
+              const activePrice = plan.price;
+              const hasDiscount = settings?.pricing?.limited_time_offer !== false && regPrice > activePrice;
+              const savings = Math.max(0, regPrice - activePrice);
 
-                <div className="space-y-4 mb-10 flex-1">
-                  <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
-                    <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
-                    <span>{plan.kgLimit} KG Monthly Limit</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
-                    <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
-                    <span>Priority Machine Access</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
-                    <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
-                    <span>Free Maintenance Checks</span>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => navigate(`/billing?type=subscription&packageId=${plan.id}`)}
-                  className="w-full py-4 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
+              return (
+                <motion.div
+                  key={plan.id}
+                  whileHover={{ y: -8 }}
+                  className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-[3rem] border-2 border-gray-100 dark:border-gray-800 shadow-xl hover:border-blue-500 transition-all flex flex-col"
                 >
-                  Select {plan.name}
-                </button>
-              </motion.div>
-            ))}
+                  <div className="mb-6">
+                    <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight uppercase mb-2">{plan.name}</h3>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-3xl sm:text-4xl font-black tracking-tight text-blue-600 dark:text-blue-400">₹{activePrice}</span>
+                      <span className="text-gray-400 font-bold uppercase text-[10px] tracking-wider">/ month</span>
+                    </div>
+                    {hasDiscount && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500 line-through font-bold">₹{regPrice}</span>
+                        <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 uppercase bg-emerald-100/90 dark:bg-emerald-950/60 border border-emerald-300/60 dark:border-emerald-800/60 px-2 py-0.5 rounded-md shadow-xs">
+                          Save ₹{savings}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4 mb-8 flex-1">
+                    <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
+                      <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                      <span>{plan.kgLimit} KG Monthly Limit</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
+                      <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                      <span>{plan.credits || ((plan.kgLimit || 12) * 10)} Monthly Credits</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
+                      <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                      <span>Priority Machine Access</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
+                      <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                      <span>Exclusive Rewards</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => navigate(`/billing?type=subscription&packageId=${plan.id}`)}
+                    className="w-full py-4 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
+                  >
+                    Select {plan.name}
+                  </button>
+                </motion.div>
+              );
+            })}
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8">
           <div className="md:col-span-8 space-y-4 sm:space-y-6">
-            {isSubscriberBooking ? (
+            {/* Ask for option to pay through credits or through direct payment */}
+            {!isSubscription && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white dark:bg-gray-900 p-5 sm:p-6 rounded-2xl sm:rounded-3xl shadow-xl border border-gray-100 dark:border-gray-800 space-y-4"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white uppercase tracking-tight flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                      Payment Option
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-0.5">
+                      Choose how you would like to settle this wash booking
+                    </p>
+                  </div>
+                  <span className="hidden sm:inline-flex px-3 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] font-black uppercase rounded-full tracking-wider border border-blue-200 dark:border-blue-800">
+                    Flexible Payment
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  {/* Option 1: Pay through Credits */}
+                  <motion.button
+                    type="button"
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={() => {
+                      setPaymentOption('credits');
+                      setPaymentMethod('subscription_credits');
+                      setError('');
+                    }}
+                    className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-all relative flex flex-col justify-between haptic-feedback overflow-hidden ${
+                      isPayingWithCredits
+                        ? 'border-emerald-600 bg-emerald-50/80 dark:bg-emerald-950/30 shadow-md ring-2 ring-emerald-500/20'
+                        : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-emerald-300 dark:hover:border-emerald-700/60'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2.5 rounded-xl ${isPayingWithCredits ? 'bg-emerald-600 text-white shadow-sm' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'}`}>
+                          <Zap className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-sm text-gray-900 dark:text-white uppercase tracking-tight">Pay through Credits</span>
+                          </div>
+                          <p className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                            Deduct {bookingCreditsNeeded} Credits • ₹0.00 to pay
+                          </p>
+                        </div>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center border-2 shrink-0 ${isPayingWithCredits ? 'border-emerald-600' : 'border-gray-300 dark:border-gray-600'}`}>
+                        {isPayingWithCredits && <div className="w-2.5 h-2.5 bg-emerald-600 rounded-full" />}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-emerald-100 dark:border-emerald-900/40 flex items-center justify-between text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      <span>Available: <strong>🧺 {userCurrentCredits} Credits</strong></span>
+                      {hasInsufficientCredits ? (
+                        <span className="text-[10px] font-black text-red-600 bg-red-100 dark:bg-red-900/40 px-2 py-0.5 rounded-md">Short {userDeficitCredits}</span>
+                      ) : (
+                        <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 rounded-md uppercase">100% Free Wash</span>
+                      )}
+                    </div>
+                  </motion.button>
+
+                  {/* Option 2: Direct Payment */}
+                  <motion.button
+                    type="button"
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={() => {
+                      setPaymentOption('direct');
+                      if (paymentMethod === 'subscription_credits') {
+                        setPaymentMethod('wallet');
+                      }
+                      setError('');
+                    }}
+                    className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-all relative flex flex-col justify-between haptic-feedback overflow-hidden ${
+                      !isPayingWithCredits
+                        ? 'border-blue-600 bg-blue-50/80 dark:bg-blue-950/30 shadow-md ring-2 ring-blue-500/20'
+                        : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-blue-300 dark:hover:border-blue-700/60'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2.5 rounded-xl ${!isPayingWithCredits ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'}`}>
+                          <CreditCard className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-sm text-gray-900 dark:text-white uppercase tracking-tight">Direct Payment</span>
+                          </div>
+                          <p className="text-[11px] font-bold text-blue-600 dark:text-blue-400">
+                            ₹{finalPrice.toFixed(2)} • Wallet, UPI, Cards, Store
+                          </p>
+                        </div>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center border-2 shrink-0 ${!isPayingWithCredits ? 'border-blue-600' : 'border-gray-300 dark:border-gray-600'}`}>
+                        {!isPayingWithCredits && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-blue-100 dark:border-blue-900/40 flex items-center justify-between text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      <span className="truncate">Save credits for later</span>
+                      <span className="text-[10px] font-black text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded-md uppercase">Earn +5 Credits</span>
+                    </div>
+                  </motion.button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Selected Payment Interface */}
+            {isPayingWithCredits ? (
               <motion.div
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -763,34 +658,69 @@ const Billing: React.FC = () => {
                 <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100 dark:border-gray-800">
                   <div className="flex items-center gap-3">
                     <div className="p-3 bg-green-500/10 text-green-600 dark:text-green-400 rounded-2xl">
-                      <Zap className="w-6 h-6" />
+                      {isSubscriber ? <Zap className="w-6 h-6" /> : <Coins className="w-6 h-6" />}
                     </div>
                     <div>
-                      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 uppercase tracking-tight">Subscriber Account</h2>
-                      <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase tracking-wider">Active Subscription Coverage</p>
+                      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 uppercase tracking-tight">
+                        {isSubscriber ? 'Subscriber Account' : 'Loyalty Credits'}
+                      </h2>
+                      <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase tracking-wider">
+                        {isSubscriber ? 'Active Subscription Coverage' : 'Loyalty Reward Coverage'}
+                      </p>
                     </div>
                   </div>
                   <span className="px-3 py-1 bg-green-500/10 text-green-600 dark:text-green-400 text-[10px] font-black uppercase rounded-full tracking-widest border border-green-500/20">
-                    {user?.package ? `${user.package.toUpperCase()} PLAN` : 'BASIC PLAN'}
+                    {isSubscriber ? (user?.package ? `${user.package.toUpperCase()} PLAN` : 'BASIC PLAN') : 'LOYALTY REWARDS'}
                   </span>
                 </div>
 
-                <div className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/20 rounded-2xl border border-green-100 dark:border-green-900/40 space-y-4 mb-8">
+                <div className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/20 rounded-2xl border border-green-100 dark:border-green-900/40 space-y-4 mb-6">
                   <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300">
-                    <span>Current Kilos Balance:</span>
-                    <span className="text-xl font-black text-gray-900 dark:text-white">{subscriberCurrentKilosLeft} KG</span>
+                    <span>Current Credits Balance:</span>
+                    <span className="text-xl font-black text-gray-900 dark:text-white">
+                      🧺 {userCurrentCredits} {isSubscriber ? `/ ${subscriberTotalMonthlyCredits}` : ''} Credits
+                    </span>
                   </div>
                   <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300">
-                    <span>Laundry Weight Selected:</span>
-                    <span className="text-xl font-black text-blue-600 dark:text-blue-400">{subscriberLoadKg} KG ({bookingInfo.approxLoad})</span>
+                    <span>
+                      {isPerPiece ? `Garment Pieces Selected (${bookingInfo.totalPieces} pcs):` : `Laundry Weight (${bookingInfo.approxLoad}):`}
+                    </span>
+                    <span className="text-xl font-black text-green-600 dark:text-green-400">
+                      {bookingCreditsNeeded} Credits
+                    </span>
                   </div>
                   <div className="pt-3 border-t border-green-200 dark:border-green-900/50 flex justify-between items-center">
-                    <span className="text-xs font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">Kilos Left After Booking:</span>
-                    <span className={`text-2xl font-black ${subscriberRemainingKilos >= 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600'}`}>
-                      {subscriberRemainingKilos} KG
+                    <span className="text-xs font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">
+                      Credits Balance After Order:
+                    </span>
+                    <span className={`text-2xl font-black ${userRemainingCredits >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600'}`}>
+                      🧺 {userRemainingCredits} Credits
                     </span>
                   </div>
                 </div>
+
+                {hasInsufficientCredits && (
+                  <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl text-xs font-bold space-y-3">
+                    <div>
+                      <p className="font-black uppercase tracking-wider">⚠️ Credit Balance Exceeded</p>
+                      <p className="mt-1">
+                        This booking requires <strong>{bookingCreditsNeeded} Credits</strong>, but you only have <strong>{userCurrentCredits} Credits</strong> available.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPaymentOption('direct');
+                        setPaymentMethod('wallet');
+                        setError('');
+                      }}
+                      className="px-3 py-2 bg-blue-600 text-white rounded-lg font-bold text-[11px] uppercase tracking-wider hover:bg-blue-700 transition-colors inline-flex items-center gap-1.5"
+                    >
+                      <CreditCard className="w-3.5 h-3.5" />
+                      Switch to Direct Payment (₹{finalPrice.toFixed(2)})
+                    </button>
+                  </div>
+                )}
 
                 {error && (
                   <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold uppercase tracking-wide">
@@ -799,11 +729,15 @@ const Billing: React.FC = () => {
                 )}
 
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileHover={{ scale: hasInsufficientCredits ? 1 : 1.02 }}
+                  whileTap={{ scale: hasInsufficientCredits ? 1 : 0.98 }}
                   onClick={handleSubscriberBook}
-                  disabled={loading}
-                  className="w-full py-5 bg-green-600 hover:bg-green-700 text-white font-black text-sm uppercase tracking-widest rounded-2xl shadow-xl shadow-green-600/20 transition-all flex items-center justify-center gap-3 haptic-feedback glow-green"
+                  disabled={loading || hasInsufficientCredits}
+                  className={`w-full py-5 text-white font-black text-sm uppercase tracking-widest rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3 haptic-feedback ${
+                    hasInsufficientCredits 
+                      ? 'bg-gray-400 cursor-not-allowed shadow-none' 
+                      : 'bg-green-600 hover:bg-green-700 shadow-green-600/20 glow-green'
+                  }`}
                 >
                   {loading ? (
                     <>
@@ -813,7 +747,7 @@ const Billing: React.FC = () => {
                   ) : (
                     <>
                       <CheckCircle2 className="w-6 h-6" />
-                      <span>Confirm and Book</span>
+                      <span>Confirm and Deduct {bookingCreditsNeeded} Credits</span>
                     </>
                   )}
                 </motion.button>
@@ -824,48 +758,27 @@ const Billing: React.FC = () => {
                 animate={{ opacity: 1, x: 0 }}
                 className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
               >
-              <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-6 flex items-center">
-                <CreditCard className="w-6 h-6 mr-2 text-blue-600 dark:text-blue-400" /> Payment Method
-              </h2>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center">
+                  <CreditCard className="w-6 h-6 mr-2 text-blue-600 dark:text-blue-400" />
+                  {isSubscription ? 'Payment Method' : 'Direct Payment Method'}
+                </h2>
+                {!isSubscription && isSubscriber && (
+                  <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300/60 dark:border-emerald-800/60 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                    Free Delivery Active
+                  </span>
+                )}
+              </div>
               
               <div className="space-y-4">
-                {/* Razorpay Option */}
-                <motion.button
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  whileHover={{ scale: 1.01 }}
-                  whileTap={{ scale: 0.99 }}
-                  onClick={() => { setPaymentMethod('razorpay'); setError(''); }}
-                  className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback relative overflow-hidden ${
-                    paymentMethod === 'razorpay' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
-                  }`}
-                >
-                  <div className="flex items-center">
-                    <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'razorpay' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                      <CreditCard className={`w-5 h-5 ${paymentMethod === 'razorpay' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
-                    </div>
-                    <div className="text-left">
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-gray-800 dark:text-gray-100">Razorpay Online</p>
-                        <span className="px-2 py-0.5 bg-blue-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">Fast & Secure</span>
-                      </div>
-                      <p className={`text-xs font-medium ${paymentMethod === 'razorpay' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Cards, UPI, NetBanking, Wallets</p>
-                    </div>
-                  </div>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'razorpay' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
-                    {paymentMethod === 'razorpay' && <motion.div layoutId="payment-dot" className="w-3 h-3 bg-blue-600 rounded-full" />}
-                  </div>
-                </motion.button>
-
                 {/* Wallet Option */}
                 <motion.button
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.05 }}
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
                   onClick={() => { setPaymentMethod('wallet'); setError(''); }}
-                  className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback ${
+                  className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback relative overflow-hidden ${
                     paymentMethod === 'wallet' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
                   }`}
                 >
@@ -874,7 +787,10 @@ const Billing: React.FC = () => {
                       <Wallet className={`w-5 h-5 ${paymentMethod === 'wallet' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
                     </div>
                     <div className="text-left">
-                      <p className="font-bold text-gray-800 dark:text-gray-100">Student Wallet</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-gray-800 dark:text-gray-100">Student Wallet</p>
+                        <span className="px-2 py-0.5 bg-blue-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">1-Click Pay</span>
+                      </div>
                       <p className={`text-xs font-medium ${paymentMethod === 'wallet' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Balance: ₹{(user?.walletBalance || 0).toFixed(2)}</p>
                     </div>
                   </div>
@@ -883,143 +799,63 @@ const Billing: React.FC = () => {
                   </div>
                 </motion.button>
 
-                {/* UPI Option */}
+                {/* Card / Online Payment Option */}
                 <motion.button
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
+                  transition={{ delay: 0.05 }}
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
-                  onClick={() => { setPaymentMethod('upi'); setError(''); }}
-                  className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback ${
-                    paymentMethod === 'upi' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
+                  onClick={() => { setPaymentMethod('card'); setError(''); }}
+                  className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback relative overflow-hidden ${
+                    paymentMethod === 'card' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
                   }`}
                 >
                   <div className="flex items-center">
-                    <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'upi' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                      <Smartphone className={`w-5 h-5 ${paymentMethod === 'upi' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
+                    <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'card' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                      <CreditCard className={`w-5 h-5 ${paymentMethod === 'card' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
                     </div>
                     <div className="text-left">
-                      <p className="font-bold text-gray-800 dark:text-gray-100">Direct UPI Scan</p>
-                      <p className={`text-xs font-medium ${paymentMethod === 'upi' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>GPay, PhonePe, Paytm QR</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-gray-800 dark:text-gray-100">Online Payment</p>
+                        <span className="px-2 py-0.5 bg-green-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">Instant</span>
+                      </div>
+                      <p className={`text-xs font-medium ${paymentMethod === 'card' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Cards, NetBanking & Instant Verification</p>
                     </div>
                   </div>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'upi' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
-                    {paymentMethod === 'upi' && <motion.div layoutId="payment-dot" className="w-3 h-3 bg-blue-600 rounded-full" />}
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'card' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
+                    {paymentMethod === 'card' && <motion.div layoutId="payment-dot" className="w-3 h-3 bg-blue-600 rounded-full" />}
                   </div>
                 </motion.button>
-              </div>
 
-
-              <AnimatePresence mode="wait">
-                {paymentMethod === 'upi' && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-800 overflow-hidden"
+                {/* Pay at Store Option (Non-subscription orders only) */}
+                {!isSubscription && (
+                  <motion.button
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={() => { setPaymentMethod('pay_at_store'); setError(''); }}
+                    className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback ${
+                      paymentMethod === 'pay_at_store' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
+                    }`}
                   >
-                    <div className="flex bg-gray-50 dark:bg-gray-800 p-1 rounded-xl mb-6">
-                      <button 
-                        onClick={() => setUpiStep('id')}
-                        className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${upiStep === 'id' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}
-                      >
-                        UPI ID
-                      </button>
-                      <button 
-                        onClick={() => setUpiStep('qr')}
-                        className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${upiStep === 'qr' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}
-                      >
-                        Scan QR
-                      </button>
+                    <div className="flex items-center">
+                      <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'pay_at_store' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                        <Store className={`w-5 h-5 ${paymentMethod === 'pay_at_store' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-bold text-gray-800 dark:text-gray-100">Pay at Store</p>
+                        <p className={`text-xs font-medium ${paymentMethod === 'pay_at_store' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Pay when dropping off or collecting garments</p>
+                      </div>
                     </div>
-
-                    {upiStep === 'id' && (
-                      <div className="space-y-4">
-                        <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Enter UPI ID</label>
-                        <div className="relative">
-                          <QrCode className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                          <input
-                            type="text"
-                            value={upiId}
-                            onChange={(e) => setUpiId(e.target.value)}
-                            placeholder="username@bank"
-                            className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100"
-                          />
-                        </div>
-                        <div className="flex gap-2 flex-wrap">
-                          {['@okaxis', '@okicici', '@paytm', '@ybl'].map(suffix => (
-                            <button 
-                              key={suffix}
-                              onClick={() => setUpiId(prev => prev.split('@')[0] + suffix)}
-                              className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-xs font-bold text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
-                            >
-                              {suffix}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {upiStep === 'qr' && (
-                      <div className="text-center space-y-4 py-4">
-                        <div className="bg-white p-4 rounded-2xl shadow-sm inline-block border border-gray-100 dark:border-gray-800">
-                          <QRCodeSVG value={upiLink} size={180} />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="font-bold text-gray-800 dark:text-gray-100">Scan to Pay</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">Scan this QR with any UPI app</p>
-                          <div className="flex items-center justify-center gap-2 mt-2">
-                            <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-xs font-mono dark:text-gray-300">{upiIdToUse}</code>
-                            <button 
-                              onClick={handleCopyUPI}
-                              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
-                            >
-                              {copied ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3 text-gray-400 dark:text-gray-500" />}
-                            </button>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-center gap-4 pt-2">
-                          <img src="https://upload.wikimedia.org/wikipedia/commons/c/c4/Google_Pay_Logo.svg" className="h-4" alt="GPay" referrerPolicy="no-referrer" />
-                          <img src="https://upload.wikimedia.org/wikipedia/commons/e/e1/PhonePe_Logo.svg" className="h-4" alt="PhonePe" referrerPolicy="no-referrer" />
-                          <img src="https://upload.wikimedia.org/wikipedia/commons/2/24/Paytm_Logo_%28standalone%29.svg" className="h-4" alt="Paytm" referrerPolicy="no-referrer" />
-                        </div>
-                      </div>
-                    )}
-
-                    {upiStep === 'verify' && (
-                      <div className="bg-blue-50 dark:bg-blue-900/20 p-6 rounded-2xl text-center space-y-4 animate-pulse-glow">
-                        <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto shadow-sm">
-                          <Smartphone className="w-8 h-8 text-blue-600 dark:text-blue-400 animate-bounce" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-gray-800 dark:text-gray-100">Request Sent!</p>
-                          <p className="text-sm text-gray-500 dark:text-gray-400">Please open your UPI app and approve the payment of ₹{finalPrice.toFixed(2)}</p>
-                        </div>
-                        <div className="flex items-center justify-center text-xs font-bold text-blue-600 dark:text-blue-400">
-                          <Loader2 className="w-3 h-3 animate-spin mr-2" />
-                          Waiting for confirmation...
-                        </div>
-                        
-                        {/* Simulation Button for the User to test the Protocol */}
-                        <button 
-                          onClick={simulateIncomingPayment}
-                          className="w-full py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-[10px] font-black rounded-lg hover:bg-green-200 dark:hover:bg-green-800 transition-all uppercase tracking-widest"
-                        >
-                          Simulate Incoming Payment (Protocol Test)
-                        </button>
-
-                        <button 
-                          onClick={() => setUpiStep('id')}
-                          className="text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 underline"
-                        >
-                          Change UPI ID
-                        </button>
-                      </div>
-                    )}
-                  </motion.div>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'pay_at_store' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
+                      {paymentMethod === 'pay_at_store' && <motion.div layoutId="payment-dot" className="w-3 h-3 bg-blue-600 rounded-full" />}
+                    </div>
+                  </motion.button>
                 )}
-              </AnimatePresence>
+              </div>
 
               <div className="mt-8 pt-8 border-t border-gray-100 dark:border-gray-800">
                 <div className="flex items-center text-gray-500 dark:text-gray-400 text-sm mb-4">
@@ -1039,10 +875,9 @@ const Billing: React.FC = () => {
                   {loading ? (
                     <Loader2 className="w-6 h-6 animate-spin" />
                   ) : (
-                    paymentMethod === 'razorpay' ? `Pay ₹${finalPrice.toFixed(2)} via Razorpay` :
-                    paymentMethod === 'upi' && upiStep === 'id' ? 'Verify UPI ID' : 
-                    paymentMethod === 'upi' && upiStep === 'qr' ? 'I have paid' :
-                    `Pay ₹${finalPrice.toFixed(2)}`
+                    paymentMethod === 'wallet' ? `Pay ₹${finalPrice.toFixed(2)} with Wallet` :
+                    paymentMethod === 'card' ? `Pay ₹${finalPrice.toFixed(2)} Online` :
+                    `Confirm Booking (Pay at Store)`
                   )}
                 </motion.button>
               </div>
@@ -1084,12 +919,33 @@ const Billing: React.FC = () => {
                       <span className="font-medium text-gray-800 dark:text-gray-200">{bookingInfo.serviceType}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">Load</span>
+                      <span className="text-gray-500 dark:text-gray-400">{bookingInfo.serviceType === 'Wash & Fold (Per Piece)' ? 'Total Items' : 'Load'}</span>
                       <span className="font-medium text-gray-800 dark:text-gray-200">{bookingInfo.approxLoad}</span>
                     </div>
+                    {bookingInfo.serviceType === 'Wash & Fold (Per Piece)' && bookingInfo.pieceBreakdown && bookingInfo.pieceBreakdown.length > 0 && (
+                      <div className="pt-2 pb-1">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Selected Garments</p>
+                        <div className="p-3 bg-gray-50 dark:bg-gray-800/80 rounded-xl space-y-1.5 border border-gray-100 dark:border-gray-700/60">
+                          {bookingInfo.pieceBreakdown.map((item: any, idx: number) => (
+                            <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-300">
+                              <span>{item.count}x {item.name}</span>
+                              {isPayingWithCredits ? (
+                                <span className="font-semibold text-green-600 dark:text-green-400">
+                                  {item.totalCredits || (item.subscriberCredits ? item.subscriberCredits * item.count : (item.unitCredits ? item.unitCredits * item.count : item.count * 3))} Credits
+                                </span>
+                              ) : (
+                                <span className="font-semibold text-gray-800 dark:text-gray-200">₹{item.totalPrice}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Pickup/Drop</span>
-                      <span className="font-medium text-gray-800 dark:text-gray-200">{bookingInfo.pickupDrop ? 'Yes' : 'No'}</span>
+                      <span className="font-medium text-gray-800 dark:text-gray-200">
+                        {bookingInfo.pickupDrop ? (isSubscriber || isPayingWithCredits ? 'Yes (Free)' : 'Yes') : 'No'}
+                      </span>
                     </div>
                     {bookingInfo.pickupDrop && bookingInfo.address && (
                       <div className="pt-2">
@@ -1111,8 +967,8 @@ const Billing: React.FC = () => {
               </div>
               
               <div className="pt-4 space-y-4">
-                {/* Special Limited Offers */}
-                {!isSubscription && limitedOffers.length > 0 && !appliedLimitedOffer && (
+                {/* Special Limited Offers (Direct payment only) */}
+                {!isSubscription && !isPayingWithCredits && limitedOffers.length > 0 && !appliedLimitedOffer && (
                    <div className="space-y-3 pb-4 border-b border-gray-100 dark:border-gray-800">
                      <label className="text-[10px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest flex items-center gap-2">
                        <Zap className="w-3 h-3 fill-current" /> Special Offers Only For Today
@@ -1136,7 +992,7 @@ const Billing: React.FC = () => {
                    </div>
                 )}
 
-                {appliedLimitedOffer && (
+                {appliedLimitedOffer && !isPayingWithCredits && (
                    <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl flex items-center justify-between">
                      <div>
                        <p className="text-[10px] font-black text-green-600 uppercase tracking-widest">Special Offer Applied</p>
@@ -1146,94 +1002,115 @@ const Billing: React.FC = () => {
                    </div>
                 )}
 
-                {/* Promo Code Input */}
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Promo Code</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={promoCode}
-                      onChange={(e) => setPromoCode(e.target.value)}
-                      placeholder="ENTER CODE"
-                      className="flex-1 min-w-0 px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider focus:ring-2 focus:ring-blue-500 outline-none dark:text-gray-100"
-                    />
-                    <button 
-                      onClick={applyPromoCode}
-                      className="px-4 py-2.5 bg-blue-600 dark:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-blue-700 transition-all flex-shrink-0"
-                    >
-                      Apply
-                    </button>
+                {/* Promo Code Input (Direct payment only) */}
+                {!isSubscription && !isPayingWithCredits && (
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Promo Code</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={promoCode}
+                        onChange={(e) => setPromoCode(e.target.value)}
+                        placeholder="ENTER CODE"
+                        className="flex-1 min-w-0 px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider focus:ring-2 focus:ring-blue-500 outline-none dark:text-gray-100"
+                      />
+                      <button 
+                        onClick={applyPromoCode}
+                        className="px-4 py-2.5 bg-blue-600 dark:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-blue-700 transition-all flex-shrink-0"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                    {promoError && <p className="text-red-500 text-[10px] font-bold uppercase tracking-wide px-1">{promoError}</p>}
+                    {promoApplied && <p className="text-green-600 text-[10px] font-bold uppercase tracking-wide px-1">Promo applied!</p>}
                   </div>
-                  {promoError && <p className="text-red-500 text-[10px] font-bold uppercase tracking-wide px-1">{promoError}</p>}
-                  {promoApplied && <p className="text-green-600 text-[10px] font-bold uppercase tracking-wide px-1">Promo applied!</p>}
-                </div>
+                )}
 
                 <div className="space-y-2 pt-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500 dark:text-gray-400">Base Price</span>
-                    <span className="font-medium text-gray-800 dark:text-gray-200">
-                      ₹{isSubscription ? selectedPackage?.originalPrice || selectedPackage?.price : (
-                        bookingInfo.approxLoad === '1-4 kg' ? settings?.pricing.minCharge :
-                        bookingInfo.approxLoad === '5 kg' ? 5 * (settings?.pricing.pricePerKg || 0) :
-                        bookingInfo.approxLoad === '6 kg' ? 6 * (settings?.pricing.pricePerKg || 0) :
-                        bookingInfo.approxLoad === '7+ kg' ? 7 * (settings?.pricing.pricePerKg || 0) : 0
+                  {isPayingWithCredits ? (
+                    <>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {isPerPiece ? `Wash & Fold (${bookingInfo.totalPieces} pcs)` : `Wash & Fold (${bookingInfo.approxLoad})`}
+                        </span>
+                        <span className="font-bold text-green-600 dark:text-green-400">
+                          {bookingCreditsNeeded} Credits
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">Coverage</span>
+                        <span className="font-medium text-green-600 dark:text-green-400">
+                          {isSubscriber ? 'Subscriber Plan (100% Covered)' : 'Loyalty Credits (100% Covered)'}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {bookingInfo.serviceType === 'Wash & Fold (Per Piece)'
+                            ? `Wash & Fold (Per Piece - ${bookingInfo.totalPieces} items)`
+                            : bookingInfo.serviceType === 'Express Wash' 
+                              ? `Express Wash (₹${expressActiveRate}/kg)` 
+                              : `Wash & Fold (₹${normalActiveRate}/kg)`}
+                        </span>
+                        <span className="font-medium text-gray-800 dark:text-gray-200">
+                          ₹{isSubscription ? (selectedPackage?.originalPrice || selectedPackage?.price || 0).toFixed(2) : computedBasePrice.toFixed(2)}
+                        </span>
+                      </div>
+
+                      {!isSubscription && bookingInfo.pickupDrop && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-500 dark:text-gray-400">Delivery Fee</span>
+                          <span className="font-medium text-gray-800 dark:text-gray-200">
+                            {isSubscriber ? 'FREE (Subscriber Perk)' : (directDeliveryFee > 0 ? `₹${directDeliveryFee.toFixed(2)}` : 'FREE')}
+                          </span>
+                        </div>
                       )}
-                    </span>
-                  </div>
-                  
-                  {!isSubscription && bookingInfo.serviceType === 'Express Wash' && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">Express Wash Premium</span>
-                      <span className="font-medium text-gray-800 dark:text-gray-200">₹{settings?.pricing.expressWash.toFixed(2)}</span>
-                    </div>
-                  )}
 
-                  {!isSubscription && bookingInfo.pickupDrop && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500 dark:text-gray-400">Delivery Fee</span>
-                      <span className="font-medium text-gray-800 dark:text-gray-200">
-                        {bookingInfo.deliveryFee > 0 ? `₹${bookingInfo.deliveryFee.toFixed(2)}` : 'FREE'}
-                      </span>
-                    </div>
-                  )}
+                      {isSubscription && selectedPackage && (
+                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold">
+                          <span>Package Discount</span>
+                          <span>-₹{(selectedPackage.originalPrice - selectedPackage.price).toFixed(2)}</span>
+                        </div>
+                      )}
+                      
+                      {autoDiscount > 0 && (
+                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold">
+                          <span>Automatic Discount</span>
+                          <span>-₹{autoDiscount.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                  {isSubscription && selectedPackage && (
-                    <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold">
-                      <span>Package Discount</span>
-                      <span>-₹{(selectedPackage.originalPrice - selectedPackage.price).toFixed(2)}</span>
-                    </div>
-                  )}
-                  
-                  {autoDiscount > 0 && (
-                    <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold">
-                      <span>Automatic Discount</span>
-                      <span>-₹{autoDiscount.toFixed(2)}</span>
-                    </div>
-                  )}
+                      {appliedLimitedOffer && (
+                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold mb-2">
+                          <span>Limited Offer: {appliedLimitedOffer.offerApplied}</span>
+                          <span>-₹{(appliedLimitedOffer.originalPrice - appliedLimitedOffer.discountedPrice).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                  {appliedLimitedOffer && (
-                    <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold mb-2">
-                      <span>Limited Offer: {appliedLimitedOffer.offerApplied}</span>
-                      <span>-₹{(appliedLimitedOffer.originalPrice - appliedLimitedOffer.discountedPrice).toFixed(2)}</span>
-                    </div>
-                  )}
-
-                  {discount > 0 && !appliedLimitedOffer && (
-                    <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold">
-                      <span>Promo Discount</span>
-                      <span>-₹{((bookingInfo.price - autoDiscount) * discount).toFixed(2)}</span>
-                    </div>
+                      {discount > 0 && !appliedLimitedOffer && (
+                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold">
+                          <span>Promo Discount</span>
+                          <span>-₹{((computedBasePrice - autoDiscount) * discount).toFixed(2)}</span>
+                        </div>
+                      )}
+                    </>
                   )}
                   
                   <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
                     <span className="text-gray-800 dark:text-gray-100">Total</span>
                     <span className="text-blue-600 dark:text-blue-400 font-black text-2xl">
-                      {isSubscriberBooking ? '₹0.00' : `₹${finalPrice.toFixed(2)}`}
+                      {isPayingWithCredits ? '₹0.00' : `₹${finalPrice.toFixed(2)}`}
                     </span>
                   </div>
-                  {isSubscriberBooking && (
-                    <p className="text-[10px] text-green-600 dark:text-green-400 font-bold uppercase tracking-widest text-right mt-1">
-                      Covered by Subscriber Account
+                  {isPayingWithCredits ? (
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest text-right mt-1">
+                      🧺 {bookingCreditsNeeded} Credits Deducted (Free Wash)
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest text-right mt-1">
+                      ✨ Earn +5 Loyalty Credits on Completion
                     </p>
                   )}
                 </div>

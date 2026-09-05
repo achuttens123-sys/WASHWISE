@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Calendar, Clock, CheckCircle2, XCircle, ChevronRight, Loader2, CalendarDays, Circle, FileText, Zap, MessageSquare, Info, Sparkles, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, CheckCircle2, XCircle, ChevronRight, Loader2, CalendarDays, Circle, FileText, Zap, MessageSquare, Info, Sparkles, AlertCircle, Wallet, Gift, ArrowRight, Award, Coins } from 'lucide-react';
 import { collection, query, where, getDocs, doc, getDoc, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -9,6 +9,7 @@ import { TIME_SLOTS, Slot, Booking, Store, Machine } from '../types';
 import { format, addDays, isSameDay } from 'date-fns';
 import TermsModal from '../components/TermsModal';
 import { OfferBanner } from '../components/OfferBanner';
+import { ReferralCard } from '../components/ReferralCard';
 
 const LAUNDRY_TIPS = [
   "Separate whites from colors to prevent bleeding.",
@@ -225,34 +226,57 @@ const Dashboard: React.FC = () => {
 
       <div className="flex flex-col lg:flex-row gap-6 mb-12 sm:mb-16 w-full items-stretch">
         {/* Main Dashboard Info - Large Bento Card */}
-        <div className="flex-[3] bg-white dark:bg-surface-container p-6 sm:p-10 xl:p-12 rounded-[2rem] sm:rounded-[3.5rem] shadow-2xl shadow-black/5 dark:shadow-none border border-gray-100/50 dark:border-surface-highest/10 relative overflow-hidden group">
+        <div className="flex-[3] min-w-0 bg-white dark:bg-surface-container p-6 sm:p-8 lg:p-8 xl:p-10 rounded-[2rem] sm:rounded-[3.5rem] shadow-2xl shadow-black/5 dark:shadow-none border border-gray-100/50 dark:border-surface-highest/10 relative overflow-hidden group">
           {/* Subtle Background Accent */}
           <div className="absolute -right-20 -top-20 w-64 h-64 bg-primary-electric/5 rounded-full blur-[100px] pointer-events-none" />
           
-          <div className="relative z-10 flex flex-col h-full justify-between gap-10">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-6 sm:gap-10">
+          <div className="relative z-10 flex flex-col h-full justify-between gap-8 sm:gap-10 min-w-0 w-full">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 lg:gap-6 xl:gap-8 min-w-0">
               <motion.div 
                 whileHover={{ scale: 1.05, rotate: -2 }}
-                className="w-16 h-16 sm:w-24 sm:h-24 bg-primary-electric rounded-[1.5rem] sm:rounded-3xl flex items-center justify-center shadow-2xl shadow-primary-electric/40 shrink-0 cursor-pointer relative group/avatar"
+                className="w-16 h-16 sm:w-20 sm:h-20 xl:w-24 xl:h-24 bg-primary-electric rounded-[1.5rem] sm:rounded-3xl flex items-center justify-center shadow-2xl shadow-primary-electric/40 shrink-0 cursor-pointer relative group/avatar"
                 onClick={() => navigate('/profile')}
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover/avatar:opacity-100 transition-opacity rounded-3xl" />
                 <span className="text-2xl sm:text-4xl font-display font-black text-white">{user?.name?.[0]?.toUpperCase()}</span>
               </motion.div>
               
-              <div className="space-y-1 sm:space-y-2">
-                <h1 className="text-3xl sm:text-4xl lg:text-5xl xl:text-6xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-[0.9]">
+              <div className="min-w-0 flex-1 space-y-1.5 sm:space-y-2">
+                <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-4xl xl:text-5xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase leading-[0.95] break-words">
                   {getGreeting()}
                 </h1>
-                <div className="flex flex-wrap items-center gap-3">
-                  <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.3em] leading-none">
+                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 pt-0.5 max-w-full">
+                  <p className="text-[10px] sm:text-[11px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider leading-none shrink-0">
                     {user?.name}
                   </p>
-                  {(user?.userType === 'subscriber' || !!user?.subscriptionPaid) && (
+                  {(user?.userType === 'subscriber' || !!user?.subscriptionPaid) ? (
                     <>
-                      <div className="h-1 w-1 bg-gray-300 dark:bg-gray-600 rounded-full" />
-                      <span className="px-2.5 py-0.5 bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400 text-[9px] font-black uppercase rounded-full tracking-wider border border-green-200 dark:border-green-800">
-                        Subscriber Account • {user.kilosLeft ?? 12} KG Left
+                      <div className="hidden sm:inline-block h-1 w-1 bg-gray-300 dark:bg-gray-600 rounded-full shrink-0" />
+                      <span className="px-2.5 py-1 bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 text-[10px] sm:text-[11px] font-black uppercase rounded-full tracking-wider border border-green-200 dark:border-green-800 inline-flex items-center gap-1.5 shadow-sm shrink-0 whitespace-nowrap">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+                        <span>🧺 {user.laundryCredits ?? (user.kilosLeft ? user.kilosLeft * 10 : 120)} / {user.totalMonthlyCredits ?? (user.package === 'super_premium' ? 320 : user.package === 'premium' ? 200 : user.package === 'standard' ? 160 : 120)} CREDITS</span>
+                      </span>
+                    </>
+                  ) : (user?.laundryCredits && user.laundryCredits > 0) ? (
+                    <>
+                      <div className="hidden sm:inline-block h-1 w-1 bg-gray-300 dark:bg-gray-600 rounded-full shrink-0" />
+                      <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-[10px] sm:text-[11px] font-black uppercase rounded-full tracking-wider border border-emerald-200 dark:border-emerald-800 inline-flex items-center gap-1.5 shadow-sm shrink-0 whitespace-nowrap">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                        <span>🧺 {user.laundryCredits} LAUNDRY CREDITS</span>
+                      </span>
+                    </>
+                  ) : null}
+
+                  {/* Wallet Balance Badge */}
+                  {(user?.walletBalance !== undefined && user?.walletBalance > 0) && (
+                    <>
+                      <div className="hidden sm:inline-block h-1 w-1 bg-gray-300 dark:bg-gray-600 rounded-full shrink-0" />
+                      <span 
+                        onClick={() => navigate('/profile')}
+                        className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-[10px] sm:text-[11px] font-black uppercase rounded-full tracking-wider border border-blue-200 dark:border-blue-800 inline-flex items-center gap-1.5 shadow-sm shrink-0 whitespace-nowrap cursor-pointer transition-colors"
+                      >
+                        <Wallet className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                        <span>₹{Number(user.walletBalance).toFixed(2)} WALLET</span>
                       </span>
                     </>
                   )}
@@ -326,6 +350,84 @@ const Dashboard: React.FC = () => {
           </motion.div>
         </div>
       </div>
+
+      {/* Loyalty Rewards - Single Compact Progress Bar Box */}
+      {(() => {
+        const userCredits = Number(user?.laundryCredits ?? ((user?.kilosLeft || 0) * 10));
+        const freeWashesReady = Math.floor(userCredits / 40);
+        const cycleCredits = userCredits % 40;
+        const progressPercent = userCredits >= 40 
+          ? (cycleCredits === 0 ? 100 : Math.round((cycleCredits / 40) * 100))
+          : Math.round((userCredits / 40) * 100);
+        const creditsToNext = userCredits >= 40 && cycleCredits === 0 ? 0 : (40 - cycleCredits);
+        const washesToNext = Math.ceil(creditsToNext / 5);
+
+        return (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8 p-4 sm:p-5 bg-white dark:bg-surface-container rounded-2xl sm:rounded-3xl border border-gray-100 dark:border-surface-highest/10 shadow-sm relative overflow-hidden"
+          >
+            <div className="flex items-center justify-between gap-4 mb-2.5">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Coins className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-high-contrast">
+                      Loyalty Rewards
+                    </h3>
+                    <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[9px] font-black uppercase rounded-full border border-emerald-200/50 dark:border-emerald-800/40">
+                      +5 Cr / Wash
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+                    {freeWashesReady > 0 ? (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                        🎉 {freeWashesReady} Free 4kg Wash{freeWashesReady > 1 ? 'es' : ''} Ready ({freeWashesReady * 40} Credits)
+                      </span>
+                    ) : (
+                      <span>{creditsToNext} credits ({washesToNext} wash{washesToNext !== 1 ? 'es' : ''}) to unlock a Free 4kg Wash</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-right shrink-0">
+                <span className="text-[9px] font-black uppercase tracking-wider text-gray-400 block">Rewards Gained</span>
+                <span className="text-base sm:text-lg font-display font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
+                  {userCredits} <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400">Credits</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Loading / Progress Bar */}
+            <div className="space-y-1.5">
+              <div className="h-2 w-full bg-gray-100 dark:bg-surface-highest/40 rounded-full overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(100, Math.max(3, progressPercent))}%` }}
+                  transition={{ duration: 0.6, ease: 'easeOut' }}
+                  className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full"
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-[10px] font-bold text-gray-400 dark:text-gray-500">
+                <span>
+                  {userCredits >= 40 
+                    ? `Next reward cycle: ${cycleCredits} / 40 Cr` 
+                    : `Milestone: ${userCredits} / 40 Cr (8 Washes = 1 Free Wash)`
+                  }
+                </span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-black">
+                  {userCredits >= 40 ? 'Free Wash Unlocked' : `${progressPercent}% Completed`}
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        );
+      })()}
 
       {/* Quick Actions & Tip Section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
@@ -445,6 +547,9 @@ const Dashboard: React.FC = () => {
                         <div className="flex items-center gap-2 sm:gap-3 mb-1.5 flex-wrap">
                           <p className="text-[10px] font-black text-primary-electric dark:text-primary-electric-light uppercase tracking-widest">{booking.serviceType}</p>
                           <span className="text-[10px] font-black text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-surface-low px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest">M#{booking.machineNumber}</span>
+                          <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2.5 sm:px-3 py-1 rounded-full uppercase tracking-widest">
+                            ID: {booking.bookingId || `#${booking.id?.slice(-6).toUpperCase()}`}
+                          </span>
                         </div>
                         <h3 className="text-xl sm:text-2xl md:text-3xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase break-words leading-tight">{getStatusLabel(booking.status)}</h3>
                       </div>
@@ -640,7 +745,12 @@ const Dashboard: React.FC = () => {
         )}
       </div>
 
-      <div className="mt-20 pt-12 border-t border-gray-50 dark:border-surface-low">
+      {/* Refer & Earn Feature Banner */}
+      <div className="mt-12 sm:mt-16">
+        <ReferralCard />
+      </div>
+
+      <div className="mt-16 sm:mt-20 pt-12 border-t border-gray-50 dark:border-surface-low">
         <div className="flex flex-col md:flex-row items-center justify-between gap-8 bg-gray-50 dark:bg-surface-low p-10 rounded-2xl relative overflow-hidden group">
           <div className="relative z-10">
             <h3 className="text-2xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase mb-3">Need help?</h3>

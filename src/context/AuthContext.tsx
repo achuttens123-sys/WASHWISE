@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, User as FirebaseUser, sendEmailVerification } from 'firebase/auth';
 import { doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { User } from '../types';
 import { isSuperAdminEmail } from '../constants';
+import { generateUserReferralCode } from '../utils/referral';
 
 interface AuthContextType {
   user: User | null;
@@ -15,6 +16,9 @@ interface AuthContextType {
   isStoreManager: boolean;
   isStoreStaff: boolean;
   isDeliveryStaff: boolean;
+  isEmailVerified: boolean;
+  reloadUser: () => Promise<FirebaseUser | null>;
+  resendEmailVerification: () => Promise<void>;
   login: (userData: User) => Promise<void>;
   updateUser: (userData: Partial<User>) => Promise<void>;
   logout: () => Promise<void>;
@@ -25,7 +29,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const cleanData = (data: any) => {
   const cleaned = { ...data };
   Object.keys(cleaned).forEach(key => {
-    if (cleaned[key] === undefined) {
+    if (cleaned[key] === undefined || (key === 'adminRole' && !cleaned[key])) {
       delete cleaned[key];
     }
   });
@@ -87,9 +91,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (userData.userType === 'subscriber' || userData.subscriptionPaid) {
                 userData.userType = 'subscriber';
                 userData.subscriptionPaid = true;
-                if (userData.kilosLeft === undefined || userData.kilosLeft === null || isNaN(userData.kilosLeft)) {
-                  userData.kilosLeft = 12;
+                const defaultPlanCredits = userData.package === 'super_premium' ? 320 :
+                                           userData.package === 'premium' ? 200 :
+                                           userData.package === 'standard' ? 160 : 120;
+                if (!userData.totalMonthlyCredits) {
+                  userData.totalMonthlyCredits = defaultPlanCredits;
                 }
+                if (userData.laundryCredits === undefined || userData.laundryCredits === null || isNaN(userData.laundryCredits)) {
+                  userData.laundryCredits = userData.kilosLeft !== undefined && !isNaN(userData.kilosLeft) ? userData.kilosLeft * 10 : defaultPlanCredits;
+                }
+                if (userData.kilosLeft === undefined || userData.kilosLeft === null || isNaN(userData.kilosLeft)) {
+                  userData.kilosLeft = Math.floor(userData.laundryCredits / 10);
+                }
+              } else if (userData.laundryCredits !== undefined && userData.laundryCredits !== null && !isNaN(userData.laundryCredits)) {
+                if (userData.kilosLeft === undefined || userData.kilosLeft === null || isNaN(userData.kilosLeft)) {
+                  userData.kilosLeft = Math.floor(userData.laundryCredits / 10);
+                }
+              }
+
+              // Ensure user has a referral code for Refer & Earn
+              if (!userData.referralCode) {
+                const newCode = generateUserReferralCode(userData.name || fbUser.displayName);
+                userData.referralCode = newCode;
+                updateDoc(doc(db, 'users', fbUser.uid), { referralCode: newCode }).catch(() => {});
               }
 
               setUser(userData);
@@ -140,6 +164,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const isEmailVerified = Boolean(firebaseUser?.emailVerified);
+
+  const reloadUser = async (): Promise<FirebaseUser | null> => {
+    if (auth.currentUser) {
+      await auth.currentUser.reload();
+      const reloadedUser = auth.currentUser;
+      setFirebaseUser(reloadedUser);
+      if (reloadedUser?.emailVerified && user && !user.emailVerified) {
+        updateUser({ emailVerified: true }).catch(() => {});
+      }
+      return reloadedUser;
+    }
+    return null;
+  };
+
+  const resendEmailVerification = async () => {
+    if (auth.currentUser) {
+      await sendEmailVerification(auth.currentUser);
+    }
+  };
+
   const logout = async () => {
     await auth.signOut();
     setUser(null);
@@ -157,6 +202,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isStoreManager, 
       isStoreStaff,
       isDeliveryStaff,
+      isEmailVerified,
+      reloadUser,
+      resendEmailVerification,
       login, 
       updateUser, 
       logout 

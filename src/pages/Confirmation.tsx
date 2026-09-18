@@ -5,7 +5,6 @@ import { CheckCircle2, Calendar, Clock, Monitor, ArrowRight, Download, Share2, P
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Booking } from '../types';
-import { jsPDF } from 'jspdf';
 import FeedbackModal from '../components/FeedbackModal';
 
 const Confirmation: React.FC = () => {
@@ -46,11 +45,12 @@ const Confirmation: React.FC = () => {
     window.print();
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     if (!booking) return;
     setIsDownloading(true);
 
     try {
+      const { jsPDF } = await import('jspdf');
       const doc = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',

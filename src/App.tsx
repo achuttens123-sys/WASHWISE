@@ -6,7 +6,6 @@ import { ThemeProvider } from './context/ThemeContext';
 import { SettingsProvider } from './context/SettingsContext';
 import Layout from './components/Layout';
 import Home from './pages/Home';
-import Login from './pages/Login';
 import ErrorBoundary from './components/ErrorBoundary';
 import PageTransition from './components/PageTransition';
 import LoadingScreen from './components/LoadingScreen';
@@ -15,6 +14,7 @@ import { Toaster, toast } from 'react-hot-toast';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 
 // Code-split route components with automatic retry and reload resilience
+const Login = lazyWithRetry(() => import('./pages/Login'));
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'));
 const BookingDetails = lazyWithRetry(() => import('./pages/BookingDetails'));
 const Billing = lazyWithRetry(() => import('./pages/Billing'));

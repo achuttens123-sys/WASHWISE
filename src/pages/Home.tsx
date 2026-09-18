@@ -1,10 +1,25 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { LogIn, UserPlus, Sparkles, Zap } from 'lucide-react';
 
+const prefetchLogin = () => {
+  // Pre-load login chunk in background
+  import('./Login').catch(() => {});
+};
+
 const Home: React.FC = () => {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Prefetch login component on idle for 0ms transition
+    if ('requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(prefetchLogin);
+    } else {
+      const timer = setTimeout(prefetchLogin, 800);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[82vh] px-4 py-8">
@@ -43,6 +58,8 @@ const Home: React.FC = () => {
           transition={{ delay: 0.15 }}
           whileHover={{ scale: 1.02, y: -4 }}
           whileTap={{ scale: 0.98 }}
+          onMouseEnter={prefetchLogin}
+          onTouchStart={prefetchLogin}
           onClick={() => navigate('/login?mode=login')}
           className="flex flex-col items-center justify-center p-8 sm:p-10 bg-white dark:bg-surface-container rounded-3xl border border-gray-100 dark:border-gray-800/60 shadow-2xl shadow-black/5 dark:shadow-none transition-all group haptic-feedback relative overflow-hidden text-center"
         >
@@ -68,6 +85,8 @@ const Home: React.FC = () => {
           transition={{ delay: 0.25 }}
           whileHover={{ scale: 1.02, y: -4 }}
           whileTap={{ scale: 0.98 }}
+          onMouseEnter={prefetchLogin}
+          onTouchStart={prefetchLogin}
           onClick={() => navigate('/login?mode=signup')}
           className="flex flex-col items-center justify-center p-8 sm:p-10 bg-gradient-to-br from-primary-electric to-[#3323cc] rounded-3xl shadow-2xl shadow-primary-electric/25 dark:shadow-none transition-all group haptic-feedback relative overflow-hidden text-center text-white"
         >

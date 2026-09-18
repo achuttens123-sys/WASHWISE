@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WASHWISE - Smart Laundry Ecosystem</title>
+    <title>WASHWISE</title>
+    <meta name="description" content="A student-friendly laundry booking service with slot-based machine assignment." />
+    <meta property="og:title" content="WASHWISE" />
+    <meta property="og:description" content="A student-friendly laundry booking service with slot-based machine assignment." />
     
     <!-- Preconnect & DNS-Prefetch for Fast Critical Asset Loading -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -11,11 +14,24 @@
     <link rel="dns-prefetch" href="https://firestore.googleapis.com" />
     <link rel="dns-prefetch" href="https://identitytoolkit.googleapis.com" />
     
-    <!-- Non-blocking Google Font Stylesheet -->
+    <!-- High-Performance Non-blocking Google Font Stylesheet -->
+    <link 
+      rel="preload" 
+      as="style" 
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap" 
+    />
     <link 
       rel="stylesheet" 
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap" 
+      media="print" 
+      onload="this.media='all'" 
     />
+    <noscript>
+      <link 
+        rel="stylesheet" 
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap" 
+      />
+    </noscript>
   </head>
   <body>
     <div id="root"></div>

@@ -38,11 +38,22 @@ export const getDeliveryFee = (distance: number): { fee: number; available: bool
   }
 };
 
+let cachedActiveStores: Store[] | null = null;
+let cachedActiveStoresTime = 0;
+const STORES_CACHE_TTL = 60 * 1000; // 60s in-memory cache
+
 export const StoreService = {
-  async getStores(): Promise<Store[]> {
+  async getStores(forceRefresh = false): Promise<Store[]> {
+    const now = Date.now();
+    if (!forceRefresh && cachedActiveStores && (now - cachedActiveStoresTime < STORES_CACHE_TTL)) {
+      return cachedActiveStores;
+    }
     const q = query(collection(db, 'stores'), where('active', '==', true));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Store));
+    const stores = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Store));
+    cachedActiveStores = stores;
+    cachedActiveStoresTime = now;
+    return stores;
   },
 
   getAllStores(callback: (stores: Store[]) => void) {
@@ -55,6 +66,7 @@ export const StoreService = {
   },
 
   async addStore(store: Partial<Store> & { id?: string }) {
+    cachedActiveStores = null;
     if (store.id) {
       return await setDoc(doc(db, 'stores', store.id), store);
     }
@@ -62,10 +74,12 @@ export const StoreService = {
   },
 
   async updateStore(id: string, store: Partial<Store>) {
+    cachedActiveStores = null;
     return await updateDoc(doc(db, 'stores', id), store);
   },
 
   async deleteStore(id: string) {
+    cachedActiveStores = null;
     return await deleteDoc(doc(db, 'stores', id));
   },
 

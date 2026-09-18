@@ -22,6 +22,9 @@ const LAUNDRY_TIPS = [
   "Check pockets for coins or tissues before washing!"
 ];
 
+// Module-level cache for instant date-switching and zero-latency slot renders
+const slotsMemoryCache = new Map<string, { data: Record<string, Slot>; timestamp: number }>();
+
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -95,12 +98,29 @@ const Dashboard: React.FC = () => {
   }, [user]);
 
   useEffect(() => {
+    let isCancelled = false;
+
     const fetchSlots = async () => {
-      setLoading(true);
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const cached = slotsMemoryCache.get(dateStr);
+      const now = Date.now();
+
+      // Instant render from cache
+      if (cached) {
+        setSlotsData(cached.data);
+        setLoading(false);
+        // If cache is very fresh (< 15 seconds), skip network refetch
+        if (now - cached.timestamp < 15000) {
+          return;
+        }
+      } else {
+        setLoading(true);
+      }
+
       const q = query(collection(db, 'slots'), where('date', '==', dateStr));
       try {
         const querySnapshot = await getDocs(q);
+        if (isCancelled) return;
         
         const newSlotsData: Record<string, Slot> = {};
         querySnapshot.forEach((doc) => {
@@ -108,15 +128,24 @@ const Dashboard: React.FC = () => {
           newSlotsData[data.timeSlot] = data;
         });
         
+        slotsMemoryCache.set(dateStr, { data: newSlotsData, timestamp: Date.now() });
         setSlotsData(newSlotsData);
       } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, 'slots');
+        if (!isCancelled) {
+          handleFirestoreError(error, OperationType.LIST, 'slots');
+        }
       } finally {
-        setLoading(false);
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
     };
 
     fetchSlots();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [selectedDate]);
 
   const getMachineAvailability = (timeSlot: string) => {

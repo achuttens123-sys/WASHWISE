@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { CheckCircle2, Calendar, Clock, Monitor, ArrowRight, Download, Share2, Printer, ReceiptText, User, Hash, CreditCard, AlertCircle, RefreshCw, Check, MessageSquare, Star, Sparkles } from 'lucide-react';
+import { CheckCircle2, Calendar, Clock, Monitor, ArrowRight, Download, Share2, Printer, ReceiptText, User, Hash, CreditCard, AlertCircle, RefreshCw, Check, MessageSquare, Star, Sparkles, Store } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Booking } from '../types';
@@ -152,8 +152,16 @@ const Confirmation: React.FC = () => {
       doc.setTextColor(75, 85, 99);
       
       const isCreditPayment = booking.paymentType === 'laundry_credits' || (booking.creditsUsed !== undefined && booking.creditsUsed > 0);
-      const deliveryFee = booking.pickupDrop ? (booking.deliveryFee ?? 30) : 0;
-      const basePrice = booking.price - deliveryFee;
+      const isCodPayment = booking.paymentType === 'pay_at_store' || Boolean(booking.isCodPrepaid);
+      const deliveryFee = booking.pickupDrop ? (booking.deliveryFee ?? 0) : 0;
+      const basePrice = Math.max(0, booking.price - deliveryFee);
+      const isPerPiece = booking.serviceType === 'Wash & Fold (Per Piece)';
+      const prepaidAmount = booking.prepaidAmount !== undefined 
+        ? Number(booking.prepaidAmount) 
+        : (isCodPayment ? (isPerPiece ? Math.round(booking.price * 0.20 * 100) / 100 : Math.min(booking.price, 39)) : booking.price);
+      const remainingAmount = booking.remainingAmount !== undefined
+        ? Number(booking.remainingAmount)
+        : (isCodPayment ? Math.max(0, Math.round((booking.price - prepaidAmount) * 100) / 100) : 0);
 
       doc.text(`${booking.serviceType}`, margin + 4, rowY);
       doc.text(`${booking.approxLoad}`, margin + 100, rowY);
@@ -175,6 +183,16 @@ const Confirmation: React.FC = () => {
         totalY += 8;
       }
 
+      if (isCodPayment && !isCreditPayment) {
+        doc.text(`Slot Booking Fee (${isPerPiece ? '20%' : 'Flat ₹39'} Paid Online)`, margin + 4, totalY);
+        doc.text(`-₹${prepaidAmount.toFixed(2)}`, width - margin - 25, totalY);
+        totalY += 8;
+
+        doc.text('Remaining Balance Due (Cash on Delivery)', margin + 4, totalY);
+        doc.text(`₹${remainingAmount.toFixed(2)}`, width - margin - 25, totalY);
+        totalY += 8;
+      }
+
       // Divider for totals
       doc.line(margin, totalY - 4, width - margin, totalY - 4);
 
@@ -182,7 +200,7 @@ const Confirmation: React.FC = () => {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.text('TOTAL AMOUNT PAID', margin + 4, totalY + 4);
+      doc.text(isCodPayment ? 'TOTAL ORDER VALUE' : 'TOTAL AMOUNT PAID', margin + 4, totalY + 4);
       doc.setFontSize(13);
       doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
       if (isCreditPayment) {
@@ -253,8 +271,16 @@ const Confirmation: React.FC = () => {
   const isRejected = booking.status === 'rejected';
   const isRescheduled = booking.status === 'rescheduled';
 
-  const deliveryFee = booking.pickupDrop ? (booking.deliveryFee ?? 30) : 0;
-  const basePrice = booking.price - deliveryFee;
+  const isCodPayment = booking.paymentType === 'pay_at_store' || Boolean(booking.isCodPrepaid);
+  const deliveryFee = booking.pickupDrop ? (booking.deliveryFee ?? 0) : 0;
+  const isPerPiece = booking.serviceType === 'Wash & Fold (Per Piece)';
+  const prepaidAmount = booking.prepaidAmount !== undefined 
+    ? Number(booking.prepaidAmount) 
+    : (isCodPayment ? (isPerPiece ? Math.round(booking.price * 0.20 * 100) / 100 : Math.min(booking.price, 39)) : booking.price);
+  const remainingAmount = booking.remainingAmount !== undefined 
+    ? Number(booking.remainingAmount) 
+    : (isCodPayment ? Math.max(0, Math.round((booking.price - prepaidAmount) * 100) / 100) : 0);
+  const basePrice = Math.max(0, booking.price - deliveryFee);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-12">
@@ -409,7 +435,7 @@ const Confirmation: React.FC = () => {
                           <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
                             <span>{item.count}x {item.name}</span>
                             <span className="font-semibold text-green-600 dark:text-green-400">
-                              {item.totalCredits || (item.subscriberCredits ? item.subscriberCredits * item.count : (item.unitCredits ? item.unitCredits * item.count : item.count * 3))} Credits
+                              {item.totalCredits || (item.subscriberCredits ? item.subscriberCredits * item.count : (item.unitCredits ? item.unitCredits * item.count : item.count * 3))} Credits {item.totalPrice ? `(₹${item.totalPrice})` : ''}
                             </span>
                           </div>
                         ))}
@@ -454,13 +480,35 @@ const Confirmation: React.FC = () => {
                         <span className="font-bold text-gray-800 dark:text-gray-200">₹{deliveryFee.toFixed(2)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between items-center pt-3 border-t border-gray-200 dark:border-gray-700 mt-2">
-                      <div className="flex items-center text-blue-600 dark:text-blue-400">
-                        <CreditCard className="w-4 h-4 mr-2" />
-                        <span className="text-xs font-bold uppercase tracking-wider">Total Amount Paid</span>
+                    {isCodPayment ? (
+                      <div className="space-y-2 pt-2 border-t border-amber-200 dark:border-amber-900/40">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-500 dark:text-gray-400">Total Order Amount</span>
+                          <span className="font-bold text-gray-800 dark:text-gray-200">₹{booking.price.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                            Slot Booking Fee ({isPerPiece ? '20%' : 'Flat ₹39'} Paid Online)
+                          </span>
+                          <span className="font-black text-emerald-600 dark:text-emerald-400">-₹{prepaidAmount.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between items-center p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-900/40">
+                          <div className="flex items-center text-amber-700 dark:text-amber-300">
+                            <Store className="w-4 h-4 mr-2" />
+                            <span className="text-xs font-black uppercase tracking-wider">Cash Due on Delivery</span>
+                          </div>
+                          <span className="text-xl font-black text-amber-600 dark:text-amber-400">₹{remainingAmount.toFixed(2)}</span>
+                        </div>
                       </div>
-                      <span className="text-xl font-black text-gray-800 dark:text-gray-100">₹{booking.price.toFixed(2)}</span>
-                    </div>
+                    ) : (
+                      <div className="flex justify-between items-center pt-3 border-t border-gray-200 dark:border-gray-700 mt-2">
+                        <div className="flex items-center text-blue-600 dark:text-blue-400">
+                          <CreditCard className="w-4 h-4 mr-2" />
+                          <span className="text-xs font-bold uppercase tracking-wider">Total Amount Paid</span>
+                        </div>
+                        <span className="text-xl font-black text-gray-800 dark:text-gray-100">₹{booking.price.toFixed(2)}</span>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

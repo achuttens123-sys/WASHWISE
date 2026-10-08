@@ -2,7 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ===============================================================
-    // Helper Functions
+    // Global Security Helper Functions
     // ===============================================================
     function isAuthenticated() {
       return request.auth != null;
@@ -12,37 +12,35 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isEmailVerified() {
+      return isAuthenticated() && request.auth.token.email_verified == true;
+    }
+
+    // Check trusted Firestore super admin role by UID or verified email in admin_roles
     function isSuperAdmin() {
       return isAuthenticated() && (
-             request.auth.uid == 'gjbVlTdjgYPIHvfuukPpdAmkJb43' ||
-             (request.auth.token.email != null && (
-               request.auth.token.email.matches('(?i)^(server@washwise\\.com|ashwinchuttipara@gmail\\.com|21ba14250@rit\\.ac\\.in)$') ||
-               request.auth.token.email in ["server@washwise.com", "ashwinchuttipara@gmail.com", "21ba14250@rit.ac.in", "SERVER@WASHWISE.COM", "ASHWINCHUTTIPARA@GMAIL.COM", "21BA14250@RIT.AC.IN"]
-             )) ||
-             (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)) &&
-              get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') == 'super_admin') ||
-             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin' ||
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'
-             ))
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') == 'super_admin') ||
+        (isEmailVerified() && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)) &&
+         get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') == 'super_admin')
       );
     }
 
     function isAdmin() {
       return isAuthenticated() && (
-             isSuperAdmin() ||
-             (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email))) ||
-             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') != '' ||
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'
-             ))
+        isSuperAdmin() ||
+        (isEmailVerified() && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email))) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') != '' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'
+        ))
       );
     }
 
     function getAdminRole() {
       let userRole = exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? 
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('adminRole', '') : '';
-      let emailRole = (request.auth.token.email != null && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email))) ?
+      let emailRole = (isEmailVerified() && exists(/databases/$(database)/documents/admin_roles/$(request.auth.token.email))) ?
              get(/databases/$(database)/documents/admin_roles/$(request.auth.token.email)).data.get('role', '') : '';
       return userRole != '' ? userRole : emailRole;
     }
@@ -64,34 +62,6 @@ service cloud.firestore {
       return isAuthenticated() && (isSuperAdmin() || getAdminRole() == 'delivery_staff');
     }
 
-    function isValidUser(data) {
-      return data.uid is string && data.uid.size() > 0 &&
-             data.name is string && data.name.size() > 0 &&
-             data.email is string &&
-             data.userType in ['guest', 'subscriber', 'admin'];
-    }
-
-    function isValidSlot(data) {
-      return data.date is string && 
-             data.timeSlot is string && 
-             data.machines is map;
-    }
-
-    function isValidBooking(data) {
-      return data.userId is string && 
-             data.userName is string &&
-             data.date is string && 
-             data.timeSlot is string;
-    }
-
-    function isValidStore(data) {
-      return data.name is string && data.name.size() > 0;
-    }
-
-    function isValidMachine(data) {
-      return data.storeId is string;
-    }
-
     function canAccessBooking(bookingData) {
       return (isAuthenticated() && request.auth.uid == bookingData.userId) || 
              isAdmin() ||
@@ -102,7 +72,7 @@ service cloud.firestore {
     }
 
     // ===============================================================
-    // Rules
+    // Collection Match Rules
     // ===============================================================
 
     match /system_test/{docId} {
@@ -115,11 +85,13 @@ service cloud.firestore {
       allow write: if isAdmin() || isSuperAdmin();
     }
 
+    // Counters: Sensitive sequence generator; mutations managed through server transaction
     match /counters/{counterId} {
-      allow read, create, update: if isAuthenticated();
-      allow delete: if isAdmin() || isSuperAdmin();
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isSuperAdmin();
     }
 
+    // Users Collection: Financial and Role fields protected from client tampering
     match /users/{userId} {
       allow read: if isAuthenticated() && (
         isOwner(userId) || 
@@ -128,38 +100,73 @@ service cloud.firestore {
         (isStoreManager() && resource.data.get('storeId', '') == getStoreId())
       );
       
+      // User self-creation during registration: Forbid self-assigning admin roles or free initial balance
       allow create: if isAuthenticated() && request.auth.uid == userId && (
         isSuperAdmin() || (
           request.resource.data.get('role', 'user') != 'admin' &&
           (request.resource.data.get('adminRole', null) == null || request.resource.data.get('adminRole', '') == '') &&
-          request.resource.data.get('isSuspended', false) == false
+          request.resource.data.get('isSuspended', false) == false &&
+          request.resource.data.get('walletBalance', 0) == 0 &&
+          request.resource.data.get('laundryCredits', 0) == 0 &&
+          request.resource.data.get('subscriptionPaid', false) == false
         )
       );
 
+      // User profile update: Regular users can update personal info (name, phone, address, savedAddresses, referralCode)
+      // but are strictly blocked from self-modifying wallet balance, credits, subscriber status, or role
       allow update: if isAuthenticated() && (
         isAdmin() || 
         isSuperAdmin() || 
         (isStoreManager() && resource.data.get('storeId', '') == getStoreId()) ||
         (isOwner(userId) && (
-          (request.resource.data.get('role', 'user') != 'admin' || resource.data.get('role', 'user') == 'admin') &&
-          (request.resource.data.get('adminRole', null) == null || request.resource.data.get('adminRole', '') == '' || request.resource.data.get('adminRole', '') == resource.data.get('adminRole', '')) &&
-          (request.resource.data.get('isSuspended', false) == resource.data.get('isSuspended', false))
+          // Role immutability
+          (request.resource.data.get('role', 'user') == resource.data.get('role', 'user')) &&
+          (request.resource.data.get('adminRole', '') == resource.data.get('adminRole', '')) &&
+          (request.resource.data.get('isSuspended', false) == resource.data.get('isSuspended', false)) &&
+          // Financial immutability on client (must use backend APIs)
+          (request.resource.data.get('walletBalance', 0) == resource.data.get('walletBalance', 0)) &&
+          (request.resource.data.get('laundryCredits', 0) == resource.data.get('laundryCredits', 0)) &&
+          (request.resource.data.get('userType', 'guest') == resource.data.get('userType', 'guest')) &&
+          (request.resource.data.get('subscriptionPaid', false) == resource.data.get('subscriptionPaid', false))
         ))
       );
 
       allow delete: if isAuthenticated() && (isOwner(userId) || isAdmin() || isSuperAdmin());
     }
 
+    // Slots Collection: Regular users can read; store managers / admins manage availability
     match /slots/{slotId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated();
-      allow delete: if isAdmin() || isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin() || isStoreManager();
     }
 
+    // Bookings Collection: Read/Create by owner or staff. Status updates protected:
+    // Regular clients cannot self-complete or skip wash workflow
     match /bookings/{bookingId} {
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || canAccessBooking(resource.data) || isAdmin() || isSuperAdmin());
-      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.userId || isAdmin() || isSuperAdmin());
-      allow update: if isAuthenticated() && (request.auth.uid == resource.data.userId || canAccessBooking(resource.data) || isAdmin() || isSuperAdmin());
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.userId || 
+        canAccessBooking(resource.data) || 
+        isAdmin() || 
+        isSuperAdmin()
+      );
+      
+      allow create: if isAuthenticated() && (
+        request.auth.uid == request.resource.data.userId || 
+        isAdmin() || 
+        isSuperAdmin()
+      );
+      
+      allow update: if isAuthenticated() && (
+        isAdmin() || 
+        isSuperAdmin() ||
+        isStoreManager() ||
+        isStoreStaff() ||
+        isDeliveryStaff() ||
+        (request.auth.uid == resource.data.userId && 
+         // Customer cannot self-advance status to completed/washing completed
+         request.resource.data.get('status', '') == resource.data.get('status', ''))
+      );
+      
       allow delete: if isAdmin() || isSuperAdmin();
     }
 
@@ -177,9 +184,9 @@ service cloud.firestore {
 
     match /machines/{machineId} {
       allow read: if isAuthenticated();
-      allow create: if isAdmin() || isSuperAdmin();
+      allow create: if isAdmin() || isSuperAdmin() || isStoreManager();
       allow update: if isAdmin() || isSuperAdmin() || isStoreManager() || isStoreStaff();
-      allow delete: if isAdmin() || isSuperAdmin();
+      allow delete: if isAdmin() || isSuperAdmin() || isStoreManager();
     }
 
     match /admin_roles/{email} {
@@ -198,20 +205,20 @@ service cloud.firestore {
 
       match /daily_stats/{date} {
         allow read: if true;
-        allow write: if isAuthenticated();
+        allow write: if isAdmin() || isSuperAdmin();
       }
     }
 
+    // Redemptions: Created only by server transactions or admin
     match /offer_redemptions/{redemptionId} {
       allow read: if isAuthenticated() && (resource == null || request.auth.uid == resource.data.userId || isAdmin() || isSuperAdmin());
-      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.userId || isAdmin() || isSuperAdmin());
-      allow update, delete: if isAdmin() || isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
     }
 
+    // Financial ledger: Created strictly by backend transactions or admin
     match /wallet_transactions/{txId} {
       allow read: if isAuthenticated() && (resource == null || request.auth.uid == resource.data.userId || isAdmin() || isSuperAdmin());
-      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.userId || isAdmin() || isSuperAdmin());
-      allow update, delete: if isAdmin() || isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
     }
 
     match /feedback/{feedbackId} {
@@ -221,6 +228,7 @@ service cloud.firestore {
       allow delete: if isAdmin() || isSuperAdmin();
     }
 
+    // Referrals Ledger: Only backend or admins create/update rewards; participants can view their status
     match /referrals/{referralId} {
       allow read: if isAuthenticated() && (
         resource == null || 
@@ -229,14 +237,7 @@ service cloud.firestore {
         isAdmin() || 
         isSuperAdmin()
       );
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (
-        request.auth.uid == resource.data.referrerId || 
-        request.auth.uid == resource.data.referredUserId || 
-        isAdmin() || 
-        isSuperAdmin()
-      );
-      allow delete: if isAdmin() || isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
     }
   }
 }

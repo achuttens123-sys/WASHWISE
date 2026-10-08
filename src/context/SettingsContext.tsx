@@ -16,6 +16,7 @@ export const DEFAULT_REFERRAL_SETTINGS: ReferralSettings = {
   enabled: true,
   referrerCredits: 20,
   referrerWalletCash: 50,
+  maxWalletCashReferrals: 3, // Only first 3 referrals grant wallet cash (₹50 each, max ₹150). Remaining referrals grant laundry credits only.
   refereeBonusCredits: 10,
   refereeDiscountRupees: 50,
   minBookingAmountToReward: 40,
@@ -34,9 +35,12 @@ export interface GlobalDiscount {
 export interface PromoCode {
   id: string;
   code: string;
-  discountType: 'percentage' | 'fixed';
+  discountType: 'percentage' | 'fixed' | 'price_per_kg';
   discountValue: number;
+  startDate?: string;
   expiryDate?: string;
+  maxRedemptions?: number;
+  redemptionCount?: number;
   description?: string;
   active: boolean;
   applicableFor?: 'all' | 'wash' | 'subscription';
@@ -139,7 +143,9 @@ export const DEFAULT_PRICING: PricingSettings = {
   minCharge: 156,
   pricePerKg: 39,
   minLoad: 4,
-  deliveryFee: 5
+  deliveryFee: 5,
+  codConvenienceFee: 0,
+  codSlotBookingFee: 39
 };
 
 export const normalizeSubscriptionPlans = (plans: any[], isOfferActive: boolean, pricingSettings?: any): SubscriptionPlan[] => {
@@ -248,7 +254,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           minCharge,
           pricePerKg: activePricePerKg,
           minLoad,
-          deliveryFee
+          deliveryFee,
+          codConvenienceFee: 0,
+          codSlotBookingFee: Number(rawPricing.codSlotBookingFee ?? (rawPricing.codConvenienceFee === 10 ? 39 : (rawPricing.codConvenienceFee ?? 39)))
         };
 
         const mergedPlans = normalizeSubscriptionPlans(data?.subscriptionPlans || defaultSettings.subscriptionPlans, isOfferActive, pricingMerged);
@@ -277,14 +285,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
         setSettings(mergedSettings);
         
-        // Auto-migrate legacy plans or missing offer pricing fields if detected
+        // Auto-migrate legacy plans or missing offer pricing fields or old COD convenience fee if detected
         const hasLegacyPlans = (data.subscriptionPlans?.some((p: any) => [421, 530, 647, 936].includes(p.price) || !p.regular_price || !p.offer_price)) ||
                                data?.pricing?.regular_price_per_kg === undefined ||
                                data?.pricing?.offer_price_per_kg === undefined ||
+                               data?.pricing?.codConvenienceFee === 10 ||
+                               data?.pricing?.codSlotBookingFee === undefined ||
                                data?.garmentCatalog?.some((g: any) => !g.regular_price || !g.offer_price);
                                
         if (hasLegacyPlans && isSuperAdmin) {
-          console.log("Legacy plans, missing offer pricing, or missing garment offer pricing detected, auto-migrating to regular & offer pricing...");
+          console.log("Legacy settings or old COD convenience fee detected, auto-migrating to 39Rs slot booking fee and removing 10Rs convenience fee...");
           setDoc(doc(db, 'settings', 'global'), mergedSettings, { merge: true }).catch(err => {
             console.error("Settings auto-migration failed:", err);
           });

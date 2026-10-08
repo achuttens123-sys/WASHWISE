@@ -20,6 +20,7 @@ import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Booking } from '../../types';
 import { format } from 'date-fns';
+import { authFetch } from '../../utils/api';
 
 const DeliveryStaffDashboard: React.FC = () => {
   const { user } = useAuth();
@@ -55,7 +56,7 @@ const DeliveryStaffDashboard: React.FC = () => {
     try {
       await updateDoc(doc(db, 'bookings', id), { status });
       if (status === 'completed' || status === 'Washing completed') {
-        fetch('/api/loyalty/trigger-reward', {
+        authFetch('/api/loyalty/trigger-reward', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ bookingId: id })
@@ -147,7 +148,7 @@ const DeliveryStaffDashboard: React.FC = () => {
                     <User className="w-10 h-10" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-500 text-[10px] font-black uppercase tracking-widest rounded-full">
                         {task.timeSlot}
                       </span>
@@ -156,6 +157,11 @@ const DeliveryStaffDashboard: React.FC = () => {
                       }`}>
                         {task.status}
                       </span>
+                      {task.paymentType === 'pay_at_store' && (
+                        <span className="px-3 py-1 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 text-[10px] font-black uppercase tracking-widest rounded-full border border-amber-200 dark:border-amber-800/50">
+                          💵 Collect Cash: ₹{(task.remainingAmount ?? (task.price - (task.prepaidAmount ?? 39))).toFixed(2)}
+                        </span>
+                      )}
                     </div>
                     <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">{task.userName}</h3>
                     <div className="flex items-center gap-2 text-sm font-bold text-gray-400 uppercase tracking-widest">

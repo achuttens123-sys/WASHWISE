@@ -8,7 +8,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { StoreService } from '../services/StoreService';
-import { Store } from '../types';
+import { Store, checkIsSubscriber } from '../types';
 import TermsModal from '../components/TermsModal';
 import { GarmentPieceSelector } from '../components/GarmentPieceSelector';
 import { calculateGarmentTotal, GARMENT_CATALOG } from '../data/garmentCatalog';
@@ -87,7 +87,7 @@ const BookingDetails: React.FC = () => {
   const regularExpressRate = settings?.pricing?.express_regular_price_per_kg ?? 89;
 
   const currentRatePerKg = isExpress ? expressRate : standardRate;
-  const isSubscriber = user?.userType === 'subscriber';
+  const isSubscriber = checkIsSubscriber(user);
   const deliveryFee = (bookingData.pickupDrop && !isSubscriber) ? (settings?.pricing?.deliveryFee ?? 30) : 0;
 
   const { 
@@ -172,8 +172,7 @@ const BookingDetails: React.FC = () => {
   const handleNext = () => {
     if (!canProceed) return;
 
-    const price = calculatePrice();
-    const isSubscriber = user?.userType === 'subscriber';
+    const isSubscriber = checkIsSubscriber(user);
     const deliveryFee = (bookingData.pickupDrop && !isSubscriber) ? (settings?.pricing?.deliveryFee ?? 30) : 0;
 
     const params = new URLSearchParams({
@@ -182,7 +181,7 @@ const BookingDetails: React.FC = () => {
       pickupDrop: bookingData.pickupDrop.toString(),
       serviceType: bookingData.serviceType,
       approxLoad: isPerPiece ? `${totalPieces} pieces` : bookingData.approxLoad,
-      price: price.toString(),
+      price: currentBasePrice.toString(),
       totalCredits: totalCreditsNeeded.toString(),
       address: bookingData.address,
       phone: bookingData.phone,
@@ -202,32 +201,43 @@ const BookingDetails: React.FC = () => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 pb-32">
+    <div className="max-w-2xl mx-auto px-3 sm:px-4 py-3 sm:py-8 pb-28 sm:pb-32">
       <button 
         onClick={() => navigate('/dashboard')}
-        className="flex items-center text-gray-500 hover:text-blue-600 mb-8 transition-colors text-sm font-medium"
+        className="flex items-center text-gray-500 hover:text-blue-600 mb-4 sm:mb-8 transition-colors text-xs sm:text-sm font-medium"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Change Slot
       </button>
 
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
+        className="bg-white dark:bg-gray-900 p-4 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
       >
         {/* Selected Slot Header Card */}
-        <div className="mb-8 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl flex items-center justify-between">
+        <div className="mb-5 sm:mb-8 p-3 sm:p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl sm:rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Selected Slot</p>
-            <h2 className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-100">{dateStr} | {timeSlot}</h2>
+            <p className="text-[10px] sm:text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Selected Slot</p>
+            <h2 className="text-sm sm:text-lg font-bold text-gray-800 dark:text-gray-100">{dateStr} | {timeSlot}</h2>
+            <p className="text-[11px] sm:text-xs font-semibold mt-0.5">
+              {isSubscriber ? (
+                <span className="text-emerald-700 dark:text-emerald-300">
+                  Amount to be paid: <strong className="font-bold">₹0 ({totalCreditsNeeded} Credits • ₹{currentTotalPrice.toFixed(2)} value)</strong>
+                </span>
+              ) : (
+                <span className="text-gray-600 dark:text-gray-400">
+                  Estimated: <strong className="text-gray-800 dark:text-gray-200">₹{currentTotalPrice.toFixed(2)}</strong> (₹39 online slot fee for COD)
+                </span>
+              )}
+            </p>
           </div>
-          <div className="bg-white dark:bg-gray-800 p-2 rounded-xl shadow-sm">
-            <Check className="w-5 h-5 text-green-500" />
+          <div className="bg-white dark:bg-gray-800 p-1.5 sm:p-2 rounded-xl shadow-xs shrink-0 ml-2">
+            <Check className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />
           </div>
         </div>
 
-        <div className="space-y-10">
+        <div className="space-y-6 sm:space-y-8">
           {/* STEP 1: Store Selection */}
           <section>
             <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center">
@@ -438,7 +448,7 @@ const BookingDetails: React.FC = () => {
                         <div>
                           <p className="text-sm font-bold">Delivery Information</p>
                           <p className="text-xs opacity-80 mt-0.5">
-                            {user?.userType === 'subscriber' 
+                            {isSubscriber 
                               ? 'Delivery is FREE for subscribers!' 
                               : `A flat delivery fee of ₹${settings?.pricing?.deliveryFee ?? 30} applies for pickup and drop service.`}
                           </p>
@@ -792,7 +802,7 @@ const BookingDetails: React.FC = () => {
                       </h3>
                       {totalPieces > 0 && (
                         <span className="text-xs font-black text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 rounded-lg">
-                          {totalPieces} {totalPieces === 1 ? 'piece' : 'pieces'} (₹{pieceTotalPrice})
+                          {totalPieces} {totalPieces === 1 ? 'piece' : 'pieces'} {isSubscriber ? `• ${totalCreditsNeeded} Credits (₹${pieceTotalPrice})` : `(₹${pieceTotalPrice})`}
                         </span>
                       )}
                     </div>
@@ -887,7 +897,7 @@ const BookingDetails: React.FC = () => {
                 </span>
                 {isSubscriber ? (
                   <span className="font-black text-green-600 dark:text-green-400">
-                    {totalCreditsNeeded} Credits
+                    {totalCreditsNeeded} Credits <span className="font-bold text-gray-500 dark:text-gray-400">({isPerPiece ? `₹${pieceTotalPrice}` : `₹${currentBasePrice}`})</span>
                   </span>
                 ) : (
                   <span className="font-bold text-gray-800 dark:text-gray-100">₹{currentBasePrice}</span>
@@ -902,7 +912,9 @@ const BookingDetails: React.FC = () => {
                     <div key={item.id} className="flex justify-between text-[11px] text-gray-500 dark:text-gray-400">
                       <span>{item.count}x {item.name}</span>
                       {isSubscriber ? (
-                        <span className="font-semibold text-green-600 dark:text-green-400">{item.totalCredits} Credits</span>
+                        <span className="font-semibold text-green-600 dark:text-green-400">
+                          {item.totalCredits} Credits <span className="text-gray-500 dark:text-gray-400">(₹{item.totalPrice})</span>
+                        </span>
                       ) : (
                         <span>₹{item.totalPrice}</span>
                       )}
@@ -952,9 +964,19 @@ const BookingDetails: React.FC = () => {
               </div>
               <div className="text-right">
                 {isSubscriber ? (
-                  <span className="text-2xl sm:text-3xl font-black text-green-600 dark:text-green-400 tracking-tight">
-                    {totalCreditsNeeded} Credits
-                  </span>
+                  <div className="flex flex-col items-end">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-2xl sm:text-3xl font-black text-green-600 dark:text-green-400 tracking-tight">
+                        {totalCreditsNeeded} Credits
+                      </span>
+                      <span className="text-lg sm:text-xl font-bold text-gray-500 dark:text-gray-400">
+                        (₹{currentTotalPrice})
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-bold text-green-700 dark:text-green-400">
+                      ₹0 to pay (Covered by Credits)
+                    </span>
+                  </div>
                 ) : (
                   <div className="flex flex-col items-end">
                     <div className="flex items-baseline gap-2">
@@ -1021,7 +1043,7 @@ const BookingDetails: React.FC = () => {
         >
           <span>
             {isSubscriber 
-              ? `Proceed with ${totalCreditsNeeded} Credits` 
+              ? `Proceed with ${totalCreditsNeeded} Credits (₹${currentTotalPrice})` 
               : `Proceed to Billing • ₹${currentTotalPrice}`}
           </span>
           <ArrowLeft className="w-4 h-4 rotate-180" />

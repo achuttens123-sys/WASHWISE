@@ -1,6 +1,11 @@
 import { initializeApp, FirebaseError } from 'firebase/app';
 import { initializeAuth, browserLocalPersistence, browserPopupRedirectResolver } from 'firebase/auth';
-import { initializeFirestore } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager,
+  setLogLevel
+} from 'firebase/firestore';
 import { getMessaging } from 'firebase/messaging';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -13,20 +18,40 @@ export const auth = initializeAuth(app, {
   popupRedirectResolver: browserPopupRedirectResolver,
 });
 
-// Initialize Firestore with settings to handle proxy/iframe connection issues
-const firestoreSettings = {
-  experimentalAutoDetectLongPolling: true,
-  ignoreUndefinedProperties: true,
-};
+// Suppress internal 1-attempt connection retry noise from Firestore
+setLogLevel('error');
 
+// Initialize Firestore with robust caching and auto-detected transport
 let dbInstance;
 try {
   const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
-  dbInstance = initializeFirestore(app, firestoreSettings, dbId);
-  console.log(`Firestore initialized with database ${dbId}`);
+  dbInstance = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    }),
+    experimentalAutoDetectLongPolling: true,
+    experimentalLongPollingOptions: {
+      timeoutSeconds: 30
+    },
+    ignoreUndefinedProperties: true,
+  }, dbId);
+  console.log(`Firestore initialized with database ${dbId} and persistent multi-tab cache`);
 } catch (error) {
-  console.error("Error initializing Firestore, falling back to default:", error);
-  dbInstance = initializeFirestore(app, firestoreSettings);
+  console.warn("Persistent cache not available in this context, falling back to memory cache:", error);
+  try {
+    const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
+    dbInstance = initializeFirestore(app, {
+      experimentalAutoDetectLongPolling: true,
+      experimentalLongPollingOptions: {
+        timeoutSeconds: 30
+      },
+      ignoreUndefinedProperties: true,
+    }, dbId);
+  } catch (fallbackErr) {
+    dbInstance = initializeFirestore(app, {
+      ignoreUndefinedProperties: true,
+    });
+  }
 }
 
 export const db = dbInstance;
@@ -116,8 +141,17 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   }
-  if (errorCode === 'unavailable' && (operationType === OperationType.GET || operationType === OperationType.LIST)) {
-    console.warn(`[Firestore Offline/Unavailable] Operation: ${operationType}, Path: ${path}`, error);
+  const isNetworkUnavailable = errorCode === 'unavailable' || 
+    errorCode === 'deadline-exceeded' ||
+    (error instanceof Error && (
+      error.message.includes('unavailable') || 
+      error.message.includes('offline') || 
+      error.message.includes('Could not reach Cloud Firestore') ||
+      error.message.includes('The operation could not be completed')
+    ));
+
+  if (isNetworkUnavailable) {
+    console.warn(`[Firestore Offline/Unavailable] Handled gracefully for operation: ${operationType}, Path: ${path}`);
     return;
   }
 

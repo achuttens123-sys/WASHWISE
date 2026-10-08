@@ -58,49 +58,49 @@ export const OfferBanner: React.FC = () => {
   const currentOffer = offers[currentIndex];
 
   return (
-    <div className="w-full bg-black border-y-4 border-yellow-400 overflow-hidden relative">
+    <div className="w-full bg-black border-y-2 sm:border-y-4 border-yellow-400 overflow-hidden relative">
       <AnimatePresence mode="wait">
         <motion.div
           key={currentOffer.offerId}
-          initial={{ y: 50, opacity: 0 }}
+          initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          exit={{ y: -50, opacity: 0 }}
-          className="flex flex-col md:flex-row items-center justify-between px-6 py-4 gap-4"
+          exit={{ y: -20, opacity: 0 }}
+          className="flex items-center justify-between px-3 py-2 sm:px-6 sm:py-4 gap-2 sm:gap-4"
         >
-          {/* BRUTALIST OFFER BADGE */}
-          <div className="flex items-center gap-4">
-            <div className="bg-yellow-400 text-black px-4 py-2 rotate-[-2deg] font-black text-2xl uppercase tracking-tighter">
-              FLASH {currentOffer.remainingSlots <= 5 ? 'URGENT' : 'SALE'}
+          {/* OFFER BADGE */}
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <div className="bg-yellow-400 text-black px-2 py-0.5 sm:px-4 sm:py-2 rotate-[-2deg] font-black text-xs sm:text-2xl uppercase tracking-tighter shrink-0">
+              FLASH {currentOffer.remainingSlots <= 5 ? 'SALE' : 'DEAL'}
             </div>
-            <div className="flex flex-col">
-              <h4 className="text-white font-black text-xl leading-none uppercase tracking-tight">
+            <div className="flex flex-col min-w-0">
+              <h4 className="text-white font-black text-xs sm:text-xl leading-none uppercase tracking-tight truncate">
                 {currentOffer.name}
               </h4>
-              <p className="text-yellow-400/80 font-mono text-[10px] uppercase tracking-widest mt-1">
+              <p className="text-yellow-400/80 font-mono text-[8px] sm:text-[10px] uppercase tracking-widest mt-0.5 hidden sm:block truncate">
                 {currentOffer.description} • LIMITED SLOTS ONLY
               </p>
             </div>
           </div>
 
           {/* REAL-TIME COUNTERS */}
-          <div className="flex items-center gap-8">
-            <div className="flex flex-col items-center">
-              <span className="text-gray-500 font-mono text-[10px] uppercase tracking-widest mb-1">Slots Left</span>
-              <div className="flex items-baseline gap-1">
-                <span className={`font-black text-3xl leading-none ${currentOffer.remainingSlots <= 3 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+          <div className="flex items-center gap-3 sm:gap-8 shrink-0">
+            <div className="flex items-center sm:flex-col sm:items-center gap-1 sm:gap-0">
+              <span className="text-gray-500 font-mono text-[8px] sm:text-[10px] uppercase tracking-widest hidden sm:block mb-1">Slots Left</span>
+              <div className="flex items-baseline gap-0.5 sm:gap-1">
+                <span className={`font-black text-xs sm:text-3xl leading-none ${currentOffer.remainingSlots <= 3 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
                   {currentOffer.remainingSlots}
                 </span>
-                <span className="text-gray-600 font-black text-sm uppercase">/ 10</span>
+                <span className="text-gray-500 font-black text-[9px] sm:text-sm uppercase">/10</span>
               </div>
             </div>
 
-            <div className="h-10 w-px bg-white/10 hidden md:block" />
+            <div className="h-6 sm:h-10 w-px bg-white/10" />
 
-            <div className="flex flex-col items-end">
-              <span className="text-gray-500 font-mono text-[10px] uppercase tracking-widest mb-1">Ends In</span>
-              <div className="flex items-center gap-2 text-yellow-400 font-black text-xl tabular-nums">
-                <Timer className="w-4 h-4" />
-                {formatTime(timeLeft)}
+            <div className="flex items-center sm:flex-col sm:items-end gap-1 sm:gap-0">
+              <span className="text-gray-500 font-mono text-[8px] sm:text-[10px] uppercase tracking-widest hidden sm:block mb-1">Ends In</span>
+              <div className="flex items-center gap-1 sm:gap-2 text-yellow-400 font-black text-xs sm:text-xl tabular-nums">
+                <Timer className="w-3 h-3 sm:w-4 sm:h-4 shrink-0" />
+                <span>{formatTime(timeLeft)}</span>
               </div>
             </div>
 
@@ -108,9 +108,9 @@ export const OfferBanner: React.FC = () => {
               whileHover={{ scale: 1.05, rotate: 1 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => window.location.href = '/booking'}
-              className="bg-white text-black px-6 py-3 font-black uppercase text-sm tracking-widest hover:bg-yellow-400 transition-colors hidden lg:block"
+              className="bg-white text-black px-4 sm:px-6 py-2 sm:py-3 font-black uppercase text-xs sm:text-sm tracking-widest hover:bg-yellow-400 transition-colors hidden md:block"
             >
-              Claim Special Offer
+              Claim
             </motion.button>
           </div>
         </motion.div>

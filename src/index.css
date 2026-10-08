@@ -101,3 +101,21 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(79, 70, 229, 0.4);
 }
+
+@media print {
+  @page {
+    margin: 6mm;
+    size: auto;
+  }
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .no-print,
+  nav,
+  header,
+  aside,
+  button:not(.allow-print) {
+    display: none !important;
+  }
+}

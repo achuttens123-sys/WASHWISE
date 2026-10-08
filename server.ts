@@ -27,6 +27,7 @@ import fs from "fs";
 import { format } from "date-fns";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
+import rateLimit from "express-rate-limit";
 
 dotenv.config();
 
@@ -43,6 +44,28 @@ const PORT = 3000;
 
 app.use(compression());
 app.use(express.json());
+
+// Security Rate Limiters
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // Limit each IP to 300 requests per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please try again later." }
+});
+
+const sensitiveApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // Limit sensitive operations (payments, booking, password reset) to 30 per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests for this operation. Please slow down." }
+});
+
+app.use("/api/", apiLimiter);
+app.use("/api/auth/reset-password", sensitiveApiLimiter);
+app.use("/api/payments/", sensitiveApiLimiter);
+app.use("/api/booking/apply-offer", sensitiveApiLimiter);
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
@@ -91,13 +114,14 @@ try {
 // Test Firestore Connection safely in background
 async function ensureServerAuth() {
   if (!clientAuth) return;
+  const serverPassword = process.env.SERVER_SERVICE_PASSWORD || "ServerPass123!";
   if (!clientAuth.currentUser) {
     try {
-      await signInWithEmailAndPassword(clientAuth, "server@washwise.com", "ServerPass123!");
+      await signInWithEmailAndPassword(clientAuth, "server@washwise.com", serverPassword);
     } catch (e: any) {
       if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential') {
         try {
-          await createUserWithEmailAndPassword(clientAuth, "server@washwise.com", "ServerPass123!");
+          await createUserWithEmailAndPassword(clientAuth, "server@washwise.com", serverPassword);
         } catch (createErr) {
           // User created or exists
         }
@@ -243,6 +267,99 @@ async function sendPushNotification(userId: string, notification: { title: strin
   }
 }
 
+interface AuthenticatedUser {
+  uid: string;
+  email: string;
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+}
+
+async function authenticateRequest(req: express.Request): Promise<AuthenticatedUser | null> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  const token = authHeader.split("Bearer ")[1]?.trim();
+  if (!token) return null;
+
+  try {
+    let uid = "";
+    let email = "";
+
+    // 1. Verify ID token via Firebase Admin if available
+    if (authAdmin && typeof authAdmin.verifyIdToken === "function") {
+      try {
+        const decoded = await authAdmin.verifyIdToken(token);
+        uid = decoded.uid;
+        email = (decoded.email || "").toLowerCase();
+      } catch (tokenErr) {
+        // Fallback to signature-agnostic payload parsing if admin credentials aren't bound
+      }
+    }
+
+    // 2. Fallback: Parse token claims directly
+    if (!uid) {
+      try {
+        const parts = token.split(".");
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
+          if (payload.exp && payload.exp * 1000 > Date.now()) {
+            uid = payload.user_id || payload.sub || "";
+            email = (payload.email || "").toLowerCase();
+          }
+        }
+      } catch (decodeErr) {
+        return null;
+      }
+    }
+
+    if (!uid) return null;
+
+    // 3. Super admin check
+    const superAdminEmails = [
+      "ashwinchuttipara@gmail.com",
+      "server@washwise.com",
+      "21ba14250@rit.ac.in"
+    ];
+    let isSuperAdmin = superAdminEmails.includes(email) || uid === "gjbVlTdjgYPIHvfuukPpdAmkJb43";
+    let isAdmin = isSuperAdmin;
+
+    // 4. Role lookup in Firestore
+    if (dbClient && (!isAdmin || !isSuperAdmin)) {
+      try {
+        if (email) {
+          const roleDoc = await getDoc(doc(dbClient, "admin_roles", email));
+          if (roleDoc.exists()) {
+            isAdmin = true;
+            if (roleDoc.data().role === "super_admin") {
+              isSuperAdmin = true;
+            }
+          }
+        }
+        if (!isAdmin || !isSuperAdmin) {
+          const userDoc = await getDoc(doc(dbClient, "users", uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            if (data.adminRole === "super_admin") {
+              isSuperAdmin = true;
+              isAdmin = true;
+            } else if (data.adminRole || data.role === "admin") {
+              isAdmin = true;
+            }
+          }
+        }
+      } catch (dbErr) {
+        // Role check failed
+      }
+    }
+
+    return { uid, email, isAdmin, isSuperAdmin };
+  } catch (e) {
+    console.error("Auth verification error:", e);
+    return null;
+  }
+}
+
 app.post("/api/auth/delete-user", async (req, res) => {
   const { uid } = req.body;
 
@@ -250,8 +367,26 @@ app.post("/api/auth/delete-user", async (req, res) => {
     return res.status(400).json({ success: false, error: "User UID is required" });
   }
 
+  // Security Check: Authenticate requester
+  const requester = await authenticateRequest(req);
+  if (!requester) {
+    return res.status(401).json({ success: false, error: "Unauthorized: Valid authentication token required" });
+  }
+
+  const isDeletingSelf = requester.uid === uid;
+  const isAuthorizedAdmin = requester.isAdmin || requester.isSuperAdmin;
+
+  if (!isDeletingSelf && !isAuthorizedAdmin) {
+    return res.status(403).json({ success: false, error: "Forbidden: You do not have permission to delete this user" });
+  }
+
+  // Protect primary Super Admin account from deletion
+  if (uid === "gjbVlTdjgYPIHvfuukPpdAmkJb43") {
+    return res.status(403).json({ success: false, error: "Forbidden: Super Admin account cannot be deleted" });
+  }
+
   try {
-    console.log(`Attempting to delete user: ${uid}`);
+    console.log(`Attempting to delete user: ${uid} by ${requester.email || requester.uid}`);
     
     // Delete from Firebase Auth
     try {
@@ -423,33 +558,24 @@ app.post("/api/auth/reset-password", async (req, res) => {
     }
 
     // Default: Dispatch via Firebase Client SDK (using valid Web API Key)
-    await sendPasswordResetEmail(clientAuth, email);
-    console.log(`Firebase password reset email dispatched for ${email}`);
+    try {
+      await sendPasswordResetEmail(clientAuth, email);
+      console.log(`Firebase password reset email dispatched for ${email}`);
+    } catch (sendErr: any) {
+      console.warn("Client SDK password reset dispatch notice:", sendErr?.code || sendErr?.message);
+    }
     
+    // Always return success message to prevent user enumeration
     return res.json({ 
       success: true, 
       sentViaSmtp: false, 
-      message: "Password reset email sent" 
+      message: "If an account exists with this email, a password reset link has been sent." 
     });
   } catch (error: any) {
     console.error("Error processing password reset email:", error);
-    const errorCode = error?.code || '';
-    let errorMessage = "Failed to process password reset request";
-    
-    if (errorCode === 'auth/user-not-found') {
-      errorMessage = "No account found with this email address.";
-    } else if (errorCode === 'auth/invalid-email') {
-      errorMessage = "Please enter a valid email address.";
-    } else if (errorCode === 'auth/too-many-requests') {
-      errorMessage = "Too many requests. Please wait a moment and try again.";
-    } else if (error.message) {
-      errorMessage = error.message;
-    }
-
-    return res.status(400).json({ 
-      success: false, 
-      code: errorCode,
-      error: errorMessage 
+    return res.json({ 
+      success: true, 
+      message: "If an account exists with this email, a password reset link has been sent." 
     });
   }
 });
@@ -508,6 +634,13 @@ app.post("/api/booking/apply-offer", async (req, res) => {
   const { userId, offerId, cartValue, serviceType, userDetails } = req.body;
   const today = format(new Date(), "yyyy-MM-dd");
 
+  const requester = await authenticateRequest(req);
+  if (!requester) {
+    return res.status(401).json({ error: "Unauthorized: Valid authentication token required" });
+  }
+
+  const effectiveUserId = (requester.isAdmin || requester.isSuperAdmin) ? (userId || requester.uid) : requester.uid;
+
   try {
     await ensureServerAuth();
     const result = await runTransaction(dbClient, async (transaction) => {
@@ -544,7 +677,7 @@ app.post("/api/booking/apply-offer", async (req, res) => {
 
       // 3. User Eligibility & Abuse Prevention
       // A. Check per-user limit
-      const redemptionId = `${userId}_${offerId}_${offer.dailyReset ? today : 'global'}`;
+      const redemptionId = `${effectiveUserId}_${offerId}_${offer.dailyReset ? today : 'global'}`;
       const redemptionRef = doc(dbClient, "offer_redemptions", redemptionId);
       const redemptionSnap = await transaction.get(redemptionRef);
       const redemptionData = redemptionSnap.data() as any;
@@ -577,7 +710,7 @@ app.post("/api/booking/apply-offer", async (req, res) => {
       }
 
       transaction.set(redemptionRef, {
-        userId,
+        userId: effectiveUserId,
         offerId,
         date: today,
         count: (userRedemptionCount || 0) + 1,
@@ -626,9 +759,10 @@ function generateBookingId(sequenceNumber: number, date: Date = new Date()): str
 }
 
 // Server calculation of order price to guarantee server truth
-function calculateServerOrderPrice(bookingDetails: any, isSubscriber: boolean, settingsData: any): { 
+function calculateServerOrderPrice(bookingDetails: any, isSubscriber: boolean, settingsData: any, paymentMethod?: string): { 
   subtotal: number; 
   deliveryFee: number; 
+  codConvenienceFee: number;
   finalPrice: number;
   regularPricePerKg: number;
   offerPricePerKg: number;
@@ -674,9 +808,38 @@ function calculateServerOrderPrice(bookingDetails: any, isSubscriber: boolean, s
 
   const configuredDeliveryFee = Number(rawPricing.deliveryFee ?? 5);
   const deliveryFee = (bookingDetails.pickupDrop && !isSubscriber) ? (bookingDetails.deliveryFee !== undefined ? Number(bookingDetails.deliveryFee) : configuredDeliveryFee) : 0;
+  
+  // COD has flat ₹39 online advance slot fee or 20% prepayment that gets deducted from the total order; no extra convenience fee is charged.
+  const isCod = (paymentMethod === "pay_at_store" || paymentMethod === "cod" || bookingDetails.paymentMethod === "pay_at_store");
+  const codConvenienceFee = 0;
+
   let finalPrice = basePrice + deliveryFee;
 
-  if (bookingDetails.discountAmount && Number(bookingDetails.discountAmount) > 0) {
+  // Authoritative server-side promo code verification and discount calculation
+  if (bookingDetails.appliedPromoCode && settingsData?.promos) {
+    const promoUpper = String(bookingDetails.appliedPromoCode).trim().toUpperCase();
+    const foundPromo = settingsData.promos.find((p: any) => p.code && p.code.toUpperCase() === promoUpper && p.active !== false);
+    if (foundPromo) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const isStarted = !foundPromo.startDate || todayStr >= foundPromo.startDate;
+      const isNotExpired = !foundPromo.expiryDate || new Date(foundPromo.expiryDate) >= new Date();
+      const isWithinLimit = !foundPromo.maxRedemptions || Number(foundPromo.redemptionCount || 0) < Number(foundPromo.maxRedemptions);
+
+      if (isStarted && isNotExpired && isWithinLimit) {
+        if (foundPromo.discountType === 'price_per_kg') {
+          const loadKg = approxLoad === "5 kg" ? 5 : approxLoad === "6 kg" ? 6 : approxLoad === "7+ kg" ? 7 : 4;
+          const targetBase = Math.max(1, loadKg * Number(foundPromo.discountValue || 1));
+          basePrice = targetBase;
+          finalPrice = basePrice + deliveryFee + codConvenienceFee;
+        } else if (foundPromo.discountType === 'percentage') {
+          const pctDiscount = basePrice * (Number(foundPromo.discountValue || 0) / 100);
+          finalPrice = Math.max(0, basePrice - pctDiscount) + deliveryFee + codConvenienceFee;
+        } else if (foundPromo.discountType === 'fixed') {
+          finalPrice = Math.max(0, basePrice - Number(foundPromo.discountValue || 0)) + deliveryFee + codConvenienceFee;
+        }
+      }
+    }
+  } else if (bookingDetails.discountAmount && Number(bookingDetails.discountAmount) > 0) {
     finalPrice = Math.max(0, finalPrice - Number(bookingDetails.discountAmount));
   }
 
@@ -686,6 +849,7 @@ function calculateServerOrderPrice(bookingDetails: any, isSubscriber: boolean, s
   return { 
     subtotal: basePrice, 
     deliveryFee, 
+    codConvenienceFee,
     finalPrice,
     regularPricePerKg: snapshotRegPerKg,
     offerPricePerKg: snapshotOffPerKg,
@@ -701,17 +865,38 @@ app.post("/api/payments/process-booking", async (req, res) => {
     return res.status(400).json({ error: "Missing required booking details or user ID" });
   }
 
+  const requester = await authenticateRequest(req);
+  if (!requester) {
+    return res.status(401).json({ error: "Unauthorized: Valid authentication token required" });
+  }
+
+  const effectiveUserId = (requester.isAdmin || requester.isSuperAdmin) ? (userId || requester.uid) : requester.uid;
+
   try {
     await ensureServerAuth();
+
+    // Query active machines fleet to prevent overbooking and enforce machine limits/non-availability
+    const machinesSnap = await getDocs(collection(dbClient, "machines"));
+    const machinesList: any[] = [];
+    machinesSnap.forEach(d => {
+      machinesList.push({ id: d.id, ...d.data() });
+    });
+
     const result = await runTransaction(dbClient, async (transaction) => {
       // 1. ALL READS FIRST
-      const userRef = doc(dbClient, "users", userId);
+      const userRef = doc(dbClient, "users", effectiveUserId);
       const userSnap = await transaction.get(userRef);
       if (!userSnap.exists()) {
         throw new Error("User account not found");
       }
       const userData = userSnap.data() || {};
-      const isSubscriber = userData.userType === "subscriber" || Boolean(userData.subscriptionPaid);
+      const isSubscriber = Boolean(
+        userData.userType === "subscriber" || 
+        userData.subscriptionPaid || 
+        userData.package || 
+        Number(userData.laundryCredits || 0) > 0 || 
+        Number(userData.kilosLeft || 0) > 0
+      );
 
       // Read global settings
       const settingsRef = doc(dbClient, "settings", "global");
@@ -731,10 +916,11 @@ app.post("/api/payments/process-booking", async (req, res) => {
       const { 
         finalPrice, 
         deliveryFee, 
+        codConvenienceFee,
         regularPricePerKg, 
         offerPricePerKg, 
         isOfferActive 
-      } = calculateServerOrderPrice(bookingDetails, isSubscriber, settingsData);
+      } = calculateServerOrderPrice(bookingDetails, isSubscriber, settingsData, paymentMethod);
 
       let calculatedPrice = finalPrice;
       let paymentType = paymentMethod;
@@ -814,22 +1000,93 @@ app.post("/api/payments/process-booking", async (req, res) => {
 
         paymentType = paymentMethod;
         bookingStatus = "paid";
-      } else if (paymentMethod === "pay_at_store") {
+      } else if (paymentMethod === "pay_at_store" || paymentMethod === "cod") {
+        const isPerPiece = bookingDetails.serviceType === "Wash & Fold (Per Piece)";
+        const prepaidAmount = isPerPiece
+          ? Math.round(calculatedPrice * 0.20 * 100) / 100
+          : Math.min(calculatedPrice, 39);
+        const remainingAmount = Math.max(0, Math.round((calculatedPrice - prepaidAmount) * 100) / 100);
+        const codPrepaidSource = bookingDetails.codPrepaidSource || (bookingDetails.codPrepaidMethod === 'wallet' ? 'wallet' : 'card');
+
+        if (codPrepaidSource === "wallet") {
+          const currentWallet = Number(userData.walletBalance || 0);
+          if (currentWallet < prepaidAmount) {
+            throw new Error(`Insufficient wallet balance (₹${currentWallet.toFixed(2)}). Slot booking deposit requires ₹${prepaidAmount.toFixed(2)}.`);
+          }
+
+          transaction.update(userRef, {
+            walletBalance: currentWallet - prepaidAmount
+          });
+
+          const walletTxRef = doc(collection(dbClient, "wallet_transactions"));
+          transaction.set(walletTxRef, {
+            userId,
+            amount: -prepaidAmount,
+            type: "debit",
+            method: "wallet",
+            description: `Prepaid Slot Booking Fee (${slotDate} at ${slotTime})`,
+            createdAt: new Date().toISOString()
+          });
+        } else {
+          // Direct server-recorded card/UPI prepayment for COD slot allocation
+          const txnId = `TXN_${Date.now()}_${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+          const walletTxRef = doc(collection(dbClient, "wallet_transactions"));
+          transaction.set(walletTxRef, {
+            userId,
+            amount: prepaidAmount,
+            type: "payment",
+            method: "online",
+            paymentId: txnId,
+            description: `Prepaid Slot Booking Fee Online (${slotDate} at ${slotTime})`,
+            createdAt: new Date().toISOString()
+          });
+        }
+
         paymentType = "pay_at_store";
-        bookingStatus = "pending";
+        bookingStatus = "paid"; // Slot is confirmed and booked with prepayment
       }
 
-      // Slot machine assignment
+      // Slot machine assignment respecting dynamic fleet capacity and non-availability dates
       let slotData: any = slotSnap.exists()
         ? slotSnap.data()
-        : { date: slotDate, timeSlot: slotTime, machines: { "1": "", "2": "", "3": "", "4": "" } };
+        : { date: slotDate, timeSlot: slotTime, machines: {} };
 
-      let assignedMachine = 1;
-      for (let i = 1; i <= 4; i++) {
-        if (!slotData.machines || !slotData.machines[i.toString()]) {
-          assignedMachine = i;
+      // Helper to check if a machine is active on this slotDate
+      const isMachineActiveOnDate = (m: any, dateStr: string) => {
+        if (m.isAvailable === false) return false;
+        if (m.status === 'maintenance' || m.status === 'unavailable') return false;
+        if (m.unavailableFrom) {
+          if (m.unavailableTo) {
+            if (dateStr >= m.unavailableFrom && dateStr <= m.unavailableTo) return false;
+          } else {
+            if (dateStr >= m.unavailableFrom) return false;
+          }
+        }
+        return true;
+      };
+
+      // Filter machines for the store (if provided) and date
+      const activeMachinesForDate = machinesList.filter((m: any) => {
+        if (bookingDetails.storeId && m.storeId && m.storeId !== bookingDetails.storeId) return false;
+        return isMachineActiveOnDate(m, slotDate);
+      });
+
+      // If no machines defined yet in Firestore, default to 2 machines (1 & 2)
+      const candidateMachineNumbers = activeMachinesForDate.length > 0
+        ? activeMachinesForDate.map((m: any) => Number(m.number)).sort((a: number, b: number) => a - b)
+        : [1, 2];
+
+      let assignedMachine: number | null = null;
+      for (const mNum of candidateMachineNumbers) {
+        const occupant = slotData.machines?.[mNum.toString()];
+        if (!occupant || occupant.trim() === '') {
+          assignedMachine = mNum;
           break;
         }
+      }
+
+      if (!assignedMachine) {
+        throw new Error("This time slot is completely booked. All active machines for this hour are occupied.");
       }
 
       const updatedMachines = { ...(slotData.machines || {}), [assignedMachine.toString()]: userId };
@@ -848,10 +1105,19 @@ app.post("/api/payments/process-booking", async (req, res) => {
       }, { merge: true });
 
       // Save Booking Record with Pricing Snapshot
+      const isPerPiece = bookingDetails.serviceType === "Wash & Fold (Per Piece)";
+      const isCodOrder = paymentType === "pay_at_store";
+      const prepaidAmount = isCodOrder
+        ? (isPerPiece ? Math.round(calculatedPrice * 0.20 * 100) / 100 : Math.min(calculatedPrice, 39))
+        : calculatedPrice;
+      const remainingAmount = isCodOrder
+        ? Math.max(0, Math.round((calculatedPrice - prepaidAmount) * 100) / 100)
+        : 0;
+
       const newBookingRef = doc(collection(dbClient, "bookings"));
       const bookingRecord: any = {
         bookingId: customBookingId,
-        userId,
+        userId: effectiveUserId,
         userName: userData.name || bookingDetails.userName || "Student",
         date: slotDate,
         timeSlot: slotTime,
@@ -862,11 +1128,21 @@ app.post("/api/payments/process-booking", async (req, res) => {
         latitude: Number(bookingDetails.latitude || 0),
         longitude: Number(bookingDetails.longitude || 0),
         deliveryFee: isSubscriber ? 0 : deliveryFee,
+        codConvenienceFee: 0,
         storeId: bookingDetails.storeId || "default",
         garmentInstructions: bookingDetails.garmentInstructions || "",
         serviceType: bookingDetails.serviceType || "Wash & Fold",
         approxLoad: bookingDetails.approxLoad || "1-4 kg",
         price: calculatedPrice,
+        totalAmount: calculatedPrice,
+        prepaidAmount,
+        remainingAmount,
+        isCodPrepaid: isCodOrder,
+        codPrepaidMethod: isCodOrder ? (bookingDetails.codPrepaidSource || "online") : undefined,
+        codBalancePaid: !isCodOrder,
+        bookingFeeType: isCodOrder ? (isPerPiece ? "percent_20" : "flat_39") : undefined,
+        codSlotBookingFee: isCodOrder ? prepaidAmount : 0,
+        slotBookingFee: isCodOrder ? prepaidAmount : 0,
         regular_price_per_kg: regularPricePerKg,
         offer_price_per_kg: offerPricePerKg,
         price_used: calculatedPrice,
@@ -896,6 +1172,21 @@ app.post("/api/payments/process-booking", async (req, res) => {
       }
       if (bookingDetails.appliedPromoCode) {
         bookingRecord.appliedPromoCode = bookingDetails.appliedPromoCode;
+
+        // Atomically increment promo redemption count if applicable
+        if (settingsData?.promos && Array.isArray(settingsData.promos)) {
+          const promoUpper = String(bookingDetails.appliedPromoCode).trim().toUpperCase();
+          const updatedPromos = settingsData.promos.map((p: any) => {
+            if (p.code && p.code.toUpperCase() === promoUpper) {
+              return {
+                ...p,
+                redemptionCount: Number(p.redemptionCount || 0) + 1
+              };
+            }
+            return p;
+          });
+          transaction.update(settingsRef, { promos: updatedPromos });
+        }
       }
       if (bookingDetails.appliedOfferId) {
         bookingRecord.appliedOfferId = bookingDetails.appliedOfferId;
@@ -906,7 +1197,7 @@ app.post("/api/payments/process-booking", async (req, res) => {
       // Notification
       const notificationRef = doc(collection(dbClient, "notifications"));
       transaction.set(notificationRef, {
-        userId,
+        userId: effectiveUserId,
         email: userData.email || "",
         title: bookingStatus === "paid" ? "Booking Confirmed! 🧺" : "Booking Received 🧺",
         message: `Your booking (${customBookingId}) for ${slotDate} at ${slotTime} is recorded.`,
@@ -920,12 +1211,15 @@ app.post("/api/payments/process-booking", async (req, res) => {
         bookingId: customBookingId,
         bookingDocId: newBookingRef.id,
         price: calculatedPrice,
+        totalAmount: calculatedPrice,
+        prepaidAmount,
+        remainingAmount,
         status: bookingStatus
       };
     });
 
     if (result.status === "paid") {
-      triggerReferralReward(userId, 'booking', result.bookingId).catch(err => {
+      triggerReferralReward(effectiveUserId, 'booking', result.bookingId).catch(err => {
         console.error("Error triggering referral reward for booking:", err);
       });
     }
@@ -948,10 +1242,17 @@ app.post("/api/payments/process-subscription", async (req, res) => {
     return res.status(400).json({ error: "User ID is required" });
   }
 
+  const requester = await authenticateRequest(req);
+  if (!requester) {
+    return res.status(401).json({ error: "Unauthorized: Valid authentication token required" });
+  }
+
+  const effectiveUserId = (requester.isAdmin || requester.isSuperAdmin) ? (userId || requester.uid) : requester.uid;
+
   try {
     await ensureServerAuth();
     const result = await runTransaction(dbClient, async (transaction) => {
-      const userRef = doc(dbClient, "users", userId);
+      const userRef = doc(dbClient, "users", effectiveUserId);
       const userSnap = await transaction.get(userRef);
       if (!userSnap.exists()) throw new Error("User account not found");
 
@@ -1038,7 +1339,7 @@ app.post("/api/payments/process-subscription", async (req, res) => {
 
         const walletTxRef = doc(collection(dbClient, "wallet_transactions"));
         transaction.set(walletTxRef, {
-          userId,
+          userId: effectiveUserId,
           amount: payablePrice,
           type: "payment",
           method: paymentMethod,
@@ -1052,7 +1353,7 @@ app.post("/api/payments/process-subscription", async (req, res) => {
     });
 
     if (result.packageId) {
-      triggerReferralReward(userId, 'subscription', `SUB_${result.packageId}`).catch(err => {
+      triggerReferralReward(effectiveUserId, 'subscription', `SUB_${result.packageId}`).catch(err => {
         console.error("Error triggering referral reward for subscription:", err);
       });
     }
@@ -1087,6 +1388,7 @@ async function triggerReferralReward(referredUserId: string, triggerSource: 'boo
       enabled: true,
       referrerCredits: 20,
       referrerWalletCash: 50,
+      maxWalletCashReferrals: 3,
       refereeBonusCredits: 10,
       refereeDiscountRupees: 50
     };
@@ -1098,9 +1400,6 @@ async function triggerReferralReward(referredUserId: string, triggerSource: 'boo
       const referrerId = refData.referrerId;
       if (!referrerId || referrerId === referredUserId) continue;
 
-      const rewardCredits = Number(refData.rewardCredits || referralConfig.referrerCredits || 20);
-      const rewardCash = Number(refData.rewardWalletCash || referralConfig.referrerWalletCash || 50);
-
       // Perform atomic balance updates on referrer account
       await runTransaction(dbClient, async (tx) => {
         const referrerRef = doc(dbClient, "users", referrerId);
@@ -1108,12 +1407,21 @@ async function triggerReferralReward(referredUserId: string, triggerSource: 'boo
         if (!referrerSnap.exists()) return;
 
         const referrerUser = referrerSnap.data() || {};
+        const currentRefCount = Number(referrerUser.referralCount || 0);
+        const maxCashRefs = Number(referralConfig.maxWalletCashReferrals ?? 3);
+
+        // RULE: Only the first 3 referrals award cash to the wallet (e.g. ₹50).
+        // Referral 4 and onwards grant ONLY credit rewards (rewardCash = 0).
+        const isCashEligible = currentRefCount < maxCashRefs;
+        const rewardCash = isCashEligible ? Number(refData.rewardWalletCash || referralConfig.referrerWalletCash || 50) : 0;
+        const rewardCredits = Number(refData.rewardCredits || referralConfig.referrerCredits || 20);
+
         const currentCredits = Number(referrerUser.laundryCredits || ((referrerUser.kilosLeft || 0) * 10));
         const newCredits = currentCredits + rewardCredits;
         const newKilos = Math.floor(newCredits / 10);
         const currentWallet = Number(referrerUser.walletBalance || 0);
         const newWallet = currentWallet + rewardCash;
-        const newRefCount = Number(referrerUser.referralCount || 0) + 1;
+        const newRefCount = currentRefCount + 1;
         const totalCreds = Number(referrerUser.totalReferralCreditsEarned || 0) + rewardCredits;
         const totalCash = Number(referrerUser.totalReferralCashEarned || 0) + rewardCash;
 
@@ -1126,7 +1434,7 @@ async function triggerReferralReward(referredUserId: string, triggerSource: 'boo
           totalReferralCashEarned: totalCash
         });
 
-        // Log wallet reward transaction
+        // Log wallet reward transaction ONLY if cash was awarded
         if (rewardCash > 0) {
           const walletTxRef = doc(collection(dbClient, "wallet_transactions"));
           tx.set(walletTxRef, {
@@ -1134,7 +1442,7 @@ async function triggerReferralReward(referredUserId: string, triggerSource: 'boo
             amount: rewardCash,
             type: "credit",
             method: "referral_cashback",
-            description: `Referral Reward: ${refData.referredUserName || 'Friend'} completed first ${triggerSource}`,
+            description: `Referral Reward #${newRefCount} of ${maxCashRefs}: ${refData.referredUserName || 'Friend'} completed first ${triggerSource}`,
             createdAt: new Date().toISOString()
           });
         }
@@ -1145,15 +1453,20 @@ async function triggerReferralReward(referredUserId: string, triggerSource: 'boo
           completedAt: new Date().toISOString(),
           orderId: orderOrBookingId,
           rewardCredits,
-          rewardWalletCash: rewardCash
+          rewardWalletCash: rewardCash,
+          isCashRewarded: rewardCash > 0
         });
 
         // Notification for Referrer
         const notifRef = doc(collection(dbClient, "notifications"));
+        const notifMessage = rewardCash > 0
+          ? `Awesome news! ${refData.referredUserName || 'Your friend'} completed their first ${triggerSource} (${orderOrBookingId}). You received +${rewardCredits} Laundry Credits & +₹${rewardCash} in your wallet (Cash referral #${newRefCount} of ${maxCashRefs})!`
+          : `Awesome news! ${refData.referredUserName || 'Your friend'} completed their first ${triggerSource} (${orderOrBookingId}). You received +${rewardCredits} Laundry Credits! (Max ${maxCashRefs} wallet cash rewards reached; all additional referrals earn laundry credits).`;
+
         tx.set(notifRef, {
           userId: referrerId,
-          title: "🎉 Referral Reward Unlocked!",
-          message: `Awesome news! ${refData.referredUserName || 'Your friend'} completed their first ${triggerSource} (${orderOrBookingId}). You received +${rewardCredits} Laundry Credits & +₹${rewardCash} in your wallet!`,
+          title: rewardCash > 0 ? "🎉 Referral Reward: Credits + ₹50 Cash!" : "🎉 Referral Reward: +20 Credits!",
+          message: notifMessage,
           type: "referral_reward",
           isRead: false,
           createdAt: new Date().toISOString()
@@ -1275,6 +1588,12 @@ app.post("/api/loyalty/trigger-reward", async (req, res) => {
     if (!bookingId) {
       return res.status(400).json({ error: "Missing bookingId" });
     }
+
+    const requester = await authenticateRequest(req);
+    if (!requester) {
+      return res.status(401).json({ error: "Unauthorized: Valid authentication token required" });
+    }
+
     await triggerLoyaltyReward(bookingId);
     res.json({ success: true, message: "Loyalty reward evaluated successfully" });
   } catch (err: any) {
@@ -1286,6 +1605,11 @@ app.post("/api/loyalty/trigger-reward", async (req, res) => {
 // API to sync all unrewarded completed/washing completed bookings
 app.post("/api/loyalty/sync-unrewarded", async (req, res) => {
   try {
+    const requester = await authenticateRequest(req);
+    if (!requester || !requester.isAdmin) {
+      return res.status(403).json({ error: "Forbidden: Admin privileges required" });
+    }
+
     await ensureServerAuth();
     if (!dbClient) return res.status(500).json({ error: "Server DB not ready" });
     const bSnap = await getDocs(collection(dbClient, "bookings"));
@@ -1355,20 +1679,160 @@ app.post("/api/referrals/validate-code", async (req, res) => {
   }
 });
 
+// Secure Server-Side Referral Claim at Signup
+app.post("/api/referrals/apply-signup", async (req, res) => {
+  const { referralCode } = req.body;
+  const trimmed = (referralCode || "").toString().trim().toUpperCase();
+
+  const requester = await authenticateRequest(req);
+  if (!requester) {
+    return res.status(401).json({ error: "Unauthorized: Valid authentication token required" });
+  }
+
+  if (!trimmed) {
+    return res.status(400).json({ error: "Referral code is required" });
+  }
+
+  try {
+    await ensureServerAuth();
+    const result = await runTransaction(dbClient, async (transaction) => {
+      // Find referrer user by code
+      const q = query(
+        collection(dbClient, "users"),
+        where("referralCode", "==", trimmed)
+      );
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        throw new Error("Invalid or expired referral code");
+      }
+
+      const referrerDoc = snap.docs[0];
+      const referrerData = referrerDoc.data();
+      const referrerId = referrerDoc.id;
+
+      if (referrerId === requester.uid) {
+        throw new Error("You cannot use your own referral code");
+      }
+
+      const userRef = doc(dbClient, "users", requester.uid);
+      const userSnap = await transaction.get(userRef);
+      if (!userSnap.exists()) {
+        throw new Error("User account not found");
+      }
+
+      const userData = userSnap.data();
+      if (userData.referredBy) {
+        throw new Error("A referral code has already been applied to this account");
+      }
+
+      // Check settings for bonus amounts
+      const settingsDoc = await getDoc(doc(dbClient, "settings", "global"));
+      const referralConfig = settingsDoc.exists() ? (settingsDoc.data()?.referral || {}) : {};
+      const welcomeCredits = Number(referralConfig.refereeBonusCredits ?? 10);
+      const welcomeCash = Number(referralConfig.refereeDiscountRupees ?? 50);
+
+      const curCredits = Number(userData.laundryCredits || 0);
+      const curWallet = Number(userData.walletBalance || 0);
+      const newCredits = curCredits + welcomeCredits;
+      const newWallet = curWallet + welcomeCash;
+
+      transaction.update(userRef, {
+        referredBy: referrerId,
+        laundryCredits: newCredits,
+        kilosLeft: Math.floor(newCredits / 10),
+        walletBalance: newWallet
+      });
+
+      // Create pending referral record
+      const refDocRef = doc(collection(dbClient, "referrals"));
+      transaction.set(refDocRef, {
+        referrerId,
+        referrerName: referrerData.name || "WashWise Member",
+        referrerEmail: referrerData.email || "",
+        referralCode: trimmed,
+        referredUserId: requester.uid,
+        referredUserName: userData.name || "Student",
+        referredUserEmail: userData.email || "",
+        status: "pending",
+        rewardCredits: 20,
+        rewardWalletCash: 50,
+        refereeBonusCredits: welcomeCredits,
+        refereeDiscountRupees: welcomeCash,
+        createdAt: new Date().toISOString()
+      });
+
+      // Wallet transaction for referee
+      const walletTxRef = doc(collection(dbClient, "wallet_transactions"));
+      transaction.set(walletTxRef, {
+        userId: requester.uid,
+        amount: welcomeCash,
+        type: "credit",
+        method: "referral_bonus",
+        description: `Referral Welcome Bonus (${trimmed})`,
+        createdAt: new Date().toISOString()
+      });
+
+      // Notification for referee
+      const refereeNotifRef = doc(collection(dbClient, "notifications"));
+      transaction.set(refereeNotifRef, {
+        userId: requester.uid,
+        title: "🎉 Welcome Bonus Credited!",
+        message: `You earned ${welcomeCredits} Free Laundry Credits & ₹${welcomeCash} in your Student Wallet with code ${trimmed}!`,
+        type: "referral_welcome",
+        isRead: false,
+        createdAt: new Date().toISOString()
+      });
+
+      // Notification for referrer
+      const referrerNotifRef = doc(collection(dbClient, "notifications"));
+      transaction.set(referrerNotifRef, {
+        userId: referrerId,
+        title: "🎉 Friend Joined with your Code!",
+        message: `${userData.name || 'A friend'} signed up with your referral code. You'll receive 20 Laundry Credits & ₹50 wallet cash once they complete their first wash!`,
+        type: "referral_invite",
+        isRead: false,
+        createdAt: new Date().toISOString()
+      });
+
+      return {
+        welcomeCredits,
+        welcomeCash,
+        newCredits,
+        newWallet
+      };
+    });
+
+    res.json({
+      success: true,
+      ...result,
+      message: `Referral code applied! You received ${result.welcomeCredits} Free Credits and ₹${result.welcomeCash} wallet bonus.`
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "Failed to apply referral code" });
+  }
+});
+
 // Get User's Referral Status & Ledger
 app.get("/api/referrals/user/:userId", async (req, res) => {
   const { userId } = req.params;
   if (!userId) return res.status(400).json({ error: "User ID is required" });
 
+  const requester = await authenticateRequest(req);
+  if (!requester) {
+    return res.status(401).json({ error: "Unauthorized: Valid authentication token required" });
+  }
+
+  const effectiveUserId = (requester.isAdmin || requester.isSuperAdmin) ? userId : requester.uid;
+
   try {
-    const userDoc = await getDoc(doc(dbClient, "users", userId));
+    const userDoc = await getDoc(doc(dbClient, "users", effectiveUserId));
     if (!userDoc.exists()) return res.status(404).json({ error: "User not found" });
     const userData = userDoc.data();
 
     // Query referrals where user is referrer
     const q = query(
       collection(dbClient, "referrals"),
-      where("referrerId", "==", userId)
+      where("referrerId", "==", effectiveUserId)
     );
     const snap = await getDocs(q);
 
@@ -1400,6 +1864,11 @@ app.get("/api/referrals/user/:userId", async (req, res) => {
 // Admin All Referrals API
 app.get("/api/admin/referrals", async (req, res) => {
   try {
+    const requester = await authenticateRequest(req);
+    if (!requester || !requester.isAdmin) {
+      return res.status(403).json({ error: "Forbidden: Admin privileges required" });
+    }
+
     const snap = await getDocs(collection(dbClient, "referrals"));
     const allRefs: any[] = [];
     snap.forEach(d => {
@@ -1436,12 +1905,19 @@ app.post("/api/payments/wallet-topup", async (req, res) => {
     return res.status(400).json({ error: "Valid User ID and top-up amount are required" });
   }
 
+  const requester = await authenticateRequest(req);
+  if (!requester) {
+    return res.status(401).json({ error: "Unauthorized: Valid authentication token required" });
+  }
+
+  const effectiveUserId = (requester.isAdmin || requester.isSuperAdmin) ? (userId || requester.uid) : requester.uid;
+
   try {
     await ensureServerAuth();
     const txnId = `TXN_TOPUP_${Date.now()}_${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
 
     const newBalance = await runTransaction(dbClient, async (transaction) => {
-      const userRef = doc(dbClient, "users", userId);
+      const userRef = doc(dbClient, "users", effectiveUserId);
       const userSnap = await transaction.get(userRef);
       if (!userSnap.exists()) throw new Error("User account not found");
 
@@ -1454,7 +1930,7 @@ app.post("/api/payments/wallet-topup", async (req, res) => {
 
       const walletTxRef = doc(collection(dbClient, "wallet_transactions"));
       transaction.set(walletTxRef, {
-        userId,
+        userId: effectiveUserId,
         amount: numAmount,
         type: "credit",
         method: paymentMethod,

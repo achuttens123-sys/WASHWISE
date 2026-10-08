@@ -187,6 +187,8 @@ const AdminDashboard: React.FC = () => {
     const q = query(collection(db, 'limited_offers'), orderBy('isActive', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setLimitedOffers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => {
+      console.warn('Limited offers snapshot error:', error);
     });
     return () => unsubscribe();
   }, [isSuperAdmin]);
@@ -1134,7 +1136,7 @@ const AdminDashboard: React.FC = () => {
                   >
                     <td className="px-6 py-4">
                       <span className="text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded-lg">
-                        {booking.bookingId || booking.id?.slice(-6).toUpperCase()}
+                        {booking.bookingId || booking.id?.slice(-6)?.toUpperCase() || 'ORD'}
                       </span>
                     </td>
                     <td className="px-6 py-4">
@@ -1266,7 +1268,7 @@ const AdminDashboard: React.FC = () => {
                           notif.type === 'booking_rejected' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
                           'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
                         }`}>
-                          {notif.type.replace('_', ' ')}
+                          {(notif.type || 'notification').replace(/_/g, ' ')}
                         </span>
                         <span className="text-xs font-bold text-gray-400 dark:text-gray-500">
                           {notif.createdAt?.toDate ? format(notif.createdAt.toDate(), 'MMM d, h:mm a') : 'Just now'}
@@ -1329,7 +1331,7 @@ const AdminDashboard: React.FC = () => {
                             member.role === 'delivery_staff' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400' :
                             'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
                           }`}>
-                            {member.role.replace('_', ' ')}
+                            {(member.role || 'staff').replace(/_/g, ' ')}
                           </span>
                         </td>
                         <td className="px-6 py-4">

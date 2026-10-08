@@ -21,6 +21,10 @@
         "emailVerified": { "type": "boolean", "description": "Whether the user has verified their email address" },
         "walletBalance": { "type": "number", "description": "User's current wallet balance in INR" },
         "laundryCredits": { "type": "number", "description": "Available laundry credits balance" },
+        "referralCode": { "type": "string", "description": "User's unique referral code" },
+        "referralCount": { "type": "number", "description": "Total completed successful referrals" },
+        "totalReferralCreditsEarned": { "type": "number", "description": "Total referral credits earned" },
+        "totalReferralCashEarned": { "type": "number", "description": "Total referral cash earned in wallet (max ₹150 for first 3 referrals)" },
         "totalLoyaltyCreditsEarned": { "type": "number", "description": "Total loyalty credits accumulated from completed washes" },
         "completedWashCount": { "type": "number", "description": "Number of completed washes" },
         "fcmTokens": {
@@ -62,6 +66,7 @@
         "latitude": { "type": "number", "description": "User's latitude" },
         "longitude": { "type": "number", "description": "User's longitude" },
         "deliveryFee": { "type": "number", "description": "Calculated delivery fee" },
+        "codConvenienceFee": { "type": "number", "description": "Convenience fee applied for Cash on Delivery / Pay at Store (₹10)" },
         "storeId": { "type": "string", "description": "ID of the store handling the booking" },
         "staffId": { "type": "string", "description": "ID of the store staff assigned to this booking" },
         "deliveryStaffId": { "type": "string", "description": "ID of the delivery staff assigned to this booking" },

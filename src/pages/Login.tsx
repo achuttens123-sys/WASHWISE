@@ -34,6 +34,7 @@ import { isSuperAdminEmail } from '../constants';
 import { useAuth } from '../context/AuthContext';
 import TermsModal from '../components/TermsModal';
 import { generateUserReferralCode, validateReferralCode } from '../utils/referral';
+import { authFetch } from '../utils/api';
 
 const Login: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -350,68 +351,28 @@ const Login: React.FC = () => {
 
       // Check if user entered a referral code during signup
       const trimmedRef = referralInput.trim().toUpperCase();
+      
+      // Save user profile first
+      await login(finalData);
+
+      // If user entered a referral code, securely apply welcome bonus via server
       if (trimmedRef) {
         try {
-          const valRes = await validateReferralCode(trimmedRef, finalData.uid);
-          if (valRes.valid && valRes.referrerUser) {
-            finalData.referredBy = valRes.referrerUser.uid;
-            // Welcome bonus for the referee: 10 laundry credits and ₹50 wallet discount
-            finalData.laundryCredits = (finalData.laundryCredits || 0) + 10;
-            finalData.walletBalance = (finalData.walletBalance || 0) + 50;
-
-            // Record pending referral document
-            await addDoc(collection(db, 'referrals'), {
-              referrerId: valRes.referrerUser.uid,
-              referrerName: valRes.referrerUser.name,
-              referrerEmail: valRes.referrerUser.email || '',
-              referralCode: trimmedRef,
-              referredUserId: finalData.uid,
-              referredUserName: finalData.name,
-              referredUserEmail: finalData.email || '',
-              status: 'pending',
-              rewardCredits: 20,
-              rewardWalletCash: 50,
-              refereeBonusCredits: 10,
-              refereeDiscountRupees: 50,
-              createdAt: new Date().toISOString()
-            });
-
-            // Notify referrer
-            await addDoc(collection(db, 'notifications'), {
-              userId: valRes.referrerUser.uid,
-              title: "🎉 Friend Joined with your Code!",
-              message: `${finalData.name} signed up with your referral code. You'll receive 20 Laundry Credits & ₹50 wallet cash once they complete their first wash!`,
-              type: "referral_invite",
-              isRead: false,
-              createdAt: new Date().toISOString()
-            });
-
-            // Notify new user (referee) of their welcome credits & wallet bonus
-            await addDoc(collection(db, 'notifications'), {
-              userId: finalData.uid,
-              title: "🎉 Welcome Bonus Credited!",
-              message: `You earned 10 Free Laundry Credits (approx. 1 kg wash) & ₹50 in your Student Wallet by joining with code ${trimmedRef}!`,
-              type: "referral_welcome",
-              isRead: false,
-              createdAt: new Date().toISOString()
-            });
-
-            // Add wallet transaction record for the welcome bonus
-            await addDoc(collection(db, 'wallet_transactions'), {
-              userId: finalData.uid,
-              amount: 50,
-              type: "credit",
-              method: "referral_bonus",
-              description: `Referral Welcome Bonus (${trimmedRef})`,
-              createdAt: new Date().toISOString()
-            });
+          const refRes = await authFetch('/api/referrals/apply-signup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ referralCode: trimmedRef })
+          });
+          const refData = await refRes.json();
+          if (refRes.ok && refData.success) {
+            console.log('Referral bonus successfully granted by server');
+          } else {
+            console.warn('Referral bonus notice:', refData.error);
           }
         } catch (refErr) {
-          console.error('Error applying referral code:', refErr);
+          console.error('Error applying referral code via server:', refErr);
         }
       }
-
-      await login(finalData);
       
       setShowTerms(false);
       if (finalData.adminRole || finalData.role === 'admin') {
@@ -567,19 +528,19 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto px-4 py-8 sm:py-12">
+    <div className="max-w-md mx-auto px-3.5 sm:px-4 py-4 sm:py-12">
       <button 
         onClick={() => navigate('/')}
-        className="flex items-center text-gray-500 hover:text-primary-electric mb-8 transition-colors text-sm font-bold uppercase tracking-widest"
+        className="flex items-center text-gray-500 hover:text-primary-electric mb-4 sm:mb-8 transition-colors text-xs sm:text-sm font-bold uppercase tracking-wider"
       >
-        <ArrowLeft className="w-4 h-4 mr-2" />
+        <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
         Back to Home
       </button>
 
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white dark:bg-surface-container p-6 sm:p-10 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-2xl shadow-black/5 dark:shadow-none relative overflow-hidden"
+        className="bg-white dark:bg-surface-container p-4 sm:p-10 rounded-2xl sm:rounded-3xl border border-gray-100 dark:border-gray-800 shadow-xl shadow-black/5 dark:shadow-none relative overflow-hidden"
       >
         {/* Account Deletion Notice */}
         {searchParams.get('deleted') === 'true' && (
@@ -713,38 +674,38 @@ const Login: React.FC = () => {
         ) : (
           <>
             {/* Mode Switcher: Log In vs Sign Up */}
-            <div className="flex bg-gray-100 dark:bg-surface-low p-1.5 rounded-2xl mb-8">
+            <div className="flex bg-gray-100 dark:bg-surface-low p-1 sm:p-1.5 rounded-xl sm:rounded-2xl mb-5 sm:mb-8">
           <button
             type="button"
             onClick={() => { setMode('login'); setError(''); }}
-            className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 py-2 sm:py-3 text-[11px] sm:text-xs font-black uppercase tracking-wider sm:tracking-widest rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 ${
               mode === 'login' 
-                ? 'bg-white dark:bg-surface-highest text-primary-electric dark:text-primary-electric-light shadow-md' 
+                ? 'bg-white dark:bg-surface-highest text-primary-electric dark:text-primary-electric-light shadow-xs sm:shadow-md' 
                 : 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
           >
-            <LogIn className="w-4 h-4" />
+            <LogIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>Log In</span>
           </button>
           <button
             type="button"
             onClick={() => { setMode('signup'); setError(''); }}
-            className={`flex-1 py-3 text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 py-2 sm:py-3 text-[11px] sm:text-xs font-black uppercase tracking-wider sm:tracking-widest rounded-lg sm:rounded-xl transition-all flex items-center justify-center gap-1.5 sm:gap-2 ${
               mode === 'signup' 
-                ? 'bg-white dark:bg-surface-highest text-primary-electric dark:text-primary-electric-light shadow-md' 
+                ? 'bg-white dark:bg-surface-highest text-primary-electric dark:text-primary-electric-light shadow-xs sm:shadow-md' 
                 : 'text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
           >
-            <UserPlus className="w-4 h-4" />
+            <UserPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>Sign Up</span>
           </button>
         </div>
 
-        <div className="text-center mb-8">
-          <h2 className="text-3xl font-display font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">
+        <div className="text-center mb-5 sm:mb-8">
+          <h2 className="text-2xl sm:text-3xl font-display font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">
             {mode === 'login' ? 'Welcome Back' : 'Create Account'}
           </h2>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 font-bold uppercase tracking-widest">
+          <p className="text-[11px] sm:text-xs text-gray-400 dark:text-gray-500 mt-1 sm:mt-2 font-bold uppercase tracking-wider sm:tracking-widest">
             {mode === 'login' ? 'Sign in to access WashWise services' : 'Sign up to get started with WashWise'}
           </p>
         </div>

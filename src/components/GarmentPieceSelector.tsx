@@ -227,12 +227,12 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
                 <div className="mt-2 mb-4 p-2.5 bg-gray-50/70 dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-800 flex items-center justify-between">
                   <div className="flex items-baseline gap-2 flex-wrap">
                     {isSubscriber ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-lg font-black text-green-600 dark:text-green-400">
                           {unitCredits} Credits
                         </span>
-                        <span className="text-[11px] font-bold text-gray-400">
-                          (₹{activeUnitPrice} tariff)
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">
+                          (₹{activeUnitPrice})
                         </span>
                       </div>
                     ) : itemOfferActive ? (
@@ -279,7 +279,7 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
                   {count > 0 ? (
                     isSubscriber ? (
                       <span className="font-bold text-green-600 dark:text-green-400">
-                        Subtotal: {count * unitCredits} Credits
+                        Subtotal: {count * unitCredits} Credits <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">(₹{count * activeUnitPrice})</span>
                       </span>
                     ) : (
                       <div className="flex flex-col">
@@ -351,7 +351,7 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
           <div>
             <p className="font-bold uppercase tracking-wider">Credit Allowance Exceeded</p>
             <p className="mt-0.5">
-              You selected {totalCredits} Credits worth of garments, but have {subscriberCreditsLeft} Credits remaining this cycle. You can pay for excess items using direct ₹ pricing at checkout.
+              You selected {totalCredits} Credits (₹{totalPrice}) worth of garments, but have {subscriberCreditsLeft} Credits remaining this cycle. You can pay for excess items using direct ₹ pricing at checkout.
             </p>
           </div>
         </div>
@@ -389,9 +389,14 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
               {isSubscriber ? 'Credits Required' : 'Total Piece Amount'}
             </span>
             {isSubscriber ? (
-              <span className="text-xl font-black text-green-600 dark:text-green-400">
-                {totalCredits} Credits
-              </span>
+              <div className="flex items-baseline gap-1.5 justify-end">
+                <span className="text-xl font-black text-green-600 dark:text-green-400">
+                  {totalCredits} Credits
+                </span>
+                <span className="text-sm font-bold text-gray-600 dark:text-gray-300">
+                  (₹{totalPrice})
+                </span>
+              </div>
             ) : (
               <div className="flex items-baseline gap-2 justify-end">
                 {isOfferActive && totalSavings > 0 && (

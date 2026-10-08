@@ -57,6 +57,7 @@ export interface ReferralSettings {
   enabled: boolean;
   referrerCredits: number;
   referrerWalletCash: number;
+  maxWalletCashReferrals?: number; // Only first N referrals give wallet money (default: 3). Remaining referrals are credit-only.
   refereeBonusCredits: number;
   refereeDiscountRupees: number;
   minBookingAmountToReward?: number;
@@ -75,6 +76,7 @@ export interface ReferralRecord {
   status: 'pending' | 'completed' | 'expired';
   rewardCredits: number;
   rewardWalletCash: number;
+  isCashRewarded?: boolean;
   refereeBonusCredits: number;
   refereeDiscountRupees: number;
   orderId?: string;
@@ -133,9 +135,34 @@ export interface Machine {
   type: 'washer' | 'dryer';
   status: 'free' | 'occupied' | 'maintenance' | 'unavailable' | 'idle' | 'running';
   isAvailable?: boolean;
+  unavailableFrom?: string; // YYYY-MM-DD start of non-availability
+  unavailableTo?: string;   // YYYY-MM-DD end of non-availability (inclusive, optional for ongoing)
+  unavailableReason?: string;
   currentBookingId?: string;
   timeRemaining?: number;
+  createdAt?: any;
 }
+
+export const isMachineAvailableOnDate = (machine: Machine, targetDateStr: string): boolean => {
+  // If permanently disabled or in maintenance/unavailable status
+  if (machine.isAvailable === false) return false;
+  if (machine.status === 'maintenance' || machine.status === 'unavailable') return false;
+
+  // Check date range non-availability
+  if (machine.unavailableFrom) {
+    if (machine.unavailableTo) {
+      if (targetDateStr >= machine.unavailableFrom && targetDateStr <= machine.unavailableTo) {
+        return false;
+      }
+    } else {
+      if (targetDateStr >= machine.unavailableFrom) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+};
 
 export interface Bag {
   id: string;
@@ -157,6 +184,8 @@ export interface PricingSettings {
   minCharge: number;
   minLoad: number;
   deliveryFee: number;
+  codConvenienceFee?: number;
+  codSlotBookingFee?: number;
 }
 
 export interface SubscriptionPlan {
@@ -284,6 +313,7 @@ export interface Booking {
   latitude?: number;
   longitude?: number;
   deliveryFee?: number;
+  codConvenienceFee?: number;
   storeId?: string;
   staffId?: string;
   deliveryStaffId?: string;
@@ -294,6 +324,16 @@ export interface Booking {
   garmentPieceSnapshots?: GarmentPieceSnapshot[];
   totalPieces?: number;
   price: number;
+  totalAmount?: number;
+  prepaidAmount?: number;
+  remainingAmount?: number;
+  isCodPrepaid?: boolean;
+  codPrepaidMethod?: 'wallet' | 'card' | 'upi' | 'netbanking' | string;
+  codBalancePaid?: boolean;
+  codBalancePaidAt?: string;
+  bookingFeeType?: 'flat_39' | 'percent_20';
+  codSlotBookingFee?: number;
+  slotBookingFee?: number;
   regular_price_per_kg?: number;
   offer_price_per_kg?: number;
   price_used?: number;
@@ -309,6 +349,14 @@ export interface Booking {
   createdAt?: any;
   rejectionReason?: string;
   rescheduledTo?: string; // ID of the new booking if this was rejected and rescheduled
+  weightKg?: number | string;
+  pickupDate?: string;
+  deliveryDate?: string;
+  slotNumber?: string | number;
+  tagPrinted?: boolean;
+  tagPrintedAt?: string;
+  invoicePrinted?: boolean;
+  invoicePrintedAt?: string;
 }
 
 export const TIME_SLOTS = [
@@ -325,3 +373,14 @@ export const TIME_SLOTS = [
   "06:00-07:00 PM",
   "07:00-08:00 PM"
 ];
+
+export const checkIsSubscriber = (user: any): boolean => {
+  if (!user) return false;
+  return Boolean(
+    user.userType === 'subscriber' ||
+    user.subscriptionPaid === true ||
+    Boolean(user.package) ||
+    (typeof user.laundryCredits === 'number' && user.laundryCredits > 0) ||
+    (typeof user.kilosLeft === 'number' && user.kilosLeft > 0)
+  );
+};

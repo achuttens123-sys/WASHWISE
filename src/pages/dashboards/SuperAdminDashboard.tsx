@@ -53,17 +53,19 @@ import {
   Zap,
   Shirt,
   RotateCcw,
-  Layers
+  Layers,
+  CalendarRange
 } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, updateDoc, doc, getDoc, runTransaction, where, limit, addDoc, deleteDoc, setDoc, getDocs } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../../firebase';
-import { Booking, AdminRole, User as AppUser, Store, Package, Slot, TIME_SLOTS, Machine, KERALA_DISTRICTS, generateStoreId, GarmentPieceItem } from '../../types';
+import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
+import { Booking, AdminRole, User as AppUser, Store, Package, Slot, TIME_SLOTS, Machine, KERALA_DISTRICTS, generateStoreId, GarmentPieceItem, isMachineAvailableOnDate } from '../../types';
 import { GARMENT_CATALOG, normalizeGarmentItem } from '../../data/garmentCatalog';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { StoreService } from '../../services/StoreService';
 import LoadingScreen from '../../components/LoadingScreen';
 import ConfirmModal from '../../components/ConfirmModal';
+import { authFetch } from '../../utils/api';
 import { 
   LineChart, 
   Line, 
@@ -149,6 +151,14 @@ const SuperAdminDashboard: React.FC = () => {
   const [selectedTimeSlot, setSelectedTimeSlot] = useState(TIME_SLOTS[0]);
   const [currentSlotData, setCurrentSlotData] = useState<Slot | null>(null);
   const [isClearingSlot, setIsClearingSlot] = useState(false);
+  const [selectedStoreForAvailability, setSelectedStoreForAvailability] = useState<string>('');
+  const [isDateRangeModalOpen, setIsDateRangeModalOpen] = useState(false);
+  const [machineToEditDateRange, setMachineToEditDateRange] = useState<Machine | null>(null);
+  const [dateRangeForm, setDateRangeForm] = useState({
+    unavailableFrom: '',
+    unavailableTo: '',
+    unavailableReason: ''
+  });
 
   useEffect(() => {
     // Global data fetching for Super Admin
@@ -393,9 +403,22 @@ const SuperAdminDashboard: React.FC = () => {
 
   // Automatic migration check for store ID 'RIT' -> 'WW001KT'
   useEffect(() => {
+    let isMounted = true;
     const checkAndMigrateRIT = async () => {
+      // 1. Skip if offline or already verified in this session
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return;
+      }
+      try {
+        if (sessionStorage.getItem('rit_migration_checked')) {
+          return;
+        }
+      } catch {}
+
       try {
         const ritDoc = await getDoc(doc(db, 'stores', 'RIT'));
+        if (!isMounted) return;
+
         if (ritDoc.exists()) {
           console.log('Migrating RIT store to WW001KT...');
           const ritData = ritDoc.data();
@@ -418,11 +441,28 @@ const SuperAdminDashboard: React.FC = () => {
             await migrateStoreReferences('RIT', 'WW001KT');
           }
         }
-      } catch (err) {
-        console.error('Auto migration of RIT store failed:', err);
+        try {
+          sessionStorage.setItem('rit_migration_checked', 'true');
+        } catch {}
+      } catch (err: any) {
+        // Handle temporary connection/offline status gracefully without throwing console.error
+        if (err?.code === 'unavailable' || err?.message?.includes('offline') || err?.message?.includes('Failed to get document')) {
+          console.warn('Auto migration deferred: client is temporarily offline or connecting.');
+        } else {
+          console.warn('Auto migration notice:', err?.message || err);
+        }
       }
     };
-    checkAndMigrateRIT();
+
+    // Delay slightly to give Firestore network handshake time to establish
+    const timer = setTimeout(() => {
+      checkAndMigrateRIT();
+    }, 1500);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
   }, []);
 
   // Store Management Handlers
@@ -596,6 +636,47 @@ const SuperAdminDashboard: React.FC = () => {
     setIsConfirmModalOpen(true);
   };
 
+  const handleOpenDateRangeModal = (machine: Machine) => {
+    setMachineToEditDateRange(machine);
+    setDateRangeForm({
+      unavailableFrom: machine.unavailableFrom || format(new Date(), 'yyyy-MM-dd'),
+      unavailableTo: machine.unavailableTo || '',
+      unavailableReason: machine.unavailableReason || ''
+    });
+    setIsDateRangeModalOpen(true);
+  };
+
+  const handleSaveDateRange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!machineToEditDateRange) return;
+    try {
+      await updateDoc(doc(db, 'machines', machineToEditDateRange.id), {
+        unavailableFrom: dateRangeForm.unavailableFrom || null,
+        unavailableTo: dateRangeForm.unavailableTo || null,
+        unavailableReason: dateRangeForm.unavailableReason || 'Scheduled Non-Availability'
+      });
+      setIsDateRangeModalOpen(false);
+      setMachineToEditDateRange(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `machines/${machineToEditDateRange.id}`);
+    }
+  };
+
+  const handleClearDateRange = async () => {
+    if (!machineToEditDateRange) return;
+    try {
+      await updateDoc(doc(db, 'machines', machineToEditDateRange.id), {
+        unavailableFrom: null,
+        unavailableTo: null,
+        unavailableReason: null
+      });
+      setIsDateRangeModalOpen(false);
+      setMachineToEditDateRange(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `machines/${machineToEditDateRange.id}`);
+    }
+  };
+
   const handleToggleSlotPause = async () => {
     if (!currentSlotData) return;
     try {
@@ -634,9 +715,13 @@ const SuperAdminDashboard: React.FC = () => {
       message: 'Are you sure you want to delete this user? This will remove their account from Firebase Authentication and their data from Firestore. This action cannot be undone.',
       onConfirm: async () => {
         try {
+          const idToken = await auth.currentUser?.getIdToken();
           const response = await fetch('/api/auth/delete-user', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+            },
             body: JSON.stringify({ uid: userId })
           });
           
@@ -1204,6 +1289,26 @@ const SuperAdminDashboard: React.FC = () => {
                       })}
                       className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl px-4 py-3 font-bold text-gray-800 dark:text-gray-100 outline-none focus:ring-2 focus:ring-blue-500"
                     />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">COD Convenience Fee (₹)</label>
+                      <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded">Cash only</span>
+                    </div>
+                    <input 
+                      type="number"
+                      value={globalSettings.pricing?.codConvenienceFee ?? 10}
+                      onChange={(e) => setGlobalSettings({
+                        ...globalSettings,
+                        pricing: {
+                          ...globalSettings.pricing,
+                          codConvenienceFee: parseFloat(e.target.value) || 0
+                        }
+                      })}
+                      className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl px-4 py-3 font-bold text-gray-800 dark:text-gray-100 outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-[10px] text-gray-400">Cash on Delivery requires a ₹39 flat slot fee (or 20% for per-piece) prepaid online, deducted from total order.</p>
                   </div>
                 </div>
               </div>
@@ -1952,120 +2057,249 @@ const SuperAdminDashboard: React.FC = () => {
                     <Tag className="w-6 h-6 text-purple-600" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Promo Codes</h3>
-                    <p className="text-sm text-gray-500 font-medium">Create and manage coupon codes for marketing.</p>
+                    <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Promo & Discount Codes</h3>
+                    <p className="text-sm text-gray-500 font-medium">Create coupon codes, ₹1/Kg offers, limited start dates, and max booking quotas.</p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => {
-                    const newPromo = { id: Date.now().toString(), code: 'NEWPROMO', description: '', discountType: 'percentage', discountValue: 0, expiryDate: '', applicableFor: 'all', active: true };
-                    setGlobalSettings({ ...globalSettings, promos: [...globalSettings.promos, newPromo] });
-                  }}
-                  className="px-4 py-2 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-purple-100 transition-all flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Promo
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => {
+                      const todayStr = new Date().toISOString().split('T')[0];
+                      const oneKgOffer = { 
+                        id: Date.now().toString(), 
+                        code: 'WASH1RS', 
+                        description: 'Special ₹1/Kg Wash Offer (First 100 bookings)', 
+                        discountType: 'price_per_kg', 
+                        discountValue: 1, 
+                        startDate: todayStr, 
+                        expiryDate: '', 
+                        maxRedemptions: 100, 
+                        redemptionCount: 0, 
+                        applicableFor: 'wash', 
+                        active: true 
+                      };
+                      setGlobalSettings({ ...globalSettings, promos: [oneKgOffer, ...globalSettings.promos] });
+                    }}
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:opacity-90 transition-all flex items-center gap-2 shadow-sm"
+                    title="Pre-fills a 1 Rs for 1 Kg offer valid for first 100 bookings"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    + Add ₹1/Kg Offer (First 100)
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const newPromo = { 
+                        id: Date.now().toString(), 
+                        code: 'NEWPROMO', 
+                        description: '', 
+                        discountType: 'percentage', 
+                        discountValue: 10, 
+                        startDate: '', 
+                        expiryDate: '', 
+                        maxRedemptions: undefined, 
+                        redemptionCount: 0, 
+                        applicableFor: 'all', 
+                        active: true 
+                      };
+                      setGlobalSettings({ ...globalSettings, promos: [...globalSettings.promos, newPromo] });
+                    }}
+                    className="px-4 py-2 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-purple-100 transition-all flex items-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Promo
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-4">
-                {globalSettings.promos.map((promo: any, index: number) => (
-                  <div key={promo.id} className="flex flex-col gap-4 p-6 bg-gray-50 dark:bg-gray-800/50 rounded-[2rem] border border-gray-100 dark:border-gray-800">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 w-full">
-                      <input 
-                        type="text"
-                        value={promo.code}
-                        onChange={(e) => {
-                          const newPromos = [...globalSettings.promos];
-                          newPromos[index].code = e.target.value.toUpperCase();
-                          setGlobalSettings({ ...globalSettings, promos: newPromos });
-                        }}
-                        placeholder="CODE"
-                        className="bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
-                      />
-                      <select 
-                        value={promo.discountType}
-                        onChange={(e) => {
-                          const newPromos = [...globalSettings.promos];
-                          newPromos[index].discountType = e.target.value;
-                          setGlobalSettings({ ...globalSettings, promos: newPromos });
-                        }}
-                        className="bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
-                      >
-                        <option value="percentage">Percentage (%)</option>
-                        <option value="fixed">Fixed (₹)</option>
-                      </select>
-                      <input 
-                        type="number"
-                        value={Number.isNaN(promo.discountValue) ? '' : promo.discountValue}
-                        onChange={(e) => {
-                          const newPromos = [...globalSettings.promos];
-                          newPromos[index].discountValue = e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0);
-                          setGlobalSettings({ ...globalSettings, promos: newPromos });
-                        }}
-                        placeholder="Value"
-                        className="bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
-                      />
-                      <select 
-                        value={promo.applicableFor || 'all'}
-                        onChange={(e) => {
-                          const newPromos = [...globalSettings.promos];
-                          newPromos[index].applicableFor = e.target.value;
-                          setGlobalSettings({ ...globalSettings, promos: newPromos });
-                        }}
-                        className="bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-xs font-black outline-none text-purple-600 dark:text-purple-400"
-                      >
-                        <option value="all">Apply To: All (Wash & Subscription)</option>
-                        <option value="wash">Apply To: Wash Orders Only</option>
-                        <option value="subscription">Apply To: Subscriptions Only</option>
-                      </select>
-                      <input 
-                        type="date"
-                        value={promo.expiryDate}
-                        onChange={(e) => {
-                          const newPromos = [...globalSettings.promos];
-                          newPromos[index].expiryDate = e.target.value;
-                          setGlobalSettings({ ...globalSettings, promos: newPromos });
-                        }}
-                        className="bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-bold outline-none"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <input 
-                        type="text"
-                        value={promo.description}
-                        onChange={(e) => {
-                          const newPromos = [...globalSettings.promos];
-                          newPromos[index].description = e.target.value;
-                          setGlobalSettings({ ...globalSettings, promos: newPromos });
-                        }}
-                        placeholder="Description (e.g., First order discount)"
-                        className="flex-1 bg-white dark:bg-gray-900 border-none rounded-xl px-4 py-2 text-sm font-medium outline-none mr-4"
-                      />
-                      <div className="flex items-center gap-2">
-                        <button 
-                          onClick={() => {
-                            const newPromos = [...globalSettings.promos];
-                            newPromos[index].active = !newPromos[index].active;
-                            setGlobalSettings({ ...globalSettings, promos: newPromos });
-                          }}
-                          className={`p-2 rounded-lg transition-all ${promo.active ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-100'}`}
-                        >
-                          {promo.active ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
-                        </button>
-                        <button 
-                          onClick={() => {
-                            const newPromos = globalSettings.promos.filter((_: any, i: number) => i !== index);
-                            setGlobalSettings({ ...globalSettings, promos: newPromos });
-                          }}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
+                {globalSettings.promos.map((promo: any, index: number) => {
+                  const is1KgOffer = promo.discountType === 'price_per_kg';
+                  const claimedCount = Number(promo.redemptionCount || 0);
+                  const maxLimit = promo.maxRedemptions ? Number(promo.maxRedemptions) : null;
+                  const isExhausted = maxLimit !== null && claimedCount >= maxLimit;
+
+                  return (
+                    <div key={promo.id} className="flex flex-col gap-4 p-6 bg-gray-50 dark:bg-gray-800/50 rounded-[2rem] border border-gray-100 dark:border-gray-800">
+                      
+                      {/* Top Row: Code, Discount Type, Value, Applicable For */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 w-full">
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">Coupon Code</label>
+                          <input 
+                            type="text"
+                            value={promo.code}
+                            onChange={(e) => {
+                              const newPromos = [...globalSettings.promos];
+                              newPromos[index].code = e.target.value.toUpperCase();
+                              setGlobalSettings({ ...globalSettings, promos: newPromos });
+                            }}
+                            placeholder="CODE (e.g. WASH1RS)"
+                            className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm font-black outline-none tracking-wider font-mono text-purple-600 dark:text-purple-400"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">Discount Model</label>
+                          <select 
+                            value={promo.discountType || 'percentage'}
+                            onChange={(e) => {
+                              const newPromos = [...globalSettings.promos];
+                              newPromos[index].discountType = e.target.value;
+                              if (e.target.value === 'price_per_kg' && (!newPromos[index].discountValue || newPromos[index].discountValue === 0)) {
+                                newPromos[index].discountValue = 1;
+                              }
+                              setGlobalSettings({ ...globalSettings, promos: newPromos });
+                            }}
+                            className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-xs font-bold outline-none"
+                          >
+                            <option value="price_per_kg">₹1/Kg (Fixed Price Per Kg)</option>
+                            <option value="percentage">Percentage (%)</option>
+                            <option value="fixed">Fixed Flat Discount (₹)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">
+                            {is1KgOffer ? 'Rate Per Kg (₹)' : promo.discountType === 'percentage' ? 'Percentage Off (%)' : 'Discount Amount (₹)'}
+                          </label>
+                          <input 
+                            type="number"
+                            value={Number.isNaN(promo.discountValue) ? '' : promo.discountValue}
+                            onChange={(e) => {
+                              const newPromos = [...globalSettings.promos];
+                              newPromos[index].discountValue = e.target.value === '' ? 0 : (parseFloat(e.target.value) || 0);
+                              setGlobalSettings({ ...globalSettings, promos: newPromos });
+                            }}
+                            placeholder={is1KgOffer ? '1 (for ₹1/kg)' : 'Value'}
+                            className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm font-black outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">Applicable Order Type</label>
+                          <select 
+                            value={promo.applicableFor || 'all'}
+                            onChange={(e) => {
+                              const newPromos = [...globalSettings.promos];
+                              newPromos[index].applicableFor = e.target.value;
+                              setGlobalSettings({ ...globalSettings, promos: newPromos });
+                            }}
+                            className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-xs font-black outline-none text-purple-600 dark:text-purple-400"
+                          >
+                            <option value="wash">Wash Orders Only (Recommended for 1₹/Kg)</option>
+                            <option value="all">All Orders (Wash & Subscription)</option>
+                            <option value="subscription">Subscriptions Only</option>
+                          </select>
+                        </div>
                       </div>
+
+                      {/* Middle Row: Start Date, Expiry Date, Max Redemptions Quota */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full pt-1">
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">Offer Starts On (Start Date)</label>
+                          <input 
+                            type="date"
+                            value={promo.startDate || ''}
+                            onChange={(e) => {
+                              const newPromos = [...globalSettings.promos];
+                              newPromos[index].startDate = e.target.value;
+                              setGlobalSettings({ ...globalSettings, promos: newPromos });
+                            }}
+                            className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-xs font-bold outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block mb-1">Offer Expires On (Optional)</label>
+                          <input 
+                            type="date"
+                            value={promo.expiryDate || ''}
+                            onChange={(e) => {
+                              const newPromos = [...globalSettings.promos];
+                              newPromos[index].expiryDate = e.target.value;
+                              setGlobalSettings({ ...globalSettings, promos: newPromos });
+                            }}
+                            className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-xs font-bold outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[10px] font-black uppercase tracking-wider text-gray-400 block">
+                              Max Redemptions Quota
+                            </label>
+                            {maxLimit !== null && (
+                              <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase ${
+                                isExhausted 
+                                  ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300' 
+                                  : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              }`}>
+                                {claimedCount} / {maxLimit} Claimed
+                              </span>
+                            )}
+                          </div>
+                          <input 
+                            type="number"
+                            min="1"
+                            value={promo.maxRedemptions || ''}
+                            onChange={(e) => {
+                              const newPromos = [...globalSettings.promos];
+                              newPromos[index].maxRedemptions = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                              setGlobalSettings({ ...globalSettings, promos: newPromos });
+                            }}
+                            placeholder="e.g. 100 (First 100 bookings)"
+                            className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-xs font-black outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Bottom Row: Description, Status & Actions */}
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1 border-t border-gray-200/50 dark:border-gray-700/50">
+                        <input 
+                          type="text"
+                          value={promo.description || ''}
+                          onChange={(e) => {
+                            const newPromos = [...globalSettings.promos];
+                            newPromos[index].description = e.target.value;
+                            setGlobalSettings({ ...globalSettings, promos: newPromos });
+                          }}
+                          placeholder="Public Description (e.g., Wash for ₹1/Kg for the first 100 bookings starting Oct 1st)"
+                          className="w-full sm:flex-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-xs font-medium outline-none"
+                        />
+
+                        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                          <button 
+                            onClick={() => {
+                              const newPromos = [...globalSettings.promos];
+                              newPromos[index].active = !newPromos[index].active;
+                              setGlobalSettings({ ...globalSettings, promos: newPromos });
+                            }}
+                            className={`px-3 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-1.5 transition-all ${
+                              promo.active 
+                                ? 'text-green-700 bg-green-100 dark:bg-green-950/40 dark:text-green-300' 
+                                : 'text-gray-500 bg-gray-200 dark:bg-gray-700'
+                            }`}
+                          >
+                            {promo.active ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+                            <span>{promo.active ? 'Active' : 'Inactive'}</span>
+                          </button>
+
+                          <button 
+                            onClick={() => {
+                              const newPromos = globalSettings.promos.filter((_: any, i: number) => i !== index);
+                              setGlobalSettings({ ...globalSettings, promos: newPromos });
+                            }}
+                            className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl transition-all"
+                            title="Delete promo code"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -2390,7 +2624,7 @@ const SuperAdminDashboard: React.FC = () => {
                               try {
                                 await updateDoc(doc(db, 'bookings', order.id!), { status: newStatus });
                                 if (newStatus === 'completed' || newStatus === 'Washing completed') {
-                                  fetch('/api/loyalty/trigger-reward', {
+                                  authFetch('/api/loyalty/trigger-reward', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ bookingId: order.id })
@@ -2709,131 +2943,361 @@ const SuperAdminDashboard: React.FC = () => {
           </motion.div>
         )}
 
-        {activeTab === 'availability' && (
-          <motion.div
-            key="availability"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="space-y-8"
-          >
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div>
-                <h2 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Machine Availability Management</h2>
-                <p className="text-gray-500 dark:text-gray-400 font-medium">View and manually clear booked slots for machines.</p>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Select Date</label>
-                  <input
-                    type="date"
-                    value={availabilityDate}
-                    onChange={(e) => setAvailabilityDate(e.target.value)}
-                    className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Select Time Slot</label>
-                  <select
-                    value={selectedTimeSlot}
-                    onChange={(e) => setSelectedTimeSlot(e.target.value)}
-                    className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {TIME_SLOTS.map(slot => (
-                      <option key={slot} value={slot}>{slot}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
+        {activeTab === 'availability' && (() => {
+          const targetStoreId = selectedStoreForAvailability || stores[0]?.id || 'WW001KT';
+          const storeMachines = machines.filter(m => m.storeId === targetStoreId);
+          const activeStoreMachinesToday = storeMachines.filter(m => isMachineAvailableOnDate(m, format(new Date(), 'yyyy-MM-dd'))).length;
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[1, 2, 3, 4].map((num) => {
-                const machineNum = num.toString();
-                const bookedUserId = currentSlotData?.machines[machineNum];
-                const bookedUser = users.find(u => u.uid === bookedUserId);
-                
-                return (
-                  <div key={machineNum} className="bg-white dark:bg-gray-900 p-8 rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col items-center text-center relative overflow-hidden group">
-                    <div className={`w-20 h-20 rounded-[2rem] flex items-center justify-center mb-6 transition-all duration-500 ${
-                      bookedUserId ? (bookedUserId === 'unavailable' ? 'bg-red-50 text-red-600 dark:bg-red-900/20' : 'bg-blue-50 text-blue-600 dark:bg-blue-900/20') : 'bg-green-50 text-green-600 dark:bg-green-900/20'
-                    }`}>
-                      <Monitor className="w-10 h-10" />
+          return (
+            <motion.div
+              key="availability"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-8"
+            >
+              {/* CAPACITY & FLEET HEADER */}
+              <div className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-gray-100 dark:border-gray-800">
+                  <div>
+                    <h2 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Machine Availability Management</h2>
+                    <p className="text-gray-500 dark:text-gray-400 font-medium text-sm">
+                      Set non-availability date ranges, manage fleet size, and dynamically regulate hourly customer booking slots.
+                    </p>
+                  </div>
+                  
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* Store Selector */}
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                      <StoreIcon className="w-4 h-4 text-blue-600" />
+                      <select
+                        value={targetStoreId}
+                        onChange={(e) => setSelectedStoreForAvailability(e.target.value)}
+                        className="bg-transparent text-xs font-bold text-gray-800 dark:text-gray-200 outline-none"
+                      >
+                        {stores.map(s => (
+                          <option key={s.id} value={s.id}>{s.name} ({s.id})</option>
+                        ))}
+                      </select>
                     </div>
-                    
-                    <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 mb-1">Machine #{machineNum}</h3>
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-6">Standard Washer</p>
-                    
-                    {bookedUserId ? (
-                      <div className="space-y-4 w-full">
-                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-800">
-                          {bookedUserId === 'unavailable' ? (
-                            <div className="flex flex-col items-center py-2">
-                              <Ban className="w-6 h-6 text-red-500 mb-2" />
-                              <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">Marked Unavailable</p>
-                            </div>
-                          ) : (
-                            <>
-                              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Booked By</p>
-                              <p className="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">{bookedUser?.name || 'Unknown User'}</p>
-                              <p className="text-[10px] font-mono text-gray-500 truncate">{bookedUserId}</p>
-                            </>
-                          )}
-                        </div>
-                        
-                        <button
-                          onClick={() => bookedUserId === 'unavailable' ? handleToggleSlotMachineAvailability(machineNum, false) : handleClearSlot(machineNum)}
-                          disabled={isClearingSlot}
-                          className={`w-full py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border flex items-center justify-center gap-2 ${
-                            bookedUserId === 'unavailable' 
-                              ? 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white' 
-                              : 'bg-red-50 text-red-600 border-red-100 hover:bg-red-600 hover:text-white'
+
+                    <button
+                      onClick={() => {
+                        setEditingMachine(null);
+                        setMachineFormData({
+                          storeId: targetStoreId,
+                          number: storeMachines.length > 0 ? Math.max(...storeMachines.map(m => m.number || 0)) + 1 : 1,
+                          type: 'washer',
+                          status: 'idle',
+                          isAvailable: true
+                        });
+                        setIsMachineModalOpen(true);
+                      }}
+                      className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-black uppercase tracking-wider shadow-sm flex items-center gap-2 hover:scale-105 active:scale-95 transition-all"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add Machine</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Explanatory Banner & Capacity Metric */}
+                <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-2 p-4 bg-blue-50/70 dark:bg-blue-950/20 rounded-2xl border border-blue-100 dark:border-blue-900/30 flex items-start gap-3">
+                    <div className="p-2 bg-blue-600 text-white rounded-xl shrink-0 mt-0.5">
+                      <Monitor className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-blue-900 dark:text-blue-200 uppercase tracking-wider">Dynamic Slot Capacity Rule</h4>
+                      <p className="text-xs text-blue-800/80 dark:text-blue-300 font-medium mt-0.5 leading-relaxed">
+                        Active machines directly dictate consumer slot capacity. For launch, having <strong>2 active machines = 2 slots per hour</strong>, completely preventing overbooking. When you add a 3rd machine, <strong>3 slots per hour</strong> will automatically open.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border border-gray-100 dark:border-gray-800 flex flex-col justify-center text-center">
+                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Active Store Capacity</span>
+                    <div className="flex items-center justify-center gap-2 mt-1">
+                      <span className="text-3xl font-black text-gray-800 dark:text-gray-100">
+                        {activeStoreMachinesToday}
+                      </span>
+                      <span className="text-xs font-bold text-gray-500">Slots / Hour</span>
+                    </div>
+                    <span className="text-[10px] font-medium text-gray-400 mt-0.5">({storeMachines.length} Total Machines)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* FLEET MACHINES CARDS */}
+              <div>
+                <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-4">
+                  Machines in {stores.find(s => s.id === targetStoreId)?.name || targetStoreId} ({storeMachines.length})
+                </h3>
+
+                {storeMachines.length === 0 ? (
+                  <div className="bg-white dark:bg-gray-900 p-12 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 text-center">
+                    <Monitor className="w-12 h-12 text-gray-300 dark:text-gray-700 mx-auto mb-3" />
+                    <h4 className="text-lg font-black text-gray-700 dark:text-gray-200 uppercase tracking-tight mb-1">No Machines in this Store</h4>
+                    <p className="text-xs text-gray-500 max-w-md mx-auto mb-6">
+                      Add machines to this store to enable student booking slots.
+                    </p>
+                    <button
+                      onClick={() => {
+                        setEditingMachine(null);
+                        setMachineFormData({ storeId: targetStoreId, number: 1, type: 'washer', status: 'idle', isAvailable: true });
+                        setIsMachineModalOpen(true);
+                      }}
+                      className="px-6 py-3 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-blue-700 transition-all shadow-sm"
+                    >
+                      Add Machine #1
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {storeMachines.map((machine) => {
+                      const todayStr = format(new Date(), 'yyyy-MM-dd');
+                      const isAvailableToday = isMachineAvailableOnDate(machine, todayStr);
+                      const hasDateRange = Boolean(machine.unavailableFrom);
+
+                      return (
+                        <div 
+                          key={machine.id} 
+                          className={`bg-white dark:bg-gray-900 p-6 rounded-[2.5rem] border transition-all shadow-sm flex flex-col justify-between ${
+                            !isAvailableToday 
+                              ? 'border-red-200 dark:border-red-900/30' 
+                              : 'border-gray-100 dark:border-gray-800'
                           }`}
                         >
-                          {isClearingSlot ? <Loader2 className="w-3 h-3 animate-spin" /> : bookedUserId === 'unavailable' ? <CheckCircle2 className="w-3 h-3" /> : <Trash2 className="w-3 h-3" />}
-                          {bookedUserId === 'unavailable' ? 'Make Available' : 'Clear Slot'}
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-3 w-full">
-                        <div className="py-2">
-                          <span className="px-4 py-2 bg-green-100 text-green-700 text-[10px] font-black uppercase tracking-widest rounded-full">
-                            Available
-                          </span>
+                          <div>
+                            <div className="flex items-start justify-between mb-4">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                                  isAvailableToday 
+                                    ? 'bg-green-50 text-green-600 dark:bg-green-900/20' 
+                                    : 'bg-red-50 text-red-600 dark:bg-red-900/20'
+                                }`}>
+                                  <Monitor className="w-6 h-6" />
+                                </div>
+                                <div>
+                                  <h3 className="text-lg font-black text-gray-800 dark:text-gray-100">Machine #{machine.number}</h3>
+                                  <span className="text-[10px] font-black uppercase tracking-wider text-gray-400">
+                                    {machine.type}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => handleDeleteMachine(machine.id)}
+                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                                title="Delete Machine"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {/* Status Badge */}
+                            <div className="mb-4">
+                              {hasDateRange ? (
+                                <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-xl border border-red-100 dark:border-red-900/30">
+                                  <div className="flex items-center gap-1.5 text-red-600 dark:text-red-400 text-xs font-black uppercase tracking-tight">
+                                    <CalendarRange className="w-3.5 h-3.5" />
+                                    <span>Unavailable (Date Range)</span>
+                                  </div>
+                                  <p className="text-[11px] font-bold text-gray-700 dark:text-gray-300 mt-1">
+                                    From {machine.unavailableFrom} {machine.unavailableTo ? `to ${machine.unavailableTo}` : '(Indefinite)'}
+                                  </p>
+                                  {machine.unavailableReason && (
+                                    <p className="text-[10px] text-gray-500 italic mt-0.5">
+                                      "{machine.unavailableReason}"
+                                    </p>
+                                  )}
+                                </div>
+                              ) : machine.isAvailable ? (
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 text-[10px] font-black uppercase tracking-wider rounded-full">
+                                  <ShieldCheck className="w-3.5 h-3.5" />
+                                  <span>Active & Available</span>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 text-[10px] font-black uppercase tracking-wider rounded-full">
+                                  <ShieldAlert className="w-3.5 h-3.5" />
+                                  <span>Marked Inactive</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="space-y-2 pt-4 border-t border-gray-100 dark:border-gray-800">
+                            <button
+                              onClick={() => handleOpenDateRangeModal(machine)}
+                              className="w-full py-2.5 px-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 border border-gray-200 dark:border-gray-700"
+                            >
+                              <CalendarRange className="w-3.5 h-3.5 text-blue-600" />
+                              <span>{hasDateRange ? 'Edit Date Range Non-Availability' : 'Schedule Inactive Dates'}</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleToggleMachineAvailability(machine)}
+                              className={`w-full py-2 px-3 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all border flex items-center justify-center gap-1.5 ${
+                                machine.isAvailable
+                                  ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-600 hover:text-white'
+                                  : 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white'
+                              }`}
+                            >
+                              {machine.isAvailable ? 'Mark Inactive' : 'Make Active'}
+                            </button>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => handleToggleSlotMachineAvailability(machineNum, true)}
-                          disabled={isClearingSlot}
-                          className="w-full py-3 bg-gray-50 text-gray-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-gray-800 hover:text-white transition-all border border-gray-100 dark:border-gray-800 flex items-center justify-center gap-2"
-                        >
-                          {isClearingSlot ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />}
-                          Mark Unavailable
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Decorative background element */}
-                    <div className={`absolute -right-4 -bottom-4 w-24 h-24 rounded-full blur-3xl opacity-10 transition-all duration-500 ${
-                      bookedUserId ? (bookedUserId === 'unavailable' ? 'bg-red-600' : 'bg-blue-600') : 'bg-green-600'
-                    }`} />
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
-
-            <div className="bg-amber-50 dark:bg-amber-900/10 p-6 rounded-[2.5rem] border border-amber-100 dark:border-amber-900/20 flex items-start gap-4">
-              <AlertCircle className="w-6 h-6 text-amber-600 shrink-0 mt-1" />
-              <div>
-                <h4 className="text-sm font-black text-amber-800 dark:text-amber-200 uppercase tracking-tight mb-1">Important Note</h4>
-                <p className="text-xs text-amber-700 dark:text-amber-400 font-medium leading-relaxed">
-                  Clearing a slot manually will make the machine available for other users to book immediately. 
-                  This action does NOT automatically cancel or refund the user's booking. 
-                  Please ensure you communicate with the user or handle the booking status separately in the Global Orders tab.
-                </p>
+                )}
               </div>
-            </div>
-          </motion.div>
-        )}
+
+              {/* TIME SLOT INSPECTOR */}
+              <div className="pt-8 border-t border-gray-200 dark:border-gray-800 space-y-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div>
+                    <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Time Slot Booking Inspector</h3>
+                    <p className="text-gray-500 dark:text-gray-400 font-medium text-xs">
+                      Inspect specific hourly slots on a selected date to manage customer slot allocations.
+                    </p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Select Date</label>
+                      <input
+                        type="date"
+                        value={availabilityDate}
+                        onChange={(e) => setAvailabilityDate(e.target.value)}
+                        className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Select Time Slot</label>
+                      <select
+                        value={selectedTimeSlot}
+                        onChange={(e) => setSelectedTimeSlot(e.target.value)}
+                        className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        {TIME_SLOTS.map(slot => (
+                          <option key={slot} value={slot}>{slot}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {storeMachines.length === 0 ? (
+                    <p className="col-span-full text-center text-sm text-gray-400 py-6">
+                      No machines configured for this store.
+                    </p>
+                  ) : (
+                    storeMachines.map((machine) => {
+                      const machineNum = machine.number.toString();
+                      const isAvailableOnSelectedDate = isMachineAvailableOnDate(machine, availabilityDate);
+                      const bookedUserId = currentSlotData?.machines[machineNum];
+                      const bookedUser = users.find(u => u.uid === bookedUserId);
+                      
+                      return (
+                        <div key={machine.id} className="bg-white dark:bg-gray-900 p-6 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col items-center text-center relative overflow-hidden group">
+                          <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center mb-4 transition-all duration-500 ${
+                            !isAvailableOnSelectedDate 
+                              ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/20' 
+                              : bookedUserId 
+                                ? (bookedUserId === 'unavailable' ? 'bg-red-50 text-red-600 dark:bg-red-900/20' : 'bg-blue-50 text-blue-600 dark:bg-blue-900/20') 
+                                : 'bg-green-50 text-green-600 dark:bg-green-900/20'
+                          }`}>
+                            <Monitor className="w-8 h-8" />
+                          </div>
+                          
+                          <h3 className="text-lg font-black text-gray-800 dark:text-gray-100 mb-0.5">Machine #{machine.number}</h3>
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">{machine.type}</p>
+                          
+                          {!isAvailableOnSelectedDate ? (
+                            <div className="space-y-3 w-full">
+                              <div className="p-3 bg-amber-50 dark:bg-amber-950/20 rounded-2xl border border-amber-100 dark:border-amber-900/30 text-center">
+                                <p className="text-[10px] font-black text-amber-700 dark:text-amber-300 uppercase tracking-wider">Scheduled Offline on this Date</p>
+                                {machine.unavailableReason && (
+                                  <p className="text-[10px] text-gray-500 italic mt-0.5">"{machine.unavailableReason}"</p>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleOpenDateRangeModal(machine)}
+                                className="w-full py-2 text-[10px] font-black uppercase tracking-wider text-blue-600 bg-blue-50 dark:bg-blue-950/30 rounded-xl hover:bg-blue-100"
+                              >
+                                Edit Schedule
+                              </button>
+                            </div>
+                          ) : bookedUserId ? (
+                            <div className="space-y-4 w-full">
+                              <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-800">
+                                {bookedUserId === 'unavailable' ? (
+                                  <div className="flex flex-col items-center py-1">
+                                    <Ban className="w-5 h-5 text-red-500 mb-1" />
+                                    <p className="text-[10px] font-black text-red-600 uppercase tracking-widest">Marked Unavailable</p>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Booked By</p>
+                                    <p className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{bookedUser?.name || 'Unknown User'}</p>
+                                    <p className="text-[9px] font-mono text-gray-500 truncate">{bookedUserId}</p>
+                                  </>
+                                )}
+                              </div>
+                              
+                              <button
+                                onClick={() => bookedUserId === 'unavailable' ? handleToggleSlotMachineAvailability(machineNum, false) : handleClearSlot(machineNum)}
+                                disabled={isClearingSlot}
+                                className={`w-full py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border flex items-center justify-center gap-2 ${
+                                  bookedUserId === 'unavailable' 
+                                    ? 'bg-green-50 text-green-600 border-green-100 hover:bg-green-600 hover:text-white' 
+                                    : 'bg-red-50 text-red-600 border-red-100 hover:bg-red-600 hover:text-white'
+                                }`}
+                              >
+                                {isClearingSlot ? <Loader2 className="w-3 h-3 animate-spin" /> : bookedUserId === 'unavailable' ? <CheckCircle2 className="w-3 h-3" /> : <Trash2 className="w-3 h-3" />}
+                                {bookedUserId === 'unavailable' ? 'Make Available' : 'Clear Slot'}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col gap-3 w-full">
+                              <div className="py-1">
+                                <span className="px-3 py-1 bg-green-100 text-green-700 text-[10px] font-black uppercase tracking-widest rounded-full">
+                                  Available
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => handleToggleSlotMachineAvailability(machineNum, true)}
+                                disabled={isClearingSlot}
+                                className="w-full py-2.5 bg-gray-50 text-gray-600 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-gray-800 hover:text-white transition-all border border-gray-100 dark:border-gray-800 flex items-center justify-center gap-1.5"
+                              >
+                                {isClearingSlot ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />}
+                                Mark Unavailable
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="bg-amber-50 dark:bg-amber-900/10 p-6 rounded-[2.5rem] border border-amber-100 dark:border-amber-900/20 flex items-start gap-4">
+                  <AlertCircle className="w-6 h-6 text-amber-600 shrink-0 mt-1" />
+                  <div>
+                    <h4 className="text-sm font-black text-amber-800 dark:text-amber-200 uppercase tracking-tight mb-1">Important Note</h4>
+                    <p className="text-xs text-amber-700 dark:text-amber-400 font-medium leading-relaxed">
+                      Clearing a slot manually will make the machine available for other users to book immediately. 
+                      This action does NOT automatically cancel or refund the user's booking. 
+                      Please ensure you communicate with the user or handle the booking status separately in the Global Orders tab.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })()}
 
         {activeTab === 'machines' && (
           <motion.div
@@ -2888,15 +3352,32 @@ const SuperAdminDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="mb-6">
+                  <div className="mb-4">
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="text-xl font-black text-gray-800 dark:text-gray-100">Machine #{machine.number}</h3>
                       <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-[9px] font-black uppercase tracking-widest rounded-lg">{machine.type}</span>
                     </div>
                     <p className="text-xs text-gray-500 font-medium">{stores.find(s => s.id === machine.storeId)?.name || 'Unknown Store'}</p>
+                    
+                    {machine.unavailableFrom && (
+                      <div className="mt-2 p-2 bg-red-50 dark:bg-red-950/30 rounded-xl text-left border border-red-100 dark:border-red-900/30">
+                        <p className="text-[9px] font-black text-red-600 uppercase tracking-tight">Offline Schedule</p>
+                        <p className="text-[10px] font-bold text-gray-700 dark:text-gray-300">
+                          {machine.unavailableFrom} {machine.unavailableTo ? `to ${machine.unavailableTo}` : '(Indefinite)'}
+                        </p>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex items-center justify-between pt-6 border-t border-gray-50 dark:border-gray-800">
+                  <button
+                    onClick={() => handleOpenDateRangeModal(machine)}
+                    className="w-full mb-3 py-2 px-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 border border-gray-200 dark:border-gray-700"
+                  >
+                    <CalendarRange className="w-3.5 h-3.5 text-blue-600" />
+                    <span>{machine.unavailableFrom ? 'Edit Date Range Non-Availability' : 'Schedule Inactive Dates'}</span>
+                  </button>
+
+                  <div className="flex items-center justify-between pt-4 border-t border-gray-50 dark:border-gray-800">
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${
                         machine.status === 'idle' ? 'bg-green-500' : 
@@ -3417,6 +3898,113 @@ const SuperAdminDashboard: React.FC = () => {
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* MODAL: SCHEDULE NON-AVAILABILITY DATE RANGE */}
+        {isDateRangeModalOpen && machineToEditDateRange && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setIsDateRangeModalOpen(false);
+                setMachineToEditDateRange(null);
+              }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-[2.5rem] shadow-2xl p-6 sm:p-8 border border-gray-100 dark:border-gray-800"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">
+                    Schedule Non-Availability
+                  </h3>
+                  <p className="text-xs text-blue-600 dark:text-blue-400 font-bold mt-0.5">
+                    Machine #{machineToEditDateRange.number} ({machineToEditDateRange.type})
+                  </p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsDateRangeModalOpen(false);
+                    setMachineToEditDateRange(null);
+                  }}
+                  className="p-2 text-gray-400 hover:text-gray-600 rounded-xl"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-xs text-gray-500 mb-5 leading-relaxed">
+                Set a date range during which this machine will be unavailable. During this window, hourly slots for customers will automatically reduce to prevent overbooking.
+              </p>
+
+              <form onSubmit={handleSaveDateRange} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider block mb-1">
+                    Unavailable From (Start Date) *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={dateRangeForm.unavailableFrom}
+                    onChange={(e) => setDateRangeForm({ ...dateRangeForm, unavailableFrom: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 dark:text-gray-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider block mb-1">
+                    Unavailable To (End Date, Inclusive)
+                  </label>
+                  <input
+                    type="date"
+                    value={dateRangeForm.unavailableTo}
+                    min={dateRangeForm.unavailableFrom}
+                    onChange={(e) => setDateRangeForm({ ...dateRangeForm, unavailableTo: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 dark:text-gray-100"
+                  />
+                  <span className="text-[10px] text-gray-400 mt-1 block">Leave blank if unavailable until further notice</span>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider block mb-1">
+                    Reason / Notes
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Launch restriction, Maintenance, Waiting for parts"
+                    value={dateRangeForm.unavailableReason}
+                    onChange={(e) => setDateRangeForm({ ...dateRangeForm, unavailableReason: e.target.value })}
+                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 dark:text-gray-100"
+                  />
+                </div>
+
+                <div className="pt-4 flex flex-col gap-2">
+                  <button
+                    type="submit"
+                    className="w-full py-3 text-xs font-black uppercase tracking-wider text-white bg-blue-600 rounded-xl hover:bg-blue-700 shadow-md shadow-blue-500/20"
+                  >
+                    Save Date Range Restriction
+                  </button>
+
+                  {machineToEditDateRange.unavailableFrom && (
+                    <button
+                      type="button"
+                      onClick={handleClearDateRange}
+                      className="w-full py-2.5 text-xs font-bold uppercase tracking-wider text-red-600 bg-red-50 hover:bg-red-100 rounded-xl transition-colors"
+                    >
+                      Clear Restriction (Restore Full Availability)
+                    </button>
+                  )}
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

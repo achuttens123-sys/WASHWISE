@@ -12,18 +12,22 @@ import {
   Check,
   Wind,
   Droplets,
-  Truck
+  Truck,
+  QrCode
 } from 'lucide-react';
 import { collection, query, where, onSnapshot, updateDoc, doc, orderBy } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Booking } from '../../types';
 import { format } from 'date-fns';
+import { TagScannerModal } from '../../components/TagScannerModal';
+import { authFetch } from '../../utils/api';
 
 const StoreStaffDashboard: React.FC = () => {
   const { user } = useAuth();
   const [tasks, setTasks] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   useEffect(() => {
     if (!user?.storeId) return;
@@ -52,7 +56,7 @@ const StoreStaffDashboard: React.FC = () => {
     try {
       await updateDoc(doc(db, 'bookings', id), { status });
       if (status === 'completed' || status === 'Washing completed') {
-        fetch('/api/loyalty/trigger-reward', {
+        authFetch('/api/loyalty/trigger-reward', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ bookingId: id })
@@ -104,8 +108,18 @@ const StoreStaffDashboard: React.FC = () => {
             </span>
           </div>
         </div>
-        <div className="p-4 bg-blue-600 rounded-3xl shadow-xl shadow-blue-200 dark:shadow-none">
-          <Package className="w-8 h-8 text-white" />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsScannerOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl text-xs font-black uppercase tracking-wider shadow-md hover:scale-105 active:scale-95 transition-all"
+            title="Scan garment tags using camera or scanner gun"
+          >
+            <QrCode className="w-4 h-4" />
+            <span>Scan Tag / QR</span>
+          </button>
+          <div className="p-4 bg-blue-600 rounded-3xl shadow-xl shadow-blue-200 dark:shadow-none">
+            <Package className="w-8 h-8 text-white" />
+          </div>
         </div>
       </div>
 
@@ -141,6 +155,11 @@ const StoreStaffDashboard: React.FC = () => {
                       <span className="px-3 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] font-black uppercase tracking-widest rounded-full">
                         ID: {task.bookingId || `#${task.id?.slice(-6).toUpperCase()}`}
                       </span>
+                      {task.paymentType === 'pay_at_store' && (
+                        <span className="px-3 py-1 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 text-[10px] font-black uppercase tracking-widest rounded-full border border-amber-200 dark:border-amber-800/50">
+                          💵 Collect Cash: ₹{(task.remainingAmount ?? (task.price - (task.prepaidAmount ?? 39))).toFixed(2)}
+                        </span>
+                      )}
                     </div>
                     <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">{task.userName}</h3>
                     <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">{task.serviceType} • {task.approxLoad}</p>
@@ -255,6 +274,14 @@ const StoreStaffDashboard: React.FC = () => {
           ))
         )}
       </div>
+
+      {/* Tag Scanner Modal */}
+      {isScannerOpen && (
+        <TagScannerModal
+          onClose={() => setIsScannerOpen(false)}
+          storeId={user?.storeId}
+        />
+      )}
     </div>
   );
 };

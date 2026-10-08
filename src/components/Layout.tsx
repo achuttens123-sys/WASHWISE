@@ -308,25 +308,27 @@ const Layout: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8 flex-grow w-full">
+      <main className={`w-full flex-grow flex flex-col ${location.pathname === '/' ? 'p-0 max-w-full overflow-hidden justify-center' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8'}`}>
         <Outlet />
       </main>
 
-      {/* Footer */}
-      <footer className="py-12 border-t border-gray-100 dark:border-gray-800 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-sm text-gray-400 dark:text-gray-500 font-medium order-2 md:order-1">© 2026 WASHWISE. Built for students, by students.</p>
-          <div className="flex items-center gap-6 order-1 md:order-2">
-            <button 
-              onClick={() => setShowTerms(true)}
-              className="text-sm font-bold text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-2"
-            >
-              <FileText className="w-4 h-4" />
-              Terms & Conditions
-            </button>
+      {/* Footer (Hidden on landing and auth pages to ensure single-screen preview without scroll) */}
+      {!isAuthPage && (
+        <footer className="py-8 sm:py-12 border-t border-gray-100 dark:border-gray-800 mt-auto">
+          <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
+            <p className="text-sm text-gray-400 dark:text-gray-500 font-medium order-2 md:order-1">© 2026 WASHWISE. Built for students, by students.</p>
+            <div className="flex items-center gap-6 order-1 md:order-2">
+              <button 
+                onClick={() => setShowTerms(true)}
+                className="text-sm font-bold text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-2"
+              >
+                <FileText className="w-4 h-4" />
+                Terms & Conditions
+              </button>
+            </div>
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
 
       <TermsModal 
         isOpen={showTerms}

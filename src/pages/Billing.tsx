@@ -6,7 +6,8 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { Booking } from '../types';
+import { Booking, checkIsSubscriber } from '../types';
+import { authFetch } from '../utils/api';
 
 const Billing: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -135,7 +136,7 @@ const Billing: React.FC = () => {
     setIsApplyingOffer(true);
     setError('');
     try {
-      const response = await fetch('/api/booking/apply-offer', {
+      const response = await authFetch('/api/booking/apply-offer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -181,20 +182,26 @@ const Billing: React.FC = () => {
 
   const subscriberLoadKg = getLoadKg(bookingInfo.approxLoad);
 
-  // Compute base direct price (fallback if query param was missing)
+  // Compute base direct price cleanly without any delivery charges
+  const rawPassedPrice = bookingInfo.price > 0 ? (
+    bookingInfo.deliveryFee > 0 && bookingInfo.price > bookingInfo.deliveryFee 
+      ? (bookingInfo.price - bookingInfo.deliveryFee) 
+      : bookingInfo.price
+  ) : 0;
+
   const computedBasePrice = isSubscription 
     ? (selectedPackage?.price || 0)
-    : (bookingInfo.price > 0 ? bookingInfo.price : (
-        bookingInfo.serviceType === 'Wash & Fold (Per Piece)'
-          ? (bookingInfo.pieceBreakdown || []).reduce((s: number, i: any) => s + (i.totalPrice || 0), 0)
-          : bookingInfo.serviceType === 'Express Wash'
+    : (bookingInfo.serviceType === 'Wash & Fold (Per Piece)'
+        ? (bookingInfo.pieceBreakdown && bookingInfo.pieceBreakdown.length > 0
+            ? bookingInfo.pieceBreakdown.reduce((s: number, i: any) => s + (i.totalPrice || 0), 0)
+            : (rawPassedPrice > 0 ? rawPassedPrice : 0))
+        : (bookingInfo.serviceType === 'Express Wash'
             ? (subscriberLoadKg * expressActiveRate)
-            : (subscriberLoadKg * normalActiveRate)
-      ));
+            : (subscriberLoadKg * normalActiveRate)));
 
-  const isSubscriber = (user?.userType === 'subscriber' || !!user?.subscriptionPaid);
+  const isSubscriber = checkIsSubscriber(user);
   const directDeliveryFee = (!isSubscription && bookingInfo.pickupDrop && !isSubscriber)
-    ? (bookingInfo.deliveryFee > 0 ? bookingInfo.deliveryFee : (settings?.pricing?.deliveryFee ?? 30))
+    ? (bookingInfo.deliveryFee > 0 ? bookingInfo.deliveryFee : (settings?.pricing?.deliveryFee ?? 5))
     : 0;
 
   const appliedDiscountAmount = appliedLimitedOffer 
@@ -205,11 +212,20 @@ const Billing: React.FC = () => {
     ? appliedLimitedOffer.discountedPrice
     : Math.max(0, (computedBasePrice - autoDiscount) * (1 - discount));
 
+  const isPerPiece = bookingInfo.serviceType === 'Wash & Fold (Per Piece)';
+  const [codPrepaidSource, setCodPrepaidSource] = useState<'card' | 'wallet'>('card');
+
+  // Direct final order total (no convenience fee added; ₹39 or 20% prepayment is deducted from total)
   const finalPrice = isSubscription 
     ? directPriceWithoutDelivery 
     : directPriceWithoutDelivery + directDeliveryFee;
 
-  const isPerPiece = bookingInfo.serviceType === 'Wash & Fold (Per Piece)';
+  // COD Prepayment and remaining balance calculation
+  const codPrepaidAmount = isPerPiece
+    ? Math.round(finalPrice * 0.20 * 100) / 100
+    : Math.min(finalPrice, 39);
+
+  const codRemainingAmount = Math.max(0, Math.round((finalPrice - codPrepaidAmount) * 100) / 100);
   const parsedTotalCreditsParam = searchParams.get('totalCredits');
 
   // Calculate credits needed for this booking
@@ -277,17 +293,45 @@ const Billing: React.FC = () => {
         return;
       }
 
+      // Check start date if exists
+      if (foundPromo.startDate) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (todayStr < foundPromo.startDate) {
+          setPromoError(`This offer starts on ${new Date(foundPromo.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`);
+          setDiscount(0);
+          setPromoApplied(false);
+          return;
+        }
+      }
+
       // Check expiry if exists
       if (foundPromo.expiryDate) {
         const expiry = new Date(foundPromo.expiryDate);
         if (expiry < new Date()) {
           setPromoError('This promo code has expired');
+          setDiscount(0);
+          setPromoApplied(false);
           return;
         }
       }
 
+      // Check redemption limit if exists (e.g. first 100 bookings)
+      if (foundPromo.maxRedemptions && Number(foundPromo.redemptionCount || 0) >= Number(foundPromo.maxRedemptions)) {
+        setPromoError(`Offer fully claimed! This discount was limited to the first ${foundPromo.maxRedemptions} bookings.`);
+        setDiscount(0);
+        setPromoApplied(false);
+        return;
+      }
+
       if (foundPromo.discountType === 'percentage') {
         setDiscount(foundPromo.discountValue / 100);
+      } else if (foundPromo.discountType === 'price_per_kg') {
+        // e.g. ₹1 for 1 Kg
+        const ratePerKg = Number(foundPromo.discountValue || 1);
+        const targetPrice = Math.max(1, subscriberLoadKg * ratePerKg);
+        const discountAmount = Math.max(0, computedBasePrice - targetPrice);
+        const fraction = discountAmount / (computedBasePrice || 1);
+        setDiscount(fraction);
       } else {
         const fraction = foundPromo.discountValue / (computedBasePrice || 1);
         setDiscount(fraction);
@@ -311,7 +355,7 @@ const Billing: React.FC = () => {
     setError('');
 
     try {
-      const response = await fetch('/api/payments/process-booking', {
+      const response = await authFetch('/api/payments/process-booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -365,7 +409,7 @@ const Billing: React.FC = () => {
           return;
         }
 
-        const response = await fetch('/api/payments/process-subscription', {
+        const response = await authFetch('/api/payments/process-subscription', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -415,7 +459,13 @@ const Billing: React.FC = () => {
         return;
       }
 
-      const response = await fetch('/api/payments/process-booking', {
+      if (paymentMethod === 'pay_at_store' && codPrepaidSource === 'wallet' && (user.walletBalance || 0) < codPrepaidAmount) {
+        setError(`Insufficient wallet balance (₹${(user.walletBalance || 0).toFixed(2)}) for the ₹${codPrepaidAmount.toFixed(2)} slot allocation fee. Please choose UPI / Cards or top up wallet.`);
+        setLoading(false);
+        return;
+      }
+
+      const response = await authFetch('/api/payments/process-booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -423,8 +473,10 @@ const Billing: React.FC = () => {
           paymentMethod,
           bookingDetails: {
             ...bookingInfo,
+            codPrepaidSource,
             price: computedBasePrice,
             deliveryFee: directDeliveryFee,
+            codConvenienceFee: 0,
             discountAmount: appliedDiscountAmount,
             appliedPromoCode: promoApplied ? promoCode : undefined,
             appliedOfferId: appliedLimitedOffer?.offerId || undefined
@@ -441,6 +493,10 @@ const Billing: React.FC = () => {
         await updateUser({
           walletBalance: Math.max(0, (user.walletBalance || 0) - finalPrice)
         });
+      } else if (paymentMethod === 'pay_at_store' && codPrepaidSource === 'wallet' && updateUser) {
+        await updateUser({
+          walletBalance: Math.max(0, (user.walletBalance || 0) - codPrepaidAmount)
+        });
       }
 
       if (data.bookingDocId || data.bookingId) {
@@ -456,10 +512,10 @@ const Billing: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-4 sm:py-8">
+    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-3 sm:py-8">
       <button 
         onClick={() => navigate(-1)}
-        className="flex items-center text-gray-500 hover:text-blue-600 mb-6 sm:mb-8 transition-colors text-sm"
+        className="flex items-center text-gray-500 hover:text-blue-600 mb-4 sm:mb-8 transition-colors text-xs sm:text-sm font-medium"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back
@@ -583,7 +639,7 @@ const Billing: React.FC = () => {
                             <span className="font-black text-sm text-gray-900 dark:text-white uppercase tracking-tight">Pay through Credits</span>
                           </div>
                           <p className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                            Deduct {bookingCreditsNeeded} Credits • ₹0.00 to pay
+                            Deduct {bookingCreditsNeeded} Credits (₹{finalPrice.toFixed(2)}) • ₹0.00 to pay
                           </p>
                         </div>
                       </div>
@@ -686,7 +742,7 @@ const Billing: React.FC = () => {
                       {isPerPiece ? `Garment Pieces Selected (${bookingInfo.totalPieces} pcs):` : `Laundry Weight (${bookingInfo.approxLoad}):`}
                     </span>
                     <span className="text-xl font-black text-green-600 dark:text-green-400">
-                      {bookingCreditsNeeded} Credits
+                      {bookingCreditsNeeded} Credits <span className="text-sm font-bold text-gray-500 dark:text-gray-400">(₹{finalPrice.toFixed(2)})</span>
                     </span>
                   </div>
                   <div className="pt-3 border-t border-green-200 dark:border-green-900/50 flex justify-between items-center">
@@ -747,7 +803,7 @@ const Billing: React.FC = () => {
                   ) : (
                     <>
                       <CheckCircle2 className="w-6 h-6" />
-                      <span>Confirm and Deduct {bookingCreditsNeeded} Credits</span>
+                      <span>Confirm and Deduct {bookingCreditsNeeded} Credits (₹{finalPrice.toFixed(2)})</span>
                     </>
                   )}
                 </motion.button>
@@ -789,9 +845,11 @@ const Billing: React.FC = () => {
                     <div className="text-left">
                       <div className="flex items-center gap-2">
                         <p className="font-bold text-gray-800 dark:text-gray-100">Student Wallet</p>
-                        <span className="px-2 py-0.5 bg-blue-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">1-Click Pay</span>
+                        <span className="px-2 py-0.5 bg-emerald-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">₹0 Fee</span>
                       </div>
-                      <p className={`text-xs font-medium ${paymentMethod === 'wallet' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Balance: ₹{(user?.walletBalance || 0).toFixed(2)}</p>
+                      <p className={`text-xs font-medium ${paymentMethod === 'wallet' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                        Balance: ₹{(user?.walletBalance || 0).toFixed(2)} • Zero convenience fee
+                      </p>
                     </div>
                   </div>
                   <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'wallet' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
@@ -817,10 +875,12 @@ const Billing: React.FC = () => {
                     </div>
                     <div className="text-left">
                       <div className="flex items-center gap-2">
-                        <p className="font-bold text-gray-800 dark:text-gray-100">Online Payment</p>
-                        <span className="px-2 py-0.5 bg-green-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">Instant</span>
+                        <p className="font-bold text-gray-800 dark:text-gray-100">Online Payment (UPI & Cards)</p>
+                        <span className="px-2 py-0.5 bg-emerald-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">₹0 Fee</span>
                       </div>
-                      <p className={`text-xs font-medium ${paymentMethod === 'card' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Cards, NetBanking & Instant Verification</p>
+                      <p className={`text-xs font-medium ${paymentMethod === 'card' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                        UPI, Cards & NetBanking • Free (No convenience fee)
+                      </p>
                     </div>
                   </div>
                   <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'card' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
@@ -828,32 +888,99 @@ const Billing: React.FC = () => {
                   </div>
                 </motion.button>
 
-                {/* Pay at Store Option (Non-subscription orders only) */}
+                {/* Cash on Delivery Option with ₹39 or 20% Prepayment (Non-subscription orders only) */}
                 {!isSubscription && (
-                  <motion.button
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 }}
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.99 }}
-                    onClick={() => { setPaymentMethod('pay_at_store'); setError(''); }}
-                    className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback ${
-                      paymentMethod === 'pay_at_store' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
+                  <div
+                    className={`rounded-2xl border-2 transition-all overflow-hidden ${
+                      paymentMethod === 'pay_at_store'
+                        ? 'border-amber-500 bg-amber-50/40 dark:bg-amber-950/20 glow-amber'
+                        : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-amber-200 dark:hover:border-amber-800'
                     }`}
                   >
-                    <div className="flex items-center">
-                      <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'pay_at_store' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                        <Store className={`w-5 h-5 ${paymentMethod === 'pay_at_store' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
+                    <button
+                      type="button"
+                      onClick={() => { setPaymentMethod('pay_at_store'); setError(''); }}
+                      className="w-full p-4 flex items-center justify-between text-left haptic-feedback"
+                    >
+                      <div className="flex items-center">
+                        <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'pay_at_store' ? 'bg-amber-500' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                          <Store className={`w-5 h-5 ${paymentMethod === 'pay_at_store' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
+                        </div>
+                        <div className="text-left">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-gray-800 dark:text-gray-100">Cash on Delivery / Pay at Store</p>
+                            <span className="px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black uppercase rounded-md tracking-wider">
+                              {isPerPiece ? '20% Advance Online' : '₹39 Flat Booking Fee'}
+                            </span>
+                          </div>
+                          <p className={`text-xs font-medium mt-0.5 ${paymentMethod === 'pay_at_store' ? 'text-amber-800 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`}>
+                            {isPerPiece
+                              ? `Pay 20% advance (₹${codPrepaidAmount.toFixed(2)}) online now • Rest 80% (₹${codRemainingAmount.toFixed(2)}) in cash after wash`
+                              : `Prepay ₹${codPrepaidAmount.toFixed(2)} slot fee online now • Rest ₹${codRemainingAmount.toFixed(2)} in cash after wash`}
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-left">
-                        <p className="font-bold text-gray-800 dark:text-gray-100">Pay at Store</p>
-                        <p className={`text-xs font-medium ${paymentMethod === 'pay_at_store' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>Pay when dropping off or collecting garments</p>
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 shrink-0 ${paymentMethod === 'pay_at_store' ? 'border-amber-500' : 'border-gray-200 dark:border-gray-700'}`}>
+                        {paymentMethod === 'pay_at_store' && <div className="w-3 h-3 bg-amber-500 rounded-full" />}
                       </div>
-                    </div>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'pay_at_store' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
-                      {paymentMethod === 'pay_at_store' && <motion.div layoutId="payment-dot" className="w-3 h-3 bg-blue-600 rounded-full" />}
-                    </div>
-                  </motion.button>
+                    </button>
+
+                    {/* Prepayment Method Selection for the Slot Fee */}
+                    {paymentMethod === 'pay_at_store' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="px-4 pb-4 pt-1 border-t border-amber-200/60 dark:border-amber-900/40 space-y-3"
+                      >
+                        <div className="p-3 bg-white dark:bg-gray-900 rounded-xl border border-amber-200/80 dark:border-amber-800/50 space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-bold text-gray-700 dark:text-gray-300">Total Order Value:</span>
+                            <span className="font-extrabold text-gray-900 dark:text-gray-100">₹{finalPrice.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs text-blue-600 dark:text-blue-400 font-bold">
+                            <span>Prepay Slot Allocation Fee (Pay Online Now):</span>
+                            <span>₹{codPrepaidAmount.toFixed(2)} ({isPerPiece ? '20%' : 'Flat ₹39'})</span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs text-amber-700 dark:text-amber-300 font-extrabold pt-1.5 border-t border-amber-100 dark:border-amber-900/40">
+                            <span>Remaining Balance (Cash on Delivery):</span>
+                            <span>₹{codRemainingAmount.toFixed(2)} ({isPerPiece ? '80%' : 'Rest of payment'})</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 block mb-2">
+                            Select Online Method for ₹{codPrepaidAmount.toFixed(2)} Slot Fee:
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setCodPrepaidSource('card')}
+                              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                                codPrepaidSource === 'card'
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-300'
+                              }`}
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              <span>UPI & Cards</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCodPrepaidSource('wallet')}
+                              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                                codPrepaidSource === 'wallet'
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-300'
+                              }`}
+                            >
+                              <Wallet className="w-3.5 h-3.5" />
+                              <span>Wallet (₹{(user?.walletBalance || 0).toFixed(0)})</span>
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -875,9 +1002,9 @@ const Billing: React.FC = () => {
                   {loading ? (
                     <Loader2 className="w-6 h-6 animate-spin" />
                   ) : (
-                    paymentMethod === 'wallet' ? `Pay ₹${finalPrice.toFixed(2)} with Wallet` :
-                    paymentMethod === 'card' ? `Pay ₹${finalPrice.toFixed(2)} Online` :
-                    `Confirm Booking (Pay at Store)`
+                    paymentMethod === 'wallet' ? `Pay ₹${finalPrice.toFixed(2)} with Wallet (₹0 Fee)` :
+                    paymentMethod === 'card' ? `Pay ₹${finalPrice.toFixed(2)} Online (₹0 Fee)` :
+                    `Pay ₹${codPrepaidAmount.toFixed(2)} Online to Confirm Slot (Rest ₹${codRemainingAmount.toFixed(2)} on Delivery)`
                   )}
                 </motion.button>
               </div>
@@ -931,7 +1058,7 @@ const Billing: React.FC = () => {
                               <span>{item.count}x {item.name}</span>
                               {isPayingWithCredits ? (
                                 <span className="font-semibold text-green-600 dark:text-green-400">
-                                  {item.totalCredits || (item.subscriberCredits ? item.subscriberCredits * item.count : (item.unitCredits ? item.unitCredits * item.count : item.count * 3))} Credits
+                                  {item.totalCredits || (item.subscriberCredits ? item.subscriberCredits * item.count : (item.unitCredits ? item.unitCredits * item.count : item.count * 3))} Credits <span className="text-gray-500 dark:text-gray-400">(₹{item.totalPrice})</span>
                                 </span>
                               ) : (
                                 <span className="font-semibold text-gray-800 dark:text-gray-200">₹{item.totalPrice}</span>
@@ -1034,7 +1161,7 @@ const Billing: React.FC = () => {
                           {isPerPiece ? `Wash & Fold (${bookingInfo.totalPieces} pcs)` : `Wash & Fold (${bookingInfo.approxLoad})`}
                         </span>
                         <span className="font-bold text-green-600 dark:text-green-400">
-                          {bookingCreditsNeeded} Credits
+                          {bookingCreditsNeeded} Credits <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">(₹{finalPrice.toFixed(2)})</span>
                         </span>
                       </div>
                       <div className="flex justify-between text-sm">
@@ -1065,6 +1192,19 @@ const Billing: React.FC = () => {
                           <span className="font-medium text-gray-800 dark:text-gray-200">
                             {isSubscriber ? 'FREE (Subscriber Perk)' : (directDeliveryFee > 0 ? `₹${directDeliveryFee.toFixed(2)}` : 'FREE')}
                           </span>
+                        </div>
+                      )}
+
+                      {paymentMethod === 'pay_at_store' && !isSubscription && (
+                        <div className="pt-2 border-t border-amber-200/80 dark:border-amber-900/40 space-y-2">
+                          <div className="flex justify-between text-xs text-blue-600 dark:text-blue-400 font-bold">
+                            <span>Prepay Slot Fee Online Now:</span>
+                            <span>₹{codPrepaidAmount.toFixed(2)} ({isPerPiece ? '20%' : 'Flat ₹39'})</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-amber-700 dark:text-amber-400 font-bold">
+                            <span>Remaining Balance (Cash on Delivery):</span>
+                            <span>₹{codRemainingAmount.toFixed(2)} ({isPerPiece ? '80%' : 'Rest of wash'})</span>
+                          </div>
                         </div>
                       )}
 
@@ -1099,14 +1239,25 @@ const Billing: React.FC = () => {
                   )}
                   
                   <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
-                    <span className="text-gray-800 dark:text-gray-100">Total</span>
+                    <span className="text-gray-800 dark:text-gray-100">Total Order</span>
                     <span className="text-blue-600 dark:text-blue-400 font-black text-2xl">
                       {isPayingWithCredits ? '₹0.00' : `₹${finalPrice.toFixed(2)}`}
                     </span>
                   </div>
+
+                  {paymentMethod === 'pay_at_store' && !isPayingWithCredits && !isSubscription && (
+                    <div className="mt-2 p-2.5 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-900/40 text-right">
+                      <p className="text-[11px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-tight">
+                        Pay Now Online: ₹{codPrepaidAmount.toFixed(2)}
+                      </p>
+                      <p className="text-[11px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-tight mt-0.5">
+                        Pay on Delivery: ₹{codRemainingAmount.toFixed(2)}
+                      </p>
+                    </div>
+                  )}
                   {isPayingWithCredits ? (
                     <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest text-right mt-1">
-                      🧺 {bookingCreditsNeeded} Credits Deducted (Free Wash)
+                      🧺 {bookingCreditsNeeded} Credits Deducted (₹{finalPrice.toFixed(2)} value • Free Wash)
                     </p>
                   ) : (
                     <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest text-right mt-1">

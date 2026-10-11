@@ -90,12 +90,17 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+          onClick={handleResetAndClose}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-pointer"
+          aria-label="Close modal overlay"
+        />
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
-          className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-3xl p-6 sm:p-8 shadow-2xl border border-gray-100 dark:border-gray-800 relative overflow-hidden"
+          className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-3xl p-6 sm:p-8 shadow-2xl border border-gray-100 dark:border-gray-800 relative overflow-hidden z-10"
         >
           {/* Top Close Button */}
           <button

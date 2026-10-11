@@ -54,6 +54,18 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     setDailyTip(LAUNDRY_TIPS[Math.floor(Math.random() * LAUNDRY_TIPS.length)]);
+    
+    // Prefetch booking flow chunks on idle for instant 0ms slot selection
+    const prefetchBookingFlow = () => {
+      import('./BookingDetails').catch(() => {});
+      import('./Billing').catch(() => {});
+    };
+
+    if ('requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(prefetchBookingFlow);
+    } else {
+      setTimeout(prefetchBookingFlow, 1000);
+    }
   }, []);
 
   const getGreeting = () => {
@@ -175,6 +187,13 @@ const Dashboard: React.FC = () => {
     return machines.filter(m => isMachineAvailableOnDate(m, selectedDateStr));
   }, [machines, selectedDateStr]);
 
+  const activeTimeSlots = useMemo(() => {
+    if (settings?.customSlots && Array.isArray(settings.customSlots) && settings.customSlots.length > 0) {
+      return settings.customSlots;
+    }
+    return TIME_SLOTS;
+  }, [settings?.customSlots]);
+
   const totalSlotsCapacity = Math.max(0, activeMachinesForDate.length);
 
   const getMachineAvailability = (timeSlot: string) => {
@@ -196,21 +215,28 @@ const Dashboard: React.FC = () => {
   const isSlotInPast = (slot: string) => {
     if (!isSameDay(selectedDate, new Date())) return false;
     
-    const [timeRange, period] = slot.split(' ');
-    const [, endTime] = timeRange.split('-'); // Use end time instead of start time
-    let [hours, minutes] = endTime.split(':').map(Number);
-    
-    // Logic for the specific format in TIME_SLOTS: "HH:mm-HH:mm AM/PM"
-    if (period === 'PM') {
-      if (hours < 12) hours += 12; // 12 PM stays 12, 1-11 PM becomes 13-23
-    } else if (period === 'AM') {
-      if (hours === 12) hours = 0;
+    try {
+      const parts = slot.trim().split(' ');
+      const timeRange = parts[0] || '';
+      const period = (parts[1] || '').toUpperCase();
+      const endTime = timeRange.split('-')[1] || timeRange.split('-')[0] || '';
+      let [hours, minutes] = endTime.split(':').map(Number);
+      if (isNaN(hours)) hours = 0;
+      if (isNaN(minutes)) minutes = 0;
+      
+      if (period === 'PM') {
+        if (hours < 12) hours += 12; // 12 PM stays 12, 1-11 PM becomes 13-23
+      } else if (period === 'AM') {
+        if (hours === 12) hours = 0;
+      }
+      
+      const slotEndTime = new Date();
+      slotEndTime.setHours(hours, minutes, 0, 0);
+      
+      return slotEndTime <= new Date();
+    } catch (e) {
+      return false;
     }
-    
-    const slotEndTime = new Date();
-    slotEndTime.setHours(hours, minutes, 0, 0);
-    
-    return slotEndTime <= new Date();
   };
 
   const handleSlotSelect = (timeSlot: string) => {
@@ -232,7 +258,7 @@ const Dashboard: React.FC = () => {
   const maintenanceMessage = stores.find(s => s.isPaused)?.maintenanceMessage || 'Store is temporarily closed for maintenance.';
 
   return (
-    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-2 sm:py-12">
+    <div className="max-w-4xl mx-auto px-0 sm:px-4 py-1.5 sm:py-12">
       {/* GLOBAL OFFER BANNER */}
       <div className="mb-2 sm:mb-8">
         <OfferBanner />
@@ -305,8 +331,9 @@ const Dashboard: React.FC = () => {
             {/* Live Active Orders Pill */}
             {activeBookings.length > 0 ? (
               <button
-                onClick={() => document.getElementById('active-orders-section')?.scrollIntoView({ behavior: 'smooth' })}
+                onClick={() => navigate('/orders')}
                 className="px-2.5 py-1 bg-primary-electric/10 text-primary-electric dark:text-primary-electric-light text-[10px] font-black uppercase rounded-lg border border-primary-electric/25 flex items-center gap-1.5 shadow-xs"
+                title="View Active Orders"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-primary-electric animate-pulse" />
                 <span>{activeBookings.length} Active</span>
@@ -318,9 +345,9 @@ const Dashboard: React.FC = () => {
             )}
             
             <button
-              onClick={() => navigate('/profile')}
-              className="p-1.5 bg-gray-50 dark:bg-surface-low hover:bg-gray-100 dark:hover:bg-surface-highest rounded-lg text-gray-400 transition-colors"
-              title="My Bookings"
+              onClick={() => navigate('/orders')}
+              className="p-1.5 bg-gray-50 dark:bg-surface-low hover:bg-gray-100 dark:hover:bg-surface-highest rounded-lg text-gray-400 hover:text-primary-electric transition-colors"
+              title="My Orders"
             >
               <Clock className="w-4 h-4" />
             </button>
@@ -332,15 +359,19 @@ const Dashboard: React.FC = () => {
           {(user?.userType === 'subscriber' || !!user?.subscriptionPaid) ? (
             <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-[9px] font-black uppercase rounded-md border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span>🧺 {user.laundryCredits ?? (user.kilosLeft ? user.kilosLeft * 10 : 120)} Credits</span>
+              <span>{user.laundryCredits ?? (user.kilosLeft ? user.kilosLeft * 10 : 120)} Credits</span>
             </span>
           ) : (user?.laundryCredits && user.laundryCredits > 0) ? (
             <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-[9px] font-black uppercase rounded-md border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
-              <span>🧺 {user.laundryCredits} Credits</span>
+              <span>{user.laundryCredits} Credits</span>
             </span>
-          ) : null}
+          ) : (
+            <span className="px-2 py-0.5 bg-gray-50 dark:bg-surface-low text-gray-500 dark:text-gray-400 text-[9px] font-black uppercase rounded-md border border-gray-200/50 dark:border-surface-highest/20 flex items-center gap-1">
+              <span>Pay-Per-Wash Mode</span>
+            </span>
+          )}
 
-          {(user?.walletBalance !== undefined && user?.walletBalance > 0) && (
+          {(user?.walletBalance !== undefined && user?.walletBalance > 0) ? (
             <span 
               onClick={() => navigate('/profile')}
               className="px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-[9px] font-black uppercase rounded-md border border-blue-200 dark:border-blue-800 flex items-center gap-1 cursor-pointer"
@@ -348,7 +379,7 @@ const Dashboard: React.FC = () => {
               <Wallet className="w-2.5 h-2.5 text-blue-600 dark:text-blue-400" />
               <span>₹{Number(user.walletBalance).toFixed(2)} Wallet</span>
             </span>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -382,7 +413,7 @@ const Dashboard: React.FC = () => {
                       <div className="inline-block h-1 w-1 bg-gray-300 dark:bg-gray-600 rounded-full shrink-0" />
                       <span className="px-2.5 py-0.5 bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 text-[10px] font-black uppercase rounded-full tracking-wider border border-green-200 dark:border-green-800 inline-flex items-center gap-1.5 shadow-sm shrink-0 whitespace-nowrap">
                         <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
-                        <span>🧺 {user.laundryCredits ?? (user.kilosLeft ? user.kilosLeft * 10 : 120)} / {user.totalMonthlyCredits ?? (user.package === 'super_premium' ? 320 : user.package === 'premium' ? 200 : user.package === 'standard' ? 160 : 120)} CREDITS</span>
+                        <span>{user.laundryCredits ?? (user.kilosLeft ? user.kilosLeft * 10 : 120)} / {user.totalMonthlyCredits ?? (user.package === 'super_premium' ? 320 : user.package === 'premium' ? 200 : user.package === 'standard' ? 160 : 120)} CREDITS</span>
                       </span>
                     </>
                   ) : (user?.laundryCredits && user.laundryCredits > 0) ? (
@@ -390,7 +421,7 @@ const Dashboard: React.FC = () => {
                       <div className="inline-block h-1 w-1 bg-gray-300 dark:bg-gray-600 rounded-full shrink-0" />
                       <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-[10px] font-black uppercase rounded-full tracking-wider border border-emerald-200 dark:border-emerald-800 inline-flex items-center gap-1.5 shadow-sm shrink-0 whitespace-nowrap">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                        <span>🧺 {user.laundryCredits} LAUNDRY CREDITS</span>
+                        <span>{user.laundryCredits} LAUNDRY CREDITS</span>
                       </span>
                     </>
                   ) : null}
@@ -448,16 +479,20 @@ const Dashboard: React.FC = () => {
           
           <div className="py-3 relative z-10">
             {activeBookings.length > 0 ? (
-              <div className="space-y-1">
+              <div 
+                className="space-y-1 cursor-pointer group/status"
+                onClick={() => navigate('/orders')}
+                title="View Active Orders"
+              >
                 <motion.span 
                   key={activeBookings.length}
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  className="block text-4xl xl:text-5xl font-display font-black text-primary-electric dark:text-primary-electric-light leading-none tracking-tighter italic"
+                  className="block text-4xl xl:text-5xl font-display font-black text-primary-electric dark:text-primary-electric-light leading-none tracking-tighter italic group-hover/status:scale-105 transition-transform"
                 >
                   {activeBookings.length}
                 </motion.span>
-                <span className="block text-[10px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-[0.2em]">Active Orders</span>
+                <span className="block text-[10px] font-black text-gray-500 dark:text-gray-400 uppercase tracking-[0.2em] group-hover/status:text-primary-electric transition-colors">Active Orders →</span>
               </div>
             ) : (
               <div className="space-y-0.5">
@@ -515,22 +550,25 @@ const Dashboard: React.FC = () => {
                 {format(selectedDate, 'EEEE, d MMMM yyyy')}
               </span>
             </div>
-            <div className="flex gap-2 sm:gap-4 overflow-x-auto pb-2 scrollbar-hide snap-x">
+            <div className="flex gap-2 sm:gap-3 overflow-x-auto pb-2 scrollbar-hide snap-x touch-pan-x -mx-1 px-1">
               {[...Array(7)].map((_, i) => {
                 const date = addDays(new Date(), i);
                 const isSelected = isSameDay(date, selectedDate);
+                const isToday = i === 0;
                 return (
                   <button
                     key={i}
                     onClick={() => setSelectedDate(date)}
-                    className={`flex-shrink-0 w-14 sm:w-20 py-2.5 sm:py-4 rounded-xl sm:rounded-2xl transition-all flex flex-col items-center justify-center snap-center haptic-feedback ${
+                    className={`flex-shrink-0 min-w-[3.75rem] w-15 sm:w-20 py-2.5 sm:py-3.5 rounded-xl sm:rounded-2xl transition-all flex flex-col items-center justify-center snap-center haptic-feedback touch-manipulation select-none ${
                       isSelected 
-                        ? 'bg-primary-electric text-white shadow-md sm:shadow-xl shadow-primary-electric/25 scale-[1.02]' 
+                        ? 'bg-primary-electric text-white shadow-md sm:shadow-xl shadow-primary-electric/25 scale-[1.03] ring-2 ring-primary-electric ring-offset-2 dark:ring-offset-surface-low' 
                         : 'bg-white dark:bg-surface-container text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-surface-highest border border-gray-100 dark:border-surface-highest/10 hover:border-primary-electric/30'
                     }`}
                   >
-                    <span className="text-[8px] sm:text-[10px] uppercase font-black tracking-wider opacity-70 mb-0.5 sm:mb-1">{format(date, 'EEE')}</span>
-                    <span className="text-base sm:text-2xl font-display font-black leading-none">{format(date, 'd')}</span>
+                    <span className="text-[8.5px] sm:text-[10px] uppercase font-black tracking-wider opacity-75 mb-0.5 sm:mb-1">
+                      {isToday ? 'Today' : format(date, 'EEE')}
+                    </span>
+                    <span className="text-lg sm:text-2xl font-display font-black leading-none">{format(date, 'd')}</span>
                   </button>
                 );
               })}
@@ -538,241 +576,6 @@ const Dashboard: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* ACTIVE WASH STATUS (MOBILE COMPACT CAROUSEL + DESKTOP CARDS) */}
-      {activeBookings.length > 0 && (
-        <div id="active-orders-section" className="mb-3 sm:mb-8">
-          <div className="flex items-center justify-between mb-2 px-0.5">
-            <h2 className="text-[10px] sm:text-xs font-black text-gray-500 dark:text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Active Orders ({activeBookings.length})
-            </h2>
-            {activeBookings.length > 1 && (
-              <span className="text-[9px] font-bold text-gray-400 sm:hidden">
-                Swipe cards ➔
-              </span>
-            )}
-          </div>
-
-          {/* Mobile Horizontal Snap-Carousel */}
-          <div className="sm:hidden flex gap-2.5 overflow-x-auto snap-x scrollbar-hide pb-1 pt-0.5 -mx-3 px-3">
-            {activeBookings.map((booking) => {
-              const steps = booking.pickupDrop ? [
-                { label: 'Confirmed', statuses: ['paid', 'pending'] },
-                { label: 'Pickup Ready', statuses: ['Ready for pick up'] },
-                { label: 'In Wash', statuses: ['In Wash', 'In Dryer'] },
-                { label: 'Washed', statuses: ['Washing completed', 'Ready to deliver'] },
-                { label: 'Out for Delivery', statuses: ['Out for delivery', 'completed'] }
-              ] : [
-                { label: 'Confirmed', statuses: ['paid', 'pending'] },
-                { label: 'In Wash', statuses: ['In Wash', 'In Dryer'] },
-                { label: 'Washed', statuses: ['Washing completed'] },
-                { label: 'Pickup Ready', statuses: ['Ready to collect', 'completed'] }
-              ];
-
-              let currentStepIndex = 0;
-              for (let i = steps.length - 1; i >= 0; i--) {
-                if (steps[i].statuses.includes(booking.status)) {
-                  currentStepIndex = i;
-                  break;
-                }
-              }
-
-              return (
-                <div
-                  key={booking.id}
-                  className="snap-center w-[85vw] max-w-[320px] bg-white dark:bg-surface-container p-3 rounded-2xl border border-gray-100 dark:border-surface-highest/10 shadow-sm shrink-0 flex flex-col justify-between"
-                >
-                  <div>
-                    {/* Top Row: Service + Status */}
-                    <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <div className={`p-1 shrink-0 bg-primary-electric rounded-md ${['In Wash', 'In Dryer'].includes(booking.status) ? 'animate-pulse' : ''}`}>
-                          <Loader2 className={`w-3 h-3 text-white ${['In Wash', 'In Dryer'].includes(booking.status) ? 'animate-spin' : ''}`} />
-                        </div>
-                        <span className="text-[11px] font-black text-primary-electric dark:text-primary-electric-light uppercase tracking-tight truncate">
-                          {booking.serviceType}
-                        </span>
-                        <span className="text-[9px] font-black text-gray-500 bg-gray-100 dark:bg-surface-low px-1.5 py-0.5 rounded uppercase">
-                          M#{booking.machineNumber}
-                        </span>
-                      </div>
-                      <span className="text-[9px] font-mono font-bold bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded shrink-0">
-                        ID: {booking.bookingId || `#${booking.id?.slice(-4).toUpperCase()}`}
-                      </span>
-                    </div>
-
-                    {/* Schedule info */}
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold">
-                      📅 {booking.date} • {booking.timeSlot}
-                    </p>
-                  </div>
-
-                  {/* Compact Mobile Progress Bar */}
-                  <div className="mt-2.5 pt-2 border-t border-gray-50 dark:border-surface-highest/10">
-                    <div className="flex gap-1 h-1.5 w-full">
-                      {steps.map((_, idx) => (
-                        <div 
-                          key={idx} 
-                          className={`flex-1 rounded-full ${
-                            idx <= currentStepIndex 
-                              ? 'bg-primary-electric' 
-                              : 'bg-gray-100 dark:bg-surface-low'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                    <div className="flex justify-between items-center text-[9px] font-bold text-gray-400 mt-1">
-                      <span>Step {currentStepIndex + 1}/{steps.length}: <strong className="text-primary-electric dark:text-primary-electric-light uppercase">{steps[currentStepIndex].label}</strong></span>
-                      <span className="uppercase text-[8px] tracking-wider text-emerald-600 font-black">Live</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Desktop Active Bookings Grid */}
-          <div className="hidden sm:grid grid-cols-1 gap-6">
-            {activeBookings.map((booking, index) => {
-              const steps = booking.pickupDrop ? [
-                { label: 'Order Confirmed', statuses: ['paid', 'pending'] },
-                { label: 'Ready for Pickup', statuses: ['Ready for pick up'] },
-                { label: 'In wash', statuses: ['In Wash', 'In Dryer'] },
-                { label: 'Completed', statuses: ['Washing completed', 'Ready to deliver'] },
-                { label: 'Out for Delivery', statuses: ['Out for delivery', 'completed'] }
-              ] : [
-                { label: 'Confirmed', statuses: ['paid', 'pending'] },
-                { label: 'In wash', statuses: ['In Wash', 'In Dryer'] },
-                { label: 'Completed', statuses: ['Washing completed'] },
-                { label: 'Ready for Pickup', statuses: ['Ready to collect', 'completed'] }
-              ];
-
-              let currentStepIndex = -1;
-              for (let i = steps.length - 1; i >= 0; i--) {
-                if (steps[i].statuses.includes(booking.status)) {
-                  currentStepIndex = i;
-                  break;
-                }
-              }
-              if (currentStepIndex === -1) currentStepIndex = 0;
-              const isEffectivelyComplete = booking.status === 'completed';
-              const displayStepIndex = isEffectivelyComplete ? steps.length : currentStepIndex;
-
-              const getStatusLabel = (status: string) => {
-                if (booking.pickupDrop) {
-                  const labels: Record<string, string> = {
-                    'paid': 'Order Confirmed',
-                    'pending': 'Order Confirmed',
-                    'Ready for pick up': 'Ready for Pickup',
-                    'In Wash': 'In wash',
-                    'In Dryer': 'In wash',
-                    'Washing completed': 'Completed',
-                    'Ready to deliver': 'Completed',
-                    'Out for delivery': 'Out for Delivery',
-                    'completed': 'Out for Delivery',
-                    'cancelled': 'Cancelled'
-                  };
-                  return (labels[status] || status).toUpperCase();
-                } else {
-                  const labels: Record<string, string> = {
-                    'paid': 'Confirmed',
-                    'pending': 'Confirmed',
-                    'In Wash': 'In wash',
-                    'In Dryer': 'In wash',
-                    'Washing completed': 'Completed',
-                    'Ready to collect': 'Ready for customer pickup',
-                    'completed': 'Ready for customer pickup',
-                    'cancelled': 'Cancelled'
-                  };
-                  return (labels[status] || status).toUpperCase();
-                }
-              };
-
-              return (
-                <motion.div
-                  key={booking.id}
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className="bg-white dark:bg-surface-container p-6 rounded-2xl shadow-lg shadow-black/5 dark:shadow-none transition-all relative overflow-hidden group border border-gray-100 dark:border-surface-highest/10"
-                >
-                  <div className="flex items-center justify-between gap-6 mb-6">
-                    <div className="flex items-center gap-4 min-w-0">
-                      <div className={`p-3.5 shrink-0 bg-primary-electric rounded-xl shadow-md shadow-primary-electric/20 ${['In Wash', 'In Dryer'].includes(booking.status) ? 'animate-pulse' : ''}`}>
-                        <Loader2 className={`w-6 h-6 text-white ${['In Wash', 'In Dryer'].includes(booking.status) ? 'animate-spin' : ''}`} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <p className="text-[10px] font-black text-primary-electric dark:text-primary-electric-light uppercase tracking-widest">{booking.serviceType}</p>
-                          <span className="text-[10px] font-black text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-surface-low px-2 py-0.5 rounded uppercase tracking-wider">M#{booking.machineNumber}</span>
-                          <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded uppercase tracking-wider">
-                            ID: {booking.bookingId || `#${booking.id?.slice(-6).toUpperCase()}`}
-                          </span>
-                        </div>
-                        <h3 className="text-xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase leading-tight">{getStatusLabel(booking.status)}</h3>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-0.5">Scheduled For</p>
-                      <p className="text-sm font-black text-gray-700 dark:text-gray-300 uppercase tracking-tight">{booking.date} • {booking.timeSlot}</p>
-                    </div>
-                  </div>
-
-                  <div className="relative overflow-hidden pt-1 pb-1">
-                    <div className="w-full relative min-h-[60px] flex flex-col justify-center">
-                      <div className="flex justify-between items-start relative z-10 w-full">
-                        {steps.map((step, idx) => {
-                          const isCompleted = idx < displayStepIndex;
-                          const isCurrent = idx === currentStepIndex && !isEffectivelyComplete;
-
-                          return (
-                            <div 
-                              key={idx} 
-                              className="flex flex-col items-center flex-1 text-center group min-w-0 relative"
-                            >
-                              {idx < steps.length - 1 && (
-                                <div className="absolute top-4 left-1/2 w-full h-0.5 bg-gray-100 dark:bg-surface-low -z-10" />
-                              )}
-                              {idx < steps.length - 1 && (
-                                <div 
-                                  className={`absolute top-4 left-1/2 h-0.5 bg-primary-electric -z-10 ${
-                                    (idx < currentStepIndex || isEffectivelyComplete) ? 'w-full' : 'w-0'
-                                  }`}
-                                />
-                              )}
-                              <div 
-                                className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center relative z-10 ${
-                                  isCompleted ? 'bg-primary-electric text-white' : 
-                                  isCurrent ? 'bg-white dark:bg-surface-container border-2 border-primary-electric text-primary-electric shadow-sm' : 
-                                  'bg-white dark:bg-surface-container border-2 border-gray-100 dark:border-surface-low text-gray-300 dark:text-gray-700'
-                                }`}
-                              >
-                                {isCompleted ? (
-                                  <CheckCircle2 className="w-4 h-4" />
-                                ) : (
-                                  <div className={`w-2 h-2 rounded-full ${isCurrent ? 'bg-primary-electric animate-pulse' : 'bg-gray-200 dark:bg-gray-700'}`} />
-                                )}
-                              </div>
-                              <p className={`mt-2 text-[9px] font-black uppercase tracking-tighter text-center w-full px-0.5 truncate ${
-                                isCurrent ? 'text-primary-electric dark:text-primary-electric-light' : 
-                                isCompleted ? 'text-gray-500 dark:text-gray-400' : 
-                                'text-gray-300 dark:text-gray-700'
-                              }`}>
-                                {step.label}
-                              </p>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* LOYALTY REWARDS - COMPACT MOBILE STRIP + DESKTOP CARD */}
       {(() => {
@@ -797,7 +600,7 @@ const Dashboard: React.FC = () => {
                     Loyalty Rewards
                   </span>
                   <span className="text-[9px] text-gray-400 font-bold block truncate">
-                    {freeWashesReady > 0 ? `🎉 ${freeWashesReady} Free Wash Ready!` : `${creditsToNext} Cr to Free Wash`}
+                    {freeWashesReady > 0 ? `${freeWashesReady} Free Wash Ready!` : `${creditsToNext} Cr to Free Wash`}
                   </span>
                 </div>
               </div>
@@ -834,7 +637,7 @@ const Dashboard: React.FC = () => {
                     <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium">
                       {freeWashesReady > 0 ? (
                         <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                          🎉 {freeWashesReady} Free 4kg Wash{freeWashesReady > 1 ? 'es' : ''} Ready ({freeWashesReady * 40} Credits)
+                          {freeWashesReady} Free 4kg Wash{freeWashesReady > 1 ? 'es' : ''} Ready ({freeWashesReady * 40} Credits)
                         </span>
                       ) : (
                         <span>{creditsToNext} credits to unlock a Free 4kg Wash</span>
@@ -891,7 +694,7 @@ const Dashboard: React.FC = () => {
         </div>
         {isSubscriber && (
           <div className="self-start sm:self-auto flex items-center gap-1 px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 rounded-lg text-[9px] sm:text-[10px] font-black text-emerald-700 dark:text-emerald-300">
-            <span>🧺 Balance: {userCredits} Credits</span>
+            <span>Balance: {userCredits} Credits</span>
           </div>
         )}
       </div>
@@ -904,7 +707,7 @@ const Dashboard: React.FC = () => {
             <p className="text-xs sm:text-sm text-gray-400 dark:text-gray-500 font-black uppercase tracking-wider">Loading slots...</p>
           </div>
         ) : (
-          TIME_SLOTS.map((slot, index) => {
+          activeTimeSlots.map((slot, index) => {
             const availability = getMachineAvailability(slot);
             const isFull = availability === 0;
             const isPast = isSlotInPast(slot);
@@ -921,7 +724,7 @@ const Dashboard: React.FC = () => {
                 whileTap={!isUnavailable ? { scale: 0.98 } : {}}
                 onClick={() => handleSlotSelect(slot)}
                 disabled={isUnavailable}
-                className={`p-2.5 sm:p-4 rounded-xl sm:rounded-2xl text-left transition-all flex flex-col justify-between min-h-[5.8rem] sm:min-h-[9.8rem] relative overflow-hidden group haptic-feedback ${
+                className={`p-2 sm:p-3.5 rounded-xl sm:rounded-2xl text-left transition-all flex flex-col justify-between min-h-[4.9rem] sm:min-h-[8.5rem] relative overflow-hidden group haptic-feedback ${
                   isUnavailable 
                     ? 'bg-gray-50/50 dark:bg-surface-low/50 opacity-40 cursor-not-allowed grayscale' 
                     : 'bg-white dark:bg-surface-container shadow-xs sm:shadow-md hover:shadow-lg hover:border-primary-electric/30 border border-gray-100 dark:border-surface-highest/10'
@@ -963,37 +766,39 @@ const Dashboard: React.FC = () => {
                   {/* Amount to be paid along with credits in brackets for subscriber accounts */}
                   <div className="mt-1.5 sm:mt-2.5 pt-1.5 border-t border-gray-100 dark:border-surface-highest/20 flex items-center justify-between gap-1 w-full min-w-0">
                     {isSubscriber ? (
-                      <div className="flex items-center gap-1 min-w-0 truncate">
+                      <div className="flex items-center justify-between w-full min-w-0">
                         {hasCredits ? (
                           <>
-                            <span className="line-through text-gray-400 dark:text-gray-500 text-[8px] sm:text-[10px]">
-                              ₹{standardWashPrice}
-                            </span>
-                            <span className="text-[10px] sm:text-xs font-black text-emerald-600 dark:text-emerald-400">
-                              ₹0
-                            </span>
-                            <span className="text-[8.5px] sm:text-[10.5px] font-bold text-primary-electric dark:text-primary-electric-light truncate">
-                              ({standardWashCredits} Credits • ₹{standardWashPrice})
+                            <div className="flex items-baseline gap-1 shrink-0">
+                              <span className="text-[10.5px] sm:text-xs font-black text-emerald-600 dark:text-emerald-400">
+                                ₹0
+                              </span>
+                              <span className="line-through text-gray-400 dark:text-gray-500 text-[8px] sm:text-[9.5px]">
+                                ₹{standardWashPrice}
+                              </span>
+                            </div>
+                            <span className="text-[7.5px] sm:text-[9.5px] font-bold text-primary-electric dark:text-primary-electric-light px-1.5 py-0.5 bg-primary-electric/5 rounded shrink-0">
+                              {standardWashCredits} Cr
                             </span>
                           </>
                         ) : (
                           <>
-                            <span className="text-[10px] sm:text-xs font-black text-gray-800 dark:text-gray-200">
+                            <span className="text-[10.5px] sm:text-xs font-black text-gray-800 dark:text-gray-200 shrink-0">
                               ₹{standardWashPrice}
                             </span>
-                            <span className="text-[8px] sm:text-[10px] font-bold text-amber-600 dark:text-amber-400 truncate">
-                              ({standardWashCredits} Credits • ₹{standardWashPrice})
+                            <span className="text-[7.5px] sm:text-[9.5px] font-bold text-amber-600 dark:text-amber-400 px-1.5 py-0.5 bg-amber-500/10 rounded shrink-0">
+                              {standardWashCredits} Cr
                             </span>
                           </>
                         )}
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1 min-w-0 truncate">
-                        <span className="text-[10px] sm:text-xs font-black text-gray-800 dark:text-gray-200">
+                      <div className="flex items-center justify-between w-full min-w-0">
+                        <span className="text-[10.5px] sm:text-xs font-black text-gray-800 dark:text-gray-200 shrink-0">
                           ₹{standardWashPrice}
                         </span>
-                        <span className="text-[7.5px] sm:text-[9px] font-bold text-primary-electric/80 dark:text-primary-electric-light/80 truncate">
-                          • ₹39 COD Fee
+                        <span className="text-[7.5px] sm:text-[9px] font-bold text-primary-electric dark:text-primary-electric-light px-1.5 py-0.5 bg-primary-electric/5 rounded shrink-0 uppercase tracking-tight">
+                          COD ₹39
                         </span>
                       </div>
                     )}
@@ -1051,22 +856,22 @@ const Dashboard: React.FC = () => {
       </div>
 
       {/* Refer & Earn Feature Banner */}
-      <div className="mt-6 sm:mt-10">
+      <div className="mt-3.5 sm:mt-10">
         <ReferralCard />
       </div>
 
       {/* Need Help / Terms Footer */}
-      <div className="mt-8 sm:mt-14 pt-6 border-t border-gray-100 dark:border-surface-low">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-gray-50 dark:bg-surface-low p-4 sm:p-8 rounded-2xl">
+      <div className="mt-4 sm:mt-14 pt-3 sm:pt-6 border-t border-gray-100 dark:border-surface-low">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 bg-gray-50 dark:bg-surface-low p-3 sm:p-8 rounded-xl sm:rounded-2xl">
           <div>
-            <h3 className="text-base sm:text-xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase mb-1">Need help?</h3>
-            <p className="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wider">Review our service policies and guidelines for care.</p>
+            <h3 className="text-sm sm:text-xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase mb-0.5 sm:mb-1">Need help?</h3>
+            <p className="text-[10px] sm:text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wider">Review our service policies and guidelines for care.</p>
           </div>
           <button
             onClick={() => setShowTerms(true)}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-white dark:bg-surface-highest text-gray-700 dark:text-high-contrast text-xs font-black uppercase tracking-wider rounded-xl shadow-xs"
+            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 sm:px-6 py-2 sm:py-3 bg-white dark:bg-surface-highest text-gray-700 dark:text-high-contrast text-[11px] sm:text-xs font-black uppercase tracking-wider rounded-xl shadow-xs"
           >
-            <FileText className="w-4 h-4 text-gray-400" />
+            <FileText className="w-3.5 h-3.5 text-gray-400" />
             Terms & Conditions
           </button>
         </div>

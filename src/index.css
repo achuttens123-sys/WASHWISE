@@ -44,9 +44,22 @@
 
 @variant dark (&:where(.dark, .dark *));
 
+/* Mobile UX & Touch Optimization */
+html {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  scroll-behavior: smooth;
+}
+
+body {
+  overscroll-behavior-y: none;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 .scrollbar-hide::-webkit-scrollbar {

@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import compression from "compression";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -9,17 +10,20 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { initializeApp as initializeClientApp } from "firebase/app";
 import { 
   getFirestore as getClientFirestore, 
+  initializeFirestore as initializeClientFirestore,
   collection, 
   query, 
   where, 
+  orderBy, 
+  limit, 
   getDocs, 
   doc, 
   getDoc, 
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  addDoc,
-  onSnapshot,
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  addDoc, 
+  onSnapshot, 
   runTransaction 
 } from "firebase/firestore";
 import { getAuth as getClientAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
@@ -40,7 +44,10 @@ process.on("uncaughtException", (err) => {
 });
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+
+// Enable 'trust proxy' so Express & express-rate-limit correctly identify client IPs behind reverse proxies / Google Cloud Run
+app.set("trust proxy", 1);
 
 app.use(compression());
 app.use(express.json());
@@ -51,6 +58,7 @@ const apiLimiter = rateLimit({
   max: 300, // Limit each IP to 300 requests per 15 minutes
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, forwardedHeader: false },
   message: { error: "Too many requests. Please try again later." }
 });
 
@@ -59,6 +67,7 @@ const sensitiveApiLimiter = rateLimit({
   max: 30, // Limit sensitive operations (payments, booking, password reset) to 30 per 15 minutes
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { xForwardedForHeader: false, forwardedHeader: false },
   message: { error: "Too many requests for this operation. Please slow down." }
 });
 
@@ -104,7 +113,15 @@ let clientAuth: any = null;
 try {
   if (firebaseConfig.projectId && firebaseConfig.apiKey) {
     clientApp = initializeClientApp(firebaseConfig);
-    dbClient = getClientFirestore(clientApp, firebaseConfig.firestoreDatabaseId || '(default)');
+    const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
+    try {
+      dbClient = initializeClientFirestore(clientApp, {
+        experimentalForceLongPolling: true,
+        ignoreUndefinedProperties: true
+      }, dbId);
+    } catch {
+      dbClient = getClientFirestore(clientApp, dbId);
+    }
     clientAuth = getClientAuth(clientApp);
   }
 } catch (e) {
@@ -173,46 +190,125 @@ function setupNotificationTriggers() {
     const bookingsRef = collection(dbClient, "bookings");
     onSnapshot(bookingsRef, (snapshot) => {
       snapshot.docChanges().forEach(async (change) => {
-        if (change.type === "modified" || change.type === "added") {
+        // Only trigger on actual status changes when document is modified
+        if (change.type === "modified") {
           const bookingData = change.doc.data();
           const bookingId = change.doc.id;
+          const currentStatus = bookingData.status;
           
-          if (bookingData.status) {
+          if (currentStatus) {
             try {
-              // 1. Create in-app notification doc on status modification
-              if (change.type === "modified") {
-                await addDoc(collection(dbClient, "notifications"), {
-                  userId: bookingData.userId,
-                  title: "Booking Status Update",
-                  message: `Your laundry booking #${bookingId.substring(0, 6)} is now: ${bookingData.status}`,
-                  status: "unread",
-                  createdAt: new Date().toISOString()
-                });
+              // Deduplication: ensure we only notify ONCE per status transition
+              // e.g. when status changes from 'paid' to 'In Wash', notify 'In Wash' once.
+              if (bookingData.lastNotifiedStatus === currentStatus) {
+                return;
               }
 
+              // Display booking ID formatted nicely with user's logic (e.g. 0033/OCT/26/0956)
+              // If not already set, fallback to sequence generation or custom formatted booking ID
+              let displayBookingId = bookingData.bookingId || bookingData.customBookingId || (bookingId.includes('/') ? bookingId : '');
+              if (!displayBookingId || !displayBookingId.includes('/')) {
+                displayBookingId = generateBookingId(bookingData.sequenceNumber || 1, bookingData.createdAt ? new Date(bookingData.createdAt) : new Date());
+                updateDoc(doc(dbClient, "bookings", bookingId), {
+                  bookingId: displayBookingId
+                }).catch(() => {});
+              }
+
+              let notifTitle = "Booking Status Update";
+              let notifMessage = `Your laundry booking ${displayBookingId} is now: ${currentStatus}`;
+              let notifType = "wash_stage_update";
+
+              switch (currentStatus) {
+                case "In Wash":
+                  notifTitle = "🧺 Clothes in Wash Cycle";
+                  notifMessage = `Your clothes for ${displayBookingId} are now washing with eco detergent.`;
+                  notifType = "wash_stage_update";
+                  break;
+                case "In Dryer":
+                  notifTitle = "💨 Drying in Progress";
+                  notifMessage = `Your wash is complete and now tumble-drying to perfection.`;
+                  notifType = "wash_stage_update";
+                  break;
+                case "Ready to collect":
+                case "Ready for pick up":
+                  notifTitle = "✨ Ready for Pickup!";
+                  notifMessage = `Your clothes for ${displayBookingId} are fresh, folded & waiting for you at the laundry hub.`;
+                  notifType = "ready_for_pickup";
+                  break;
+                case "Out for delivery":
+                  notifTitle = "🚚 Out for Delivery";
+                  notifMessage = `Our delivery partner is bringing your fresh laundry (${displayBookingId}) to your doorstep.`;
+                  notifType = "out_for_delivery";
+                  break;
+                case "completed":
+                case "Washing completed":
+                  notifTitle = "✅ Laundry Completed";
+                  notifMessage = `Order ${displayBookingId} is completed. Thank you for choosing WashWise!`;
+                  notifType = "wash_completed";
+                  break;
+                case "rescheduled":
+                  notifTitle = "⏰ Booking Rescheduled";
+                  notifMessage = `Your slot for ${displayBookingId} was moved to ${bookingData.timeSlot || 'new time'}.`;
+                  notifType = "booking_rescheduled";
+                  break;
+                case "paid":
+                  notifTitle = "Booking Confirmed";
+                  notifMessage = `Your laundry booking (${displayBookingId}) has been confirmed.`;
+                  notifType = "booking_confirmed";
+                  break;
+                case "rejected":
+                  notifTitle = "Booking Rejected";
+                  notifMessage = `Your booking (${displayBookingId}) was rejected.`;
+                  notifType = "booking_rejected";
+                  break;
+              }
+
+              // Mark as notified for this exact status atomically in the booking doc to prevent duplicate triggers
+              await updateDoc(doc(dbClient, "bookings", bookingId), {
+                lastNotifiedStatus: currentStatus,
+                statusNotified: true
+              });
+
+              // 1. Create or update exactly ONE deterministic in-app notification doc with the formatted order ID
+              // Deterministic document ID guarantees idempotency at the database engine level
+              const safeStatusKey = currentStatus.toLowerCase().replace(/[^a-z0-9]/g, '_');
+              const deterministicNotifId = `notif_${bookingId}_${safeStatusKey}`;
+              await setDoc(doc(dbClient, "notifications", deterministicNotifId), {
+                userId: bookingData.userId,
+                title: notifTitle,
+                message: notifMessage,
+                type: notifType,
+                bookingId: displayBookingId,
+                bookingDocId: bookingId,
+                link: `/confirmation?id=${displayBookingId}`,
+                isRead: false,
+                status: "unread",
+                createdAt: new Date().toISOString()
+              }, { merge: true });
+
               // 2. Loyalty Points Trigger on wash completion (Idempotent: checks !loyaltyRewarded or 0 credits awarded)
-              const isWashFinished = bookingData.status === "completed" || bookingData.status === "Washing completed";
+              const isWashFinished = currentStatus === "completed" || currentStatus === "Washing completed";
               if (isWashFinished && (!bookingData.loyaltyRewarded || Number(bookingData.loyaltyCreditsAwarded || 0) === 0)) {
                 triggerLoyaltyReward(bookingId, bookingData).catch((err) => {
                   console.error("Error triggering loyalty reward from listener:", err);
                 });
               }
 
-              // 3. Send External Push Notification for specific milestones
-              const notifyStatuses = ["paid", "completed", "rejected", "rescheduled", "Ready to collect", "Out for delivery"];
-              if (notifyStatuses.includes(bookingData.status) && !bookingData.statusNotified) {
-                await sendPushNotification(bookingData.userId, {
-                  title: "Booking Update",
-                  body: `Your booking status has changed to: ${bookingData.status}`,
-                  data: {
-                    bookingId: bookingId,
-                    status: bookingData.status
-                  }
-                });
+              // 3. Send Mobile Notification Bar Push (FCM) to user's phone for ALL stage transitions
+              // This guarantees customer receives notification in their mobile status/notification bar
+              await sendPushNotification(bookingData.userId, {
+                title: notifTitle,
+                body: notifMessage,
+                data: {
+                  bookingId: displayBookingId,
+                  customOrderId: displayBookingId,
+                  customBookingId: displayBookingId,
+                  bookingDocId: bookingId,
+                  status: currentStatus,
+                  link: `/confirmation?id=${displayBookingId}`
+                }
+              });
 
-                // Mark as notified in the booking doc
-                await updateDoc(doc(dbClient, "bookings", bookingId), { statusNotified: true });
-              }
             } catch (err) {
               // Silent error handling
             }
@@ -231,7 +327,8 @@ async function sendPushNotification(userId: string, notification: { title: strin
     if (!userDoc.exists()) return;
 
     const userData = userDoc.data();
-    const tokens = userData?.fcmTokens || [];
+    const rawTokens: string[] = userData?.fcmTokens || [];
+    const tokens = Array.from(new Set(rawTokens.filter((t: any) => typeof t === "string" && t.trim().length > 0)));
 
     if (tokens.length === 0) return;
 
@@ -360,8 +457,401 @@ async function authenticateRequest(req: express.Request): Promise<AuthenticatedU
   }
 }
 
+// ============================================================================
+// FRAUD & RISK PROTECTION ENGINE
+// ============================================================================
+
+interface RiskIncidentParams {
+  userId?: string;
+  userEmail?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  riskType: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  actionTaken: 'blocked' | 'flagged' | 'warned';
+  details: string;
+  metadata?: Record<string, any>;
+}
+
+// In-memory brute force & enumeration tracking
+const promoFailureTracker = new Map<string, { count: number; lockedUntil: number }>();
+
+async function logRiskIncident(params: RiskIncidentParams) {
+  try {
+    if (!dbClient) return;
+    const logRef = doc(collection(dbClient, "risk_logs"));
+    const logData = {
+      userId: params.userId || null,
+      userEmail: params.userEmail || null,
+      ipAddress: params.ipAddress || "unknown",
+      userAgent: params.userAgent || "unknown",
+      riskType: params.riskType,
+      severity: params.severity,
+      actionTaken: params.actionTaken,
+      details: params.details,
+      metadata: params.metadata || {},
+      createdAt: new Date().toISOString()
+    };
+    await setDoc(logRef, logData);
+
+    // If high or critical severity, elevate user's risk score and append risk flags
+    if (params.userId && (params.severity === 'high' || params.severity === 'critical')) {
+      try {
+        const userRef = doc(dbClient, "users", params.userId);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const userData = userSnap.data();
+          const existingFlags: string[] = Array.isArray(userData.riskFlags) ? [...userData.riskFlags] : [];
+          if (!existingFlags.includes(params.riskType)) {
+            existingFlags.push(params.riskType);
+          }
+          const currentScore = Number(userData.riskScore || 0);
+          const scoreBump = params.severity === 'critical' ? 40 : 25;
+          const newScore = Math.min(100, currentScore + scoreBump);
+          const newLevel = newScore >= 70 ? 'high' : newScore >= 40 ? 'medium' : 'low';
+
+          await updateDoc(userRef, {
+            riskLevel: newLevel,
+            riskScore: newScore,
+            riskFlags: existingFlags,
+            lastRiskIncidentAt: new Date().toISOString()
+          });
+        }
+      } catch (err) {
+        // non-blocking
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to record risk incident:", err);
+  }
+}
+
+// Admin: Get Risk Overview & Metrics
+app.get("/api/admin/risk/overview", async (req, res) => {
+  try {
+    const requester = await authenticateRequest(req);
+    if (!requester || (!requester.isAdmin && !requester.isSuperAdmin)) {
+      return res.status(403).json({ error: "Forbidden: Admin access required" });
+    }
+
+    await ensureServerAuth();
+    if (!dbClient) return res.status(500).json({ error: "Database not ready" });
+
+    // Fetch risk logs
+    const logsSnap = await getDocs(query(collection(dbClient, "risk_logs"), orderBy("createdAt", "desc"), limit(100)));
+    const logs: any[] = [];
+    logsSnap.forEach(d => logs.push({ id: d.id, ...d.data() }));
+
+    const now = Date.now();
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+    const logs24h = logs.filter(l => new Date(l.createdAt).getTime() >= oneDayAgo);
+
+    const highSeverityCount = logs.filter(l => l.severity === 'high' || l.severity === 'critical').length;
+    const blockedCount = logs.filter(l => l.actionTaken === 'blocked').length;
+
+    // Fetch users with elevated risk
+    const usersSnap = await getDocs(collection(dbClient, "users"));
+    let flaggedUsersCount = 0;
+    let suspendedUsersCount = 0;
+    const flaggedUsersList: any[] = [];
+
+    usersSnap.forEach(d => {
+      const u = d.data();
+      if (u.isSuspended === true) {
+        suspendedUsersCount++;
+      }
+      if (u.riskLevel === 'high' || u.riskLevel === 'medium' || (u.riskScore && u.riskScore > 30)) {
+        flaggedUsersCount++;
+        flaggedUsersList.push({
+          uid: d.id,
+          name: u.name,
+          email: u.email,
+          riskLevel: u.riskLevel || 'medium',
+          riskScore: u.riskScore || 35,
+          isSuspended: u.isSuspended || false,
+          riskFlags: u.riskFlags || []
+        });
+      }
+    });
+
+    const systemStatus = highSeverityCount > 5 || logs24h.length > 20 ? 'Elevated' : logs24h.length > 5 ? 'Guarded' : 'Optimal';
+
+    res.json({
+      success: true,
+      systemStatus,
+      totalIncidents: logs.length,
+      incidents24h: logs24h.length,
+      highSeverityCount,
+      blockedCount,
+      flaggedUsersCount,
+      suspendedUsersCount,
+      flaggedUsers: flaggedUsersList.slice(0, 10),
+      recentLogs: logs.slice(0, 20)
+    });
+  } catch (error: any) {
+    console.error("Error fetching risk overview:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch risk overview" });
+  }
+});
+
+// Admin: Get Risk Logs
+app.get("/api/admin/risk/logs", async (req, res) => {
+  try {
+    const requester = await authenticateRequest(req);
+    if (!requester || (!requester.isAdmin && !requester.isSuperAdmin)) {
+      return res.status(403).json({ error: "Forbidden: Admin access required" });
+    }
+
+    await ensureServerAuth();
+    if (!dbClient) return res.status(500).json({ error: "Database not ready" });
+
+    const limitCount = Math.min(100, Number(req.query.limit || 50));
+    const logsSnap = await getDocs(query(collection(dbClient, "risk_logs"), orderBy("createdAt", "desc"), limit(limitCount)));
+    const logs: any[] = [];
+    logsSnap.forEach(d => logs.push({ id: d.id, ...d.data() }));
+
+    res.json({ success: true, logs });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to fetch risk logs" });
+  }
+});
+
+// Admin: Take Action on Suspicious User (Suspend / Reinstate / Adjust Risk)
+app.post("/api/admin/risk/user-action", async (req, res) => {
+  try {
+    const requester = await authenticateRequest(req);
+    if (!requester || (!requester.isAdmin && !requester.isSuperAdmin)) {
+      return res.status(403).json({ error: "Forbidden: Admin access required" });
+    }
+
+    const { targetUserId, action, riskLevel, reason } = req.body;
+    if (!targetUserId || !action) {
+      return res.status(400).json({ error: "targetUserId and action are required" });
+    }
+
+    await ensureServerAuth();
+    const userRef = doc(dbClient, "users", targetUserId);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const userData = userSnap.data();
+
+    // Prevent suspending Super Admin
+    if (userData.adminRole === 'super_admin' || userData.email === 'ashwinchuttipara@gmail.com') {
+      return res.status(403).json({ error: "Cannot suspend a Super Admin" });
+    }
+
+    let updatePayload: Record<string, any> = {};
+
+    if (action === 'suspend') {
+      updatePayload = {
+        isSuspended: true,
+        suspendedReason: reason || "Suspended by Security Administrator for risk protection",
+        suspendedAt: new Date().toISOString(),
+        suspendedBy: requester.email || requester.uid,
+        riskLevel: 'blocked'
+      };
+      await logRiskIncident({
+        userId: targetUserId,
+        userEmail: userData.email,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        riskType: "ADMIN_ACTION_SUSPEND",
+        severity: "high",
+        actionTaken: "blocked",
+        details: `User account suspended by admin ${requester.email}. Reason: ${reason || "Security violation"}`
+      });
+    } else if (action === 'unsuspend') {
+      updatePayload = {
+        isSuspended: false,
+        suspendedReason: null,
+        unsuspendedAt: new Date().toISOString(),
+        unsuspendedBy: requester.email || requester.uid,
+        riskLevel: 'low',
+        riskScore: 10
+      };
+      await logRiskIncident({
+        userId: targetUserId,
+        userEmail: userData.email,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        riskType: "ADMIN_ACTION_UNSUSPEND",
+        severity: "low",
+        actionTaken: "warned",
+        details: `User account reinstated by admin ${requester.email}`
+      });
+    } else if (action === 'clear_flags') {
+      updatePayload = {
+        riskFlags: [],
+        riskScore: 0,
+        riskLevel: 'low'
+      };
+    } else if (action === 'set_risk_level') {
+      updatePayload = {
+        riskLevel: riskLevel || 'medium',
+        riskScore: riskLevel === 'high' ? 80 : riskLevel === 'medium' ? 50 : 15
+      };
+    } else {
+      return res.status(400).json({ error: "Invalid action specified" });
+    }
+
+    await updateDoc(userRef, updatePayload);
+
+    res.json({ success: true, message: `Action ${action} executed successfully`, updated: updatePayload });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to execute user action" });
+  }
+});
+
+// Admin: Get & Update Risk Settings
+app.get("/api/admin/risk/settings", async (req, res) => {
+  try {
+    const requester = await authenticateRequest(req);
+    if (!requester || (!requester.isAdmin && !requester.isSuperAdmin)) {
+      return res.status(403).json({ error: "Forbidden: Admin access required" });
+    }
+
+    await ensureServerAuth();
+    const settingsDoc = await getDoc(doc(dbClient, "settings", "global"));
+    const data = settingsDoc.exists() ? settingsDoc.data() : {};
+    const riskControls = data?.riskControls || {
+      maxDailyBookingsPerUser: 3,
+      maxActiveCodBookings: 2,
+      maxSingleWalletTopup: 5000,
+      maxDailyWalletTopup: 15000,
+      promoAttemptLimit: 5,
+      enforceIpReferralCheck: true,
+      autoBlockHighRisk: false
+    };
+
+    res.json({ success: true, settings: riskControls });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to fetch risk settings" });
+  }
+});
+
+app.post("/api/admin/risk/settings", async (req, res) => {
+  try {
+    const requester = await authenticateRequest(req);
+    if (!requester || (!requester.isAdmin && !requester.isSuperAdmin)) {
+      return res.status(403).json({ error: "Forbidden: Admin access required" });
+    }
+
+    const { settings } = req.body;
+    if (!settings) {
+      return res.status(400).json({ error: "Settings payload required" });
+    }
+
+    await ensureServerAuth();
+    const settingsRef = doc(dbClient, "settings", "global");
+    await updateDoc(settingsRef, {
+      riskControls: {
+        maxDailyBookingsPerUser: Number(settings.maxDailyBookingsPerUser ?? 3),
+        maxActiveCodBookings: Number(settings.maxActiveCodBookings ?? 2),
+        maxSingleWalletTopup: Number(settings.maxSingleWalletTopup ?? 5000),
+        maxDailyWalletTopup: Number(settings.maxDailyWalletTopup ?? 15000),
+        promoAttemptLimit: Number(settings.promoAttemptLimit ?? 5),
+        enforceIpReferralCheck: Boolean(settings.enforceIpReferralCheck ?? true),
+        autoBlockHighRisk: Boolean(settings.autoBlockHighRisk ?? false),
+        updatedAt: new Date().toISOString(),
+        updatedBy: requester.email
+      }
+    });
+
+    res.json({ success: true, message: "Risk controls updated successfully" });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to update risk settings" });
+  }
+});
+
+// Endpoint: Validate Promo Code with Brute-Force & Enumeration Shield
+app.post("/api/booking/validate-promo", async (req, res) => {
+  const { promoCode, cartValue = 0, serviceType } = req.body;
+  const clientKey = `${req.ip}_${req.body.userId || 'anon'}`;
+  const now = Date.now();
+
+  // Check enumeration lockout
+  const tracker = promoFailureTracker.get(clientKey);
+  if (tracker && tracker.lockedUntil > now) {
+    const remainingSecs = Math.ceil((tracker.lockedUntil - now) / 1000);
+    return res.status(429).json({
+      valid: false,
+      error: `Too many invalid attempts. Risk lockout active for ${remainingSecs}s.`
+    });
+  }
+
+  const trimmed = String(promoCode || "").trim().toUpperCase();
+  if (!trimmed) {
+    return res.status(400).json({ valid: false, error: "Please enter a promo code" });
+  }
+
+  try {
+    await ensureServerAuth();
+    const settingsDoc = await getDoc(doc(dbClient, "settings", "global"));
+    const settingsData = settingsDoc.exists() ? settingsDoc.data() : null;
+    const promos: any[] = settingsData?.promos || [];
+
+    const foundPromo = promos.find((p: any) => p.code && p.code.toUpperCase() === trimmed && p.active !== false);
+
+    if (!foundPromo) {
+      // Record failure
+      const currentFailures = (tracker?.count || 0) + 1;
+      const riskSettings = settingsData?.riskControls;
+      const maxAttempts = Number(riskSettings?.promoAttemptLimit ?? 5);
+
+      if (currentFailures >= maxAttempts) {
+        promoFailureTracker.set(clientKey, { count: currentFailures, lockedUntil: now + 15 * 60 * 1000 });
+        await logRiskIncident({
+          userId: req.body.userId,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          riskType: "PROMO_BRUTE_FORCE",
+          severity: "medium",
+          actionTaken: "blocked",
+          details: `Repeated invalid promo code attempts (${currentFailures}) from IP ${req.ip}. Last tried: "${trimmed}". 15-min lockout triggered.`
+        });
+        return res.status(429).json({
+          valid: false,
+          error: "Too many invalid attempts. Promo entry locked for 15 minutes for fraud protection."
+        });
+      } else {
+        promoFailureTracker.set(clientKey, { count: currentFailures, lockedUntil: 0 });
+      }
+
+      return res.status(404).json({ valid: false, error: "Invalid or expired promo code" });
+    }
+
+    // Check validity dates & redemptions
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    if (foundPromo.startDate && todayStr < foundPromo.startDate) {
+      return res.status(400).json({ valid: false, error: `This promo code starts on ${foundPromo.startDate}` });
+    }
+    if (foundPromo.expiryDate && new Date(foundPromo.expiryDate) < new Date()) {
+      return res.status(400).json({ valid: false, error: "This promo code has expired" });
+    }
+    if (foundPromo.maxRedemptions && Number(foundPromo.redemptionCount || 0) >= Number(foundPromo.maxRedemptions)) {
+      return res.status(400).json({ valid: false, error: "This promo code has reached its maximum redemptions limit" });
+    }
+
+    // Reset failure count on success
+    promoFailureTracker.delete(clientKey);
+
+    res.json({
+      valid: true,
+      code: foundPromo.code,
+      discountType: foundPromo.discountType,
+      discountValue: foundPromo.discountValue,
+      description: foundPromo.description || `Save with ${foundPromo.code}`
+    });
+  } catch (err: any) {
+    res.status(500).json({ valid: false, error: err.message || "Failed to validate promo code" });
+  }
+});
+
 app.post("/api/auth/delete-user", async (req, res) => {
-  const { uid } = req.body;
+  const { uid, reason, feedback } = req.body;
 
   if (!uid) {
     return res.status(400).json({ success: false, error: "User UID is required" });
@@ -388,7 +878,57 @@ app.post("/api/auth/delete-user", async (req, res) => {
   try {
     console.log(`Attempting to delete user: ${uid} by ${requester.email || requester.uid}`);
     
-    // Delete from Firebase Auth
+    // 1. Fetch user data before deletion to archive exit feedback
+    let userSnapshotData: any = {};
+    try {
+      const userDocSnap = await getDoc(doc(dbClient, "users", uid));
+      if (userDocSnap.exists()) {
+        userSnapshotData = userDocSnap.data();
+      }
+    } catch (fetchErr) {
+      console.warn("Could not fetch user doc before deletion:", fetchErr);
+    }
+
+    // 2. Record Exit / Account Deletion Feedback if provided
+    if (reason || feedback) {
+      try {
+        const exitFeedbackDoc = {
+          userId: uid,
+          userName: userSnapshotData?.name || (requester as any).name || "Deleted User",
+          userEmail: userSnapshotData?.email || requester.email || "No Email",
+          userPhone: userSnapshotData?.phone || "No Phone",
+          reason: reason || "No specific reason provided",
+          feedback: feedback ? String(feedback).trim() : "",
+          userType: userSnapshotData?.userType || "guest",
+          completedWashCount: Number(userSnapshotData?.completedWashCount || 0),
+          createdAt: new Date().toISOString(),
+          type: "account_deletion"
+        };
+
+        // Save into dedicated 'exit_feedbacks' collection
+        await addDoc(collection(dbClient, "exit_feedbacks"), exitFeedbackDoc);
+
+        // Also save into general 'feedback' collection so it surfaces in Super Admin 'Queries & Feedback' tab
+        await addDoc(collection(dbClient, "feedback"), {
+          userId: uid,
+          userName: exitFeedbackDoc.userName,
+          userEmail: exitFeedbackDoc.userEmail,
+          category: "account_deletion",
+          subject: `Account Deletion: ${reason || 'User Closed Account'}`,
+          message: feedback 
+            ? `Reason to leave: ${reason}\n\nAdditional feedback: ${feedback}`
+            : `Reason to leave: ${reason}`,
+          status: "new",
+          createdAt: new Date().toISOString()
+        });
+
+        console.log(`Exit feedback logged for deleted user ${uid}`);
+      } catch (feedbackErr) {
+        console.warn("Could not save exit feedback doc:", feedbackErr);
+      }
+    }
+
+    // 3. Delete from Firebase Auth
     try {
       await authAdmin.deleteUser(uid);
       console.log(`Auth user ${uid} deleted successfully`);
@@ -402,7 +942,7 @@ app.post("/api/auth/delete-user", async (req, res) => {
       }
     }
 
-    // Delete from Firestore
+    // 4. Delete from Firestore users collection
     try {
       await deleteDoc(doc(dbClient, "users", uid));
       console.log(`Firestore document for ${uid} deleted successfully`);
@@ -839,8 +1379,9 @@ function calculateServerOrderPrice(bookingDetails: any, isSubscriber: boolean, s
         }
       }
     }
-  } else if (bookingDetails.discountAmount && Number(bookingDetails.discountAmount) > 0) {
-    finalPrice = Math.max(0, finalPrice - Number(bookingDetails.discountAmount));
+  } else if (bookingDetails.appliedOfferDiscount && bookingDetails.appliedOfferId) {
+    const validatedDiscount = Math.min(basePrice, Number(bookingDetails.appliedOfferDiscount || 0));
+    finalPrice = Math.max(0, basePrice - validatedDiscount) + deliveryFee + codConvenienceFee;
   }
 
   const snapshotRegPerKg = serviceType === "Express Wash" ? expressRegularPerKg : regularPricePerKg;
@@ -874,6 +1415,83 @@ app.post("/api/payments/process-booking", async (req, res) => {
 
   try {
     await ensureServerAuth();
+
+    // 1. Account Suspension & Fraud Risk Guard
+    const userDocPre = await getDoc(doc(dbClient, "users", effectiveUserId));
+    if (userDocPre.exists()) {
+      const uData = userDocPre.data();
+      if (uData.isSuspended === true || uData.riskLevel === 'blocked') {
+        await logRiskIncident({
+          userId: effectiveUserId,
+          userEmail: uData.email,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          riskType: "SUSPENDED_ACCOUNT_ATTEMPT",
+          severity: "high",
+          actionTaken: "blocked",
+          details: `Suspended account attempted to place a booking. Reason: ${uData.suspendedReason || "Account flagged for risk protection"}`
+        });
+        return res.status(403).json({ error: "Your account is temporarily suspended due to security risk. Please contact customer support." });
+      }
+    }
+
+    // Read global settings for risk controls
+    const settingsSnapPre = await getDoc(doc(dbClient, "settings", "global"));
+    const settingsDataPre = settingsSnapPre.exists() ? settingsSnapPre.data() : null;
+    const riskControls = settingsDataPre?.riskControls || {};
+
+    // 2. Daily Booking Velocity Guard
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    const userBookingsSnap = await getDocs(query(
+      collection(dbClient, "bookings"),
+      where("userId", "==", effectiveUserId)
+    ));
+
+    const todayBookings = userBookingsSnap.docs.filter(d => {
+      const bData = d.data();
+      return bData.date === todayStr || (bData.createdAt && String(bData.createdAt).startsWith(todayStr));
+    });
+
+    const maxDailyBookings = Number(riskControls.maxDailyBookingsPerUser ?? 3);
+    if (!(requester.isAdmin || requester.isSuperAdmin) && todayBookings.length >= maxDailyBookings) {
+      await logRiskIncident({
+        userId: effectiveUserId,
+        userEmail: requester.email,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        riskType: "HIGH_BOOKING_VELOCITY",
+        severity: "medium",
+        actionTaken: "blocked",
+        details: `User attempted to exceed daily limit of ${maxDailyBookings} bookings on ${todayStr}. Active today: ${todayBookings.length}.`
+      });
+      return res.status(429).json({ error: `Daily booking limit reached (max ${maxDailyBookings} washes/day) for fleet availability. Contact store admin for bulk laundry.` });
+    }
+
+    // 3. Cash-on-Delivery (COD) / Pay-at-Store Unpaid Order Guard
+    const isCodBooking = (paymentMethod === "pay_at_store" || paymentMethod === "cod" || bookingDetails.paymentMethod === "pay_at_store");
+    if (isCodBooking && !(requester.isAdmin || requester.isSuperAdmin)) {
+      const pendingCodBookings = userBookingsSnap.docs.filter(d => {
+        const b = d.data();
+        const isUncompleted = b.status !== "completed" && b.status !== "rejected";
+        const isCod = b.paymentType === "pay_at_store" || b.paymentType === "cod" || b.isCodPrepaid === true;
+        return isUncompleted && isCod && Number(b.remainingAmount || 0) > 0;
+      });
+
+      const maxActiveCod = Number(riskControls.maxActiveCodBookings ?? 2);
+      if (pendingCodBookings.length >= maxActiveCod) {
+        await logRiskIncident({
+          userId: effectiveUserId,
+          userEmail: requester.email,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          riskType: "EXCESSIVE_COD_ORDERS",
+          severity: "medium",
+          actionTaken: "blocked",
+          details: `User has ${pendingCodBookings.length} unpaid COD orders, exceeding the limit of ${maxActiveCod}.`
+        });
+        return res.status(400).json({ error: `You have ${pendingCodBookings.length} pending Pay-at-Store bookings. Please complete or collect your pending orders or pay online to book further slots.` });
+      }
+    }
 
     // Query active machines fleet to prevent overbooking and enforce machine limits/non-availability
     const machinesSnap = await getDocs(collection(dbClient, "machines"));
@@ -1199,7 +1817,7 @@ app.post("/api/payments/process-booking", async (req, res) => {
       transaction.set(notificationRef, {
         userId: effectiveUserId,
         email: userData.email || "",
-        title: bookingStatus === "paid" ? "Booking Confirmed! 🧺" : "Booking Received 🧺",
+        title: bookingStatus === "paid" ? "Booking Confirmed" : "Booking Received",
         message: `Your booking (${customBookingId}) for ${slotDate} at ${slotTime} is recorded.`,
         type: "booking_confirmed",
         bookingId: customBookingId,
@@ -1465,7 +2083,7 @@ async function triggerReferralReward(referredUserId: string, triggerSource: 'boo
 
         tx.set(notifRef, {
           userId: referrerId,
-          title: rewardCash > 0 ? "🎉 Referral Reward: Credits + ₹50 Cash!" : "🎉 Referral Reward: +20 Credits!",
+          title: rewardCash > 0 ? "Referral Reward: Credits + ₹50 Cash" : "Referral Reward: +20 Credits",
           message: notifMessage,
           type: "referral_reward",
           isRead: false,
@@ -1476,7 +2094,7 @@ async function triggerReferralReward(referredUserId: string, triggerSource: 'boo
         const refereeNotifRef = doc(collection(dbClient, "notifications"));
         tx.set(refereeNotifRef, {
           userId: referredUserId,
-          title: "🌟 Referral Status: Verified!",
+          title: "Referral Status: Verified",
           message: `Your first ${triggerSource} is completed! Your referral bonus has been verified and ${referrerUser.name || 'your referrer'} also received their reward.`,
           type: "referral_verified",
           isRead: false,
@@ -1557,22 +2175,24 @@ async function triggerLoyaltyReward(bookingId: string, bookingDataInput?: any) {
         loyaltyRewardedAt: new Date().toISOString()
       });
 
-      const notifRef = doc(collection(dbClient, "notifications"));
+      const deterministicLoyaltyNotifId = `notif_${bookingId}_loyalty_reward`;
+      const notifRef = doc(dbClient, "notifications", deterministicLoyaltyNotifId);
       const isFreeWashReady = newCredits >= 40;
       const creditsUntilNext = 40 - (newCredits % 40);
+      const displayId = curBooking.bookingId || (bookingId.includes('/') ? bookingId : `#${bookingId.slice(-6).toUpperCase()}`);
       tx.set(notifRef, {
         userId: targetUserId,
-        title: "🎉 +5 Loyalty Credits Earned!",
-        message: `Wash #${bookingId.substring(0, 6)} completed! You earned 5 Loyalty Credits. Your balance is now ${newCredits} credits ${isFreeWashReady ? '(Free 4kg Wash Ready to Redeem!)' : `(${creditsUntilNext === 40 ? 'Free Wash Unlocked!' : `${creditsUntilNext} more credits until next Free Wash`})`}.`,
+        title: "+5 Loyalty Credits Earned",
+        message: `Wash ${displayId} completed! You earned 5 Loyalty Credits. Your balance is now ${newCredits} credits ${isFreeWashReady ? '(Free 4kg Wash Ready to Redeem)' : `(${creditsUntilNext === 40 ? 'Free Wash Unlocked' : `${creditsUntilNext} more credits until next Free Wash`})`}.`,
         type: "loyalty_reward",
         status: "unread",
         isRead: false,
         createdAt: new Date().toISOString()
-      });
+      }, { merge: true });
     });
 
     sendPushNotification(targetUserId, {
-      title: "🎉 +5 Loyalty Credits Earned!",
+      title: "+5 Loyalty Credits Earned",
       body: `Your wash is completed! 5 loyalty credits have been added to your WashWise balance.`
     }).catch(() => {});
 
@@ -1714,6 +2334,22 @@ app.post("/api/referrals/apply-signup", async (req, res) => {
         throw new Error("You cannot use your own referral code");
       }
 
+      // Fraud Check: Referral Collusion / IP collision
+      const clientIp = req.ip;
+      const referrerIp = referrerData.ipAddress || referrerData.lastIpAddress;
+      if (referrerIp && clientIp && referrerIp === clientIp) {
+        logRiskIncident({
+          userId: requester.uid,
+          userEmail: requester.email,
+          ipAddress: clientIp,
+          userAgent: req.get("User-Agent"),
+          riskType: "REFERRAL_RING_DETECTED",
+          severity: "medium",
+          actionTaken: "flagged",
+          details: `Referral code ${trimmed} entered from identical IP (${clientIp}) as referrer (${referrerData.email || referrerId}).`
+        }).catch(() => {});
+      }
+
       const userRef = doc(dbClient, "users", requester.uid);
       const userSnap = await transaction.get(userRef);
       if (!userSnap.exists()) {
@@ -1776,7 +2412,7 @@ app.post("/api/referrals/apply-signup", async (req, res) => {
       const refereeNotifRef = doc(collection(dbClient, "notifications"));
       transaction.set(refereeNotifRef, {
         userId: requester.uid,
-        title: "🎉 Welcome Bonus Credited!",
+        title: "Welcome Bonus Credited!",
         message: `You earned ${welcomeCredits} Free Laundry Credits & ₹${welcomeCash} in your Student Wallet with code ${trimmed}!`,
         type: "referral_welcome",
         isRead: false,
@@ -1787,8 +2423,8 @@ app.post("/api/referrals/apply-signup", async (req, res) => {
       const referrerNotifRef = doc(collection(dbClient, "notifications"));
       transaction.set(referrerNotifRef, {
         userId: referrerId,
-        title: "🎉 Friend Joined with your Code!",
-        message: `${userData.name || 'A friend'} signed up with your referral code. You'll receive 20 Laundry Credits & ₹50 wallet cash once they complete their first wash!`,
+        title: "Friend Joined with your Code!",
+        message: `${userData.name || 'A friend'} signed up with your referral code. You will receive 20 Laundry Credits & ₹50 wallet cash once they complete their first wash!`,
         type: "referral_invite",
         isRead: false,
         createdAt: new Date().toISOString()
@@ -1901,8 +2537,8 @@ app.post("/api/payments/wallet-topup", async (req, res) => {
   const { userId, amount, paymentMethod = "card" } = req.body;
 
   const numAmount = Number(amount);
-  if (!userId || !numAmount || numAmount <= 0) {
-    return res.status(400).json({ error: "Valid User ID and top-up amount are required" });
+  if (!userId || isNaN(numAmount) || numAmount < 10) {
+    return res.status(400).json({ error: "Minimum wallet top-up amount is ₹10." });
   }
 
   const requester = await authenticateRequest(req);
@@ -1914,6 +2550,74 @@ app.post("/api/payments/wallet-topup", async (req, res) => {
 
   try {
     await ensureServerAuth();
+
+    // 1. Fetch risk settings & user doc
+    const settingsDoc = await getDoc(doc(dbClient, "settings", "global"));
+    const settingsData = settingsDoc.exists() ? settingsDoc.data() : null;
+    const maxSingleTopup = Number(settingsData?.riskControls?.maxSingleWalletTopup ?? 5000);
+    const maxDailyTopup = Number(settingsData?.riskControls?.maxDailyWalletTopup ?? 15000);
+
+    // 2. Check maximum single top-up limit
+    if (numAmount > maxSingleTopup) {
+      await logRiskIncident({
+        userId: effectiveUserId,
+        userEmail: requester.email,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        riskType: "SUSPICIOUS_TOPUP",
+        severity: "high",
+        actionTaken: "blocked",
+        details: `Top-up request of ₹${numAmount} exceeds single transaction limit of ₹${maxSingleTopup}.`
+      });
+      return res.status(400).json({ error: `Maximum single top-up is ₹${maxSingleTopup.toLocaleString('en-IN')} for fraud and risk protection.` });
+    }
+
+    // 3. Check Account Suspension
+    const userDocPre = await getDoc(doc(dbClient, "users", effectiveUserId));
+    if (userDocPre.exists()) {
+      const uData = userDocPre.data();
+      if (uData.isSuspended === true || uData.riskLevel === 'blocked') {
+        await logRiskIncident({
+          userId: effectiveUserId,
+          userEmail: uData.email,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          riskType: "SUSPENDED_ACCOUNT_ATTEMPT",
+          severity: "high",
+          actionTaken: "blocked",
+          details: `Suspended account attempted wallet top-up. Reason: ${uData.suspendedReason || "Account suspended"}`
+        });
+        return res.status(403).json({ error: "Your account is temporarily suspended due to security risk. Please contact customer support." });
+      }
+    }
+
+    // 4. Check Daily Top-up Velocity & Cumulative Amount
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    const topupsQuery = query(
+      collection(dbClient, "wallet_transactions"),
+      where("userId", "==", effectiveUserId)
+    );
+    const txSnap = await getDocs(topupsQuery);
+    const todayTopups = txSnap.docs.filter(d => {
+      const t = d.data();
+      return t.type === "credit" && t.createdAt && String(t.createdAt).startsWith(todayStr);
+    });
+    const todayTotal = todayTopups.reduce((sum, d) => sum + Number(d.data().amount || 0), 0);
+
+    if ((todayTotal + numAmount) > maxDailyTopup) {
+      await logRiskIncident({
+        userId: effectiveUserId,
+        userEmail: requester.email,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        riskType: "SUSPICIOUS_TOPUP",
+        severity: "medium",
+        actionTaken: "blocked",
+        details: `Cumulative daily top-up of ₹${todayTotal + numAmount} exceeds daily limit of ₹${maxDailyTopup}.`
+      });
+      return res.status(400).json({ error: `Daily wallet top-up limit of ₹${maxDailyTopup.toLocaleString('en-IN')} reached for your account.` });
+    }
+
     const txnId = `TXN_TOPUP_${Date.now()}_${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
 
     const newBalance = await runTransaction(dbClient, async (transaction) => {
@@ -1935,6 +2639,7 @@ app.post("/api/payments/wallet-topup", async (req, res) => {
         type: "credit",
         method: paymentMethod,
         paymentId: txnId,
+        ipAddress: req.ip,
         description: `Wallet Top-up (Instant ${paymentMethod.toUpperCase()})`,
         createdAt: new Date().toISOString()
       });
@@ -1953,12 +2658,228 @@ app.post("/api/payments/wallet-topup", async (req, res) => {
   }
 });
 
+// ============================================================================
+// SMART NOTIFICATION REMINDERS ENGINE
+// ============================================================================
+
+// Core function to check and send periodic & milestone reminders
+async function runSmartRemindersScan() {
+  if (!dbClient) return { success: false, remindersSent: 0 };
+
+  let count = 0;
+  try {
+    // 1. Fetch reminder settings from Firestore
+    let reminderSettings: any = null;
+    try {
+      const settingsSnap = await getDoc(doc(dbClient, "settings", "global"));
+      if (settingsSnap.exists()) {
+        reminderSettings = settingsSnap.data()?.reminders;
+      }
+    } catch (e) {
+      // Use fallback defaults
+    }
+
+    const isEnabled = reminderSettings?.enabled !== false;
+    if (!isEnabled) {
+      return { success: true, message: "Reminders disabled in global settings", remindersSent: 0 };
+    }
+
+    const daysInterval = Number(reminderSettings?.daysAfterLastBooking || 5);
+    const templates = (reminderSettings?.templates || []).filter((t: any) => t.active !== false);
+
+    const defaultTemplates = [
+      "New week alle… ningal busy aayal mathi, laundry njangal handle cheyyam",
+      "Just checking… laundry plan undo? 😏",
+      "Half week kazhinju… little refresh venam alle?",
+      "“Innu small wash cheythal… weekend free aakum 😌”",
+      "“Ningal relax cheyyan… njangal laundry handle cheyyam 🤍”",
+      "“Weekend plans undo? 👀 clothes ready aano? 😉”",
+      "“Friday vibe set aakan… fresh clothes must alle 😏”",
+      "“Innu perfect day aanu… laundry kazhinjal full relax 😌”",
+      "“Saturday chillinu munpe… oru quick wash cheyyam? 😊”",
+      "“Hey… ningal relax cheyyu 🤍 but slots fast fill aavunnu… book cheyyumo? 😊”",
+      "“Innu wash njangal handle cheyyam… but kurachu slots mathram baki 😌”",
+      "“Ningalk vendi oru slot save cheyyan thonni 😏 but others fast aayi book cheyyunnu 👀”",
+      "“Late aayal… ningal miss aakum 😌 njangal wait cheyyunnu ketto”"
+    ];
+
+    const activeLines = templates.length > 0 ? templates.map((t: any) => t.text) : defaultTemplates;
+
+    const now = new Date();
+    const todayStr = now.toISOString().split("T")[0];
+
+    // Check quiet hours: avoid sending between 10 PM and 8 AM
+    const currentHour = now.getHours();
+    const quietStart = Number(reminderSettings?.quietHoursStart ?? 22);
+    const quietEnd = Number(reminderSettings?.quietHoursEnd ?? 8);
+    const isQuietHour = currentHour >= quietStart || currentHour < quietEnd;
+
+    // 2. Scan Users for Weekly / 5-Day Re-book Reminders
+    if (!isQuietHour) {
+      const usersSnap = await getDocs(collection(dbClient, "users"));
+      for (const userDoc of usersSnap.docs) {
+        const userData = userDoc.data();
+        const userId = userDoc.id;
+
+        // Skip admins
+        if (userData.role === "admin" || userData.adminRole) continue;
+
+        // Check last reminder timestamp (anti-spam rule: max 1 per week or interval)
+        const lastReminded = userData.lastWashReminderDate;
+        if (lastReminded) {
+          const diffDaysSinceReminder = (now.getTime() - new Date(lastReminded).getTime()) / (1000 * 3600 * 24);
+          if (diffDaysSinceReminder < daysInterval) continue;
+        }
+
+        // Check user's last order date
+        const lastOrderDateStr = userData.lastOrderDate || userData.createdAt;
+        if (!lastOrderDateStr) continue;
+
+        const lastOrderTime = new Date(lastOrderDateStr).getTime();
+        const daysSinceLastOrder = (now.getTime() - lastOrderTime) / (1000 * 3600 * 24);
+
+        // Check if user has any active/pending upcoming booking
+        // If they already have a booking pending or today, don't nag them
+        if (daysSinceLastOrder >= daysInterval) {
+          // Pick a random witty Malayalam/English message
+          const randomText = activeLines[Math.floor(Math.random() * activeLines.length)];
+
+          await addDoc(collection(dbClient, "notifications"), {
+            userId: userId,
+            title: "WashWise Laundry Reminder 🤍",
+            message: randomText,
+            type: "weekly_wash_reminder",
+            link: "/dashboard",
+            isRead: false,
+            status: "unread",
+            createdAt: new Date().toISOString()
+          });
+
+          // Send push notification if token available
+          sendPushNotification(userId, {
+            title: "WashWise 🤍",
+            body: randomText,
+            data: { link: "/dashboard" }
+          }).catch(() => {});
+
+          // Update user lastWashReminderDate to prevent irritating duplicates
+          await updateDoc(doc(dbClient, "users", userId), {
+            lastWashReminderDate: new Date().toISOString()
+          });
+
+          count++;
+        }
+      }
+    }
+
+    // 3. Scan Upcoming Wash Slots for Today (Upcoming Wash Reminders)
+    const bookingsTodaySnap = await getDocs(
+      query(collection(dbClient, "bookings"), where("date", "==", todayStr))
+    );
+
+    for (const bDoc of bookingsTodaySnap.docs) {
+      const bData = bDoc.data();
+      const bId = bDoc.id;
+
+      if (!bData.upcomingNotified && bData.status && ["paid", "pending"].includes(bData.status)) {
+        await addDoc(collection(dbClient, "notifications"), {
+          userId: bData.userId,
+          title: "⏰ Upcoming Wash Reminder",
+          message: `Your laundry slot is today (${bData.timeSlot || 'scheduled time'}). Have your clothes sorted & ready!`,
+          type: "upcoming_wash",
+          bookingId: bId,
+          link: `/confirmation?id=${bId}`,
+          isRead: false,
+          status: "unread",
+          createdAt: new Date().toISOString()
+        });
+
+        sendPushNotification(bData.userId, {
+          title: "⏰ Upcoming Wash Today",
+          body: `Your slot at ${bData.timeSlot || 'WashWise'} is scheduled for today.`,
+          data: { bookingId: bId }
+        }).catch(() => {});
+
+        await updateDoc(doc(dbClient, "bookings", bId), {
+          upcomingNotified: true
+        });
+        count++;
+      }
+    }
+
+    // 4. Scan Subscription Expiry & Credit Renewal Reminders (3 days prior)
+    const subscribersSnap = await getDocs(
+      query(collection(dbClient, "users"), where("userType", "==", "subscriber"))
+    );
+
+    for (const subDoc of subscribersSnap.docs) {
+      const subData = subDoc.data();
+      const subId = subDoc.id;
+      const resetDate = subData.creditResetDate;
+
+      if (resetDate && !subData.renewalNotifiedDate) {
+        const daysToReset = (new Date(resetDate).getTime() - now.getTime()) / (1000 * 3600 * 24);
+        if (daysToReset > 0 && daysToReset <= 3) {
+          await addDoc(collection(dbClient, "notifications"), {
+            userId: subId,
+            title: "💳 Monthly Credits Renewal",
+            message: `Your subscription credits reset in ${Math.ceil(daysToReset)} days on ${resetDate}. Make sure to utilize any remaining wash loads!`,
+            type: "subscription_renewal_reminder",
+            link: "/profile",
+            isRead: false,
+            status: "unread",
+            createdAt: new Date().toISOString()
+          });
+
+          await updateDoc(doc(dbClient, "users", subId), {
+            renewalNotifiedDate: todayStr
+          });
+          count++;
+        }
+      }
+    }
+
+    return { success: true, remindersSent: count };
+  } catch (error: any) {
+    console.error("Error running smart reminders scan:", error);
+    return { success: false, error: error.message, remindersSent: count };
+  }
+}
+
+// Endpoint for Admin or Client to trigger a scan check
+app.post("/api/reminders/trigger-check", async (req, res) => {
+  try {
+    const requester = await authenticateRequest(req);
+    if (!requester || (!requester.isAdmin && !requester.isSuperAdmin)) {
+      return res.status(403).json({ error: "Unauthorized. Admin privileges required." });
+    }
+
+    const result = await runSmartRemindersScan();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to trigger reminder check" });
+  }
+});
+
+// Periodic automated background interval (Runs every 30 minutes in background)
+setInterval(() => {
+  runSmartRemindersScan().catch((err) => {
+    console.warn("Background reminder scan notice:", err);
+  });
+}, 30 * 60 * 1000);
+
 // Vite middleware setup
 async function startServer() {
   try {
+    const httpServer = http.createServer(app);
+
     if (process.env.NODE_ENV !== "production") {
+      const isHmrDisabled = process.env.DISABLE_HMR === "true";
       const vite = await createViteServer({
-        server: { middlewareMode: true },
+        server: { 
+          middlewareMode: true,
+          hmr: isHmrDisabled ? false : { server: httpServer }
+        },
         appType: "spa",
       });
       app.use(vite.middlewares);
@@ -1981,11 +2902,11 @@ async function startServer() {
       });
     }
 
-    const server = app.listen(PORT, "0.0.0.0", () => {
+    httpServer.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });
 
-    server.on("error", (err: any) => {
+    httpServer.on("error", (err: any) => {
       console.error("Server listen error:", err);
     });
   } catch (err) {

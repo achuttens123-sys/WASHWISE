@@ -31,6 +31,14 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "FCM tokens for push notifications"
+        },
+        "isSuspended": { "type": "boolean", "description": "Whether user account is suspended due to fraud or administrative block" },
+        "riskLevel": { "type": "string", "enum": ["low", "medium", "high", "blocked"], "description": "Fraud risk rating" },
+        "riskScore": { "type": "number", "description": "Computed fraud risk score 0-100" },
+        "riskFlags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Specific fraud and risk triggers recorded for user"
         }
       },
       "required": ["uid", "name", "email", "userType"]
@@ -248,9 +256,30 @@
         "status": { "type": "string" },
         "createdAt": { "type": "string" }
       }
+    },
+    "RiskLog": {
+      "title": "RiskLog",
+      "description": "Security and fraud detection incident log.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user involved if known" },
+        "userEmail": { "type": "string", "description": "Email of the user involved" },
+        "ipAddress": { "type": "string", "description": "Client IP address" },
+        "riskType": { "type": "string", "enum": ["HIGH_BOOKING_VELOCITY", "EXCESSIVE_COD_ORDERS", "PROMO_BRUTE_FORCE", "SUSPICIOUS_TOPUP", "SUSPENDED_ACCOUNT_ATTEMPT", "REFERRAL_RING_DETECTED", "TAMPERED_CLIENT_PRICE", "UNAUTHORIZED_ADMIN_ATTEMPT"], "description": "Triggered fraud/risk vector" },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Risk severity rating" },
+        "actionTaken": { "type": "string", "enum": ["blocked", "flagged", "warned"], "description": "Protective defense executed" },
+        "details": { "type": "string", "description": "Detailed explanation of risk trigger" },
+        "metadata": { "type": "object", "description": "Contextual request parameters" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when incident was detected" }
+      },
+      "required": ["riskType", "severity", "actionTaken", "details", "createdAt"]
     }
   },
   "firestore": {
+    "/risk_logs/{logId}": {
+      "schema": "RiskLog",
+      "description": "Fraud and risk protection incident logs"
+    },
     "/feedback/{feedbackId}": {
       "schema": "Feedback",
       "description": "Customer feedback and inquiries"

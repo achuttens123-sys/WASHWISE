@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { User, Mail, GraduationCap, Calendar, Settings, LogOut, Wallet, History, Shield, Loader2, CheckCircle, ArrowLeft, ArrowRight, AlertCircle, Trophy, Zap, Star, Gift, Copy, Share2, TrendingUp, X, Check, MapPin, Trash2, Edit3, PhoneCall, Plus, HelpCircle, MessageSquare, Send, Sparkles } from 'lucide-react';
+import { User, Mail, GraduationCap, Calendar, Settings, LogOut, Wallet, History, Shield, ShieldCheck, Loader2, CheckCircle, ArrowLeft, ArrowRight, AlertCircle, Trophy, Zap, Star, Gift, Copy, Share2, TrendingUp, X, Check, MapPin, Trash2, Edit3, PhoneCall, Phone, Plus, HelpCircle, MessageSquare, Send, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { collection, query, where, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
@@ -9,6 +9,7 @@ import { Booking } from '../types';
 import SubscriptionPlansModal from '../components/SubscriptionPlansModal';
 import FeedbackModal from '../components/FeedbackModal';
 import { ReferralCard } from '../components/ReferralCard';
+import { PWAInstallButton } from '../components/PWAInstallButton';
 import { useSettings } from '../context/SettingsContext';
 import { getReferralShareUrl, getReferralShareText } from '../utils/referral';
 import { ReferralRecord } from '../types';
@@ -42,6 +43,8 @@ const Profile: React.FC = () => {
   // Account Deletion state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [deleteReason, setDeleteReason] = useState('Moving to another city / area');
+  const [deleteFeedback, setDeleteFeedback] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
 
@@ -160,6 +163,14 @@ const Profile: React.FC = () => {
 
   const handleTopUpWallet = async (amount: number) => {
     if (!user) return;
+    if (amount < 10) {
+      setTopUpError('Minimum top-up is ₹10.');
+      return;
+    }
+    if (amount > 5000) {
+      setTopUpError('Maximum single top-up is ₹5,000 for fraud & risk protection.');
+      return;
+    }
     setTopUpLoading(true);
     setTopUpError('');
     try {
@@ -266,7 +277,7 @@ const Profile: React.FC = () => {
     setDeleteError('');
 
     try {
-      // 1. Call backend API to delete user from Auth & Firestore
+      // 1. Call backend API to delete user from Auth & Firestore along with exit reason/feedback
       const idToken = await auth.currentUser?.getIdToken();
       const response = await fetch('/api/auth/delete-user', {
         method: 'POST',
@@ -274,7 +285,11 @@ const Profile: React.FC = () => {
           'Content-Type': 'application/json',
           ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
         },
-        body: JSON.stringify({ uid: user.uid }),
+        body: JSON.stringify({ 
+          uid: user.uid,
+          reason: deleteReason,
+          feedback: deleteFeedback
+        }),
       });
 
       const data = await response.json();
@@ -311,35 +326,35 @@ const Profile: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 sm:py-20">
-      <div className="flex flex-col lg:flex-row gap-6 lg:gap-16">
+    <div className="max-w-6xl mx-auto px-2.5 sm:px-4 py-3 sm:py-16">
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-16">
         {/* Sidebar Navigation */}
         <div className="w-full lg:w-72 shrink-0">
-          <div className="sticky top-24 space-y-6 lg:space-y-10">
-            <div className="px-2 sm:px-4">
-              <h1 className="text-3xl sm:text-5xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none mb-2 sm:mb-3">Account</h1>
-              <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Settings & Activity</p>
+          <div className="sticky top-20 sm:top-24 space-y-3 sm:space-y-6 lg:space-y-10">
+            <div className="px-1 sm:px-4">
+              <h1 className="text-xl sm:text-4xl lg:text-5xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none mb-1 sm:mb-2">Account</h1>
+              <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Settings & Activity</p>
             </div>
 
-            <nav className="flex lg:flex-col gap-2 overflow-x-auto pb-2 lg:pb-0 scrollbar-none">
+            <nav className="flex lg:flex-col gap-1.5 sm:gap-2 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
               {[
                 { id: 'profile', label: 'My Profile', icon: User },
                 { id: 'wallet', label: 'Wallet', icon: Wallet },
                 { id: 'referrals', label: 'Refer & Earn', icon: Gift },
-                { id: 'history', label: 'Booking History', icon: History },
-                { id: 'support', label: 'Queries & Feedback', icon: HelpCircle },
+                { id: 'history', label: 'History', icon: History },
+                { id: 'support', label: 'Support', icon: HelpCircle },
               ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => { setActiveTab(tab.id as any); setIsUpgrading(false); }}
-                  className={`flex-1 min-w-[120px] lg:w-full flex items-center justify-center lg:justify-start px-4 sm:px-8 py-3.5 sm:py-5 rounded-2xl transition-all duration-300 group haptic-feedback shrink-0 ${
+                  className={`flex-1 min-w-[95px] sm:min-w-[120px] lg:w-full flex items-center justify-center lg:justify-start px-2.5 sm:px-8 py-2 sm:py-4 rounded-xl sm:rounded-2xl transition-all duration-300 group haptic-feedback shrink-0 ${
                     activeTab === tab.id && !isUpgrading 
-                      ? 'bg-primary-electric text-white shadow-xl shadow-primary-electric/20 dark:shadow-none' 
+                      ? 'bg-primary-electric text-white shadow-md sm:shadow-xl shadow-primary-electric/20 dark:shadow-none' 
                       : 'text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-surface-low'
                   }`}
                 >
-                  <tab.icon className={`w-4 h-4 sm:w-5 sm:h-5 mr-2 sm:mr-4 transition-transform duration-300 ${activeTab === tab.id ? 'scale-110' : 'group-hover:scale-110'}`} />
-                  <span className="font-black text-[10px] uppercase tracking-widest whitespace-nowrap">{tab.label}</span>
+                  <tab.icon className={`w-3.5 h-3.5 sm:w-5 sm:h-5 mr-1.5 sm:mr-4 transition-transform duration-300 ${activeTab === tab.id ? 'scale-110' : 'group-hover:scale-110'}`} />
+                  <span className="font-black text-[9px] sm:text-[10px] uppercase tracking-wider whitespace-nowrap">{tab.label}</span>
                 </button>
               ))}
             </nav>
@@ -361,36 +376,36 @@ const Profile: React.FC = () => {
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab + (isUpgrading ? '-upgrade' : '')}
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="bg-white dark:bg-surface-container p-4 sm:p-8 md:p-16 rounded-2xl sm:rounded-[3rem] shadow-2xl shadow-black/5 dark:shadow-none border border-gray-50 dark:border-surface-low relative overflow-hidden"
+              exit={{ opacity: 0, y: -15 }}
+              className="bg-white dark:bg-surface-container p-3.5 sm:p-8 md:p-14 rounded-2xl sm:rounded-[2.5rem] shadow-sm sm:shadow-2xl border border-gray-50 dark:border-surface-low relative overflow-hidden"
             >
               {/* Decorative Background Element */}
               <div className="absolute -top-24 -right-24 w-64 h-64 bg-primary-electric/5 rounded-full blur-3xl pointer-events-none" />
 
               {activeTab === 'profile' && !isUpgrading && (
-                <div className="space-y-6 sm:space-y-12 relative z-10">
+                <div className="space-y-4 sm:space-y-8 md:space-y-12 relative z-10">
                   {/* Save Success Alert */}
                   {saveSuccess && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
-                      className="p-6 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-2xl border border-green-200 dark:border-green-900/30 flex items-center gap-4"
+                      className="p-3 sm:p-6 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-xl sm:rounded-2xl border border-green-200 dark:border-green-900/30 flex items-center gap-2.5 sm:gap-4"
                     >
-                      <CheckCircle className="w-6 h-6 text-green-500 shrink-0" />
+                      <CheckCircle className="w-4 h-4 sm:w-6 sm:h-6 text-green-500 shrink-0" />
                       <div>
-                        <p className="text-xs font-black uppercase tracking-widest">Profile Updated Successfully!</p>
-                        <p className="text-[10px] font-medium opacity-80">Your name and address information have been saved.</p>
+                        <p className="text-[11px] sm:text-xs font-black uppercase tracking-wider">Profile Updated Successfully!</p>
+                        <p className="text-[9.5px] sm:text-[10px] font-medium opacity-80">Your profile information has been saved.</p>
                       </div>
                     </motion.div>
                   )}
 
-                  <div className="flex flex-col md:flex-row items-center md:items-start gap-12">
-                    <div className="relative group">
-                      <div className="w-40 h-40 bg-gray-50 dark:bg-surface-low rounded-3xl flex items-center justify-center text-primary-electric dark:text-primary-electric-light shadow-inner overflow-hidden">
-                        <User className="w-20 h-20" />
+                  <div className="flex flex-row items-center md:items-start gap-3 sm:gap-6 md:gap-10">
+                    <div className="relative group shrink-0">
+                      <div className="w-16 h-16 sm:w-28 sm:h-28 md:w-36 md:h-36 bg-gray-50 dark:bg-surface-low rounded-2xl sm:rounded-3xl flex items-center justify-center text-primary-electric dark:text-primary-electric-light shadow-inner overflow-hidden">
+                        <User className="w-8 h-8 sm:w-14 sm:h-14 md:w-16 md:h-16" />
                       </div>
                       <button 
                         onClick={() => {
@@ -402,19 +417,19 @@ const Profile: React.FC = () => {
                           });
                         }}
                         title="Edit Profile Details"
-                        className={`absolute -bottom-3 -right-3 p-4 rounded-2xl shadow-2xl border transition-all haptic-feedback ${
+                        className={`absolute -bottom-1.5 -right-1.5 sm:-bottom-2 sm:-right-2 p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl shadow-md border transition-all haptic-feedback ${
                           isEditing 
                             ? 'bg-primary-electric text-white border-primary-electric' 
                             : 'bg-white dark:bg-surface-highest text-gray-400 border-gray-100 dark:border-surface-low hover:text-primary-electric'
                         }`}
                       >
-                        <Edit3 className="w-6 h-6" />
+                        <Edit3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                       </button>
                     </div>
 
-                    <div className="text-center md:text-left pt-2 flex-1">
-                      <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 mb-2">
-                        <h2 className="text-4xl sm:text-5xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none break-words">
+                    <div className="text-left pt-0.5 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center justify-start gap-2 mb-1">
+                        <h2 className="text-base sm:text-3xl md:text-4xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase leading-snug truncate max-w-full">
                           {user.name || 'Anonymous User'}
                         </h2>
                         {!isEditing && (
@@ -427,37 +442,37 @@ const Profile: React.FC = () => {
                                 address: user.address || '',
                               });
                             }}
-                            className="px-4 py-2 bg-primary-electric/10 text-primary-electric hover:bg-primary-electric hover:text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all haptic-feedback"
+                            className="px-2.5 py-1 bg-primary-electric/10 text-primary-electric hover:bg-primary-electric hover:text-white rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider flex items-center gap-1 transition-all haptic-feedback shrink-0"
                           >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            Edit Profile
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit</span>
                           </button>
                         )}
                       </div>
 
-                      <div className="flex flex-wrap justify-center md:justify-start gap-4 mt-4">
-                        <span className={`inline-flex items-center px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                      <div className="flex flex-wrap justify-start gap-1.5 mt-1 sm:mt-2">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 sm:px-4 sm:py-1 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider border ${
                           (user.userType === 'subscriber' || !!user.subscriptionPaid)
                             ? 'bg-green-50 text-green-600 border-green-100 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900/30' 
                             : 'bg-gray-50 text-gray-400 border-gray-100 dark:bg-surface-low dark:text-gray-500 dark:border-surface-low'
                         }`}>
-                          <Shield className="w-3 h-3 mr-2" />
-                          {(user.userType === 'subscriber' || !!user.subscriptionPaid) ? 'Subscriber Account' : 'Guest Account'}
+                          <Shield className="w-2.5 h-2.5 sm:w-3 sm:h-3 mr-1" />
+                          {(user.userType === 'subscriber' || !!user.subscriptionPaid) ? 'Subscriber' : 'Guest Account'}
                         </span>
                       </div>
                     </div>
                   </div>
 
                   {isEditing ? (
-                    <form onSubmit={handleSaveProfile} className="space-y-8 bg-gray-50/50 dark:bg-surface-low/30 p-8 md:p-10 rounded-3xl border border-gray-100 dark:border-surface-low">
-                      <div className="flex items-center justify-between pb-4 border-b border-gray-200/50 dark:border-surface-low">
-                        <h3 className="text-xl font-display font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">Edit Profile & Address</h3>
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Update details below</span>
+                    <form onSubmit={handleSaveProfile} className="space-y-4 sm:space-y-6 bg-gray-50/50 dark:bg-surface-low/30 p-3.5 sm:p-8 rounded-xl sm:rounded-2xl border border-gray-100 dark:border-surface-low">
+                      <div className="flex items-center justify-between pb-2 sm:pb-3 border-b border-gray-200/50 dark:border-surface-low">
+                        <h3 className="text-sm sm:text-lg font-display font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">Edit Profile</h3>
+                        <span className="text-[9px] font-black text-gray-400 uppercase tracking-wider">Update details</span>
                       </div>
 
-                      <div className="space-y-6">
+                      <div className="space-y-3 sm:space-y-4">
                         <div>
-                          <label className="block text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2 ml-1">
+                          <label className="block text-[9.5px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1 ml-0.5">
                             Full Name
                           </label>
                           <input
@@ -465,115 +480,115 @@ const Profile: React.FC = () => {
                             required
                             value={editForm.name}
                             onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                            className="w-full px-6 py-4 bg-white dark:bg-surface-low border border-gray-200 dark:border-surface-low rounded-2xl outline-none transition-all font-bold text-sm dark:text-high-contrast focus:ring-4 focus:ring-primary-electric/10"
+                            className="w-full px-3.5 py-2 sm:py-3 bg-white dark:bg-surface-low border border-gray-200 dark:border-surface-low rounded-xl outline-none transition-all font-bold text-xs sm:text-sm dark:text-high-contrast focus:ring-2 focus:ring-primary-electric/20"
                             placeholder="Enter your full name"
                           />
                         </div>
 
                         <div>
-                          <label className="block text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2 ml-1">
+                          <label className="block text-[9.5px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1 ml-0.5">
                             Address / Hostel Location
                           </label>
                           <textarea
-                            rows={3}
+                            rows={2}
                             value={editForm.address}
                             onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
-                            className="w-full px-6 py-4 bg-white dark:bg-surface-low border border-gray-200 dark:border-surface-low rounded-2xl outline-none transition-all font-medium text-sm dark:text-high-contrast focus:ring-4 focus:ring-primary-electric/10 resize-none"
-                            placeholder="Enter full address or Hostel Name & Room Number (e.g. Block B, Room 302, Green Campus)"
+                            className="w-full px-3.5 py-2 sm:py-3 bg-white dark:bg-surface-low border border-gray-200 dark:border-surface-low rounded-xl outline-none transition-all font-medium text-xs sm:text-sm dark:text-high-contrast focus:ring-2 focus:ring-primary-electric/20 resize-none"
+                            placeholder="Hostel Name & Room Number or street address"
                           />
                         </div>
 
                         <div>
-                          <label className="block text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2 ml-1">
+                          <label className="block text-[9.5px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1 ml-0.5">
                             Phone Number
                           </label>
                           <input
                             type="tel"
                             value={editForm.phone}
                             onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                            className="w-full px-6 py-4 bg-white dark:bg-surface-low border border-gray-200 dark:border-surface-low rounded-2xl outline-none transition-all font-bold text-sm dark:text-high-contrast focus:ring-4 focus:ring-primary-electric/10"
-                            placeholder="Enter 10-digit mobile number"
+                            className="w-full px-3.5 py-2 sm:py-3 bg-white dark:bg-surface-low border border-gray-200 dark:border-surface-low rounded-xl outline-none transition-all font-bold text-xs sm:text-sm dark:text-high-contrast focus:ring-2 focus:ring-primary-electric/20"
+                            placeholder="10-digit mobile number"
                           />
                         </div>
                       </div>
 
                       {error && (
-                        <div className="flex items-center gap-4 p-5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-2xl border border-red-100 dark:border-red-900/30">
-                          <AlertCircle className="w-5 h-5 shrink-0" />
-                          <p className="text-xs font-black uppercase tracking-widest">{error}</p>
+                        <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl border border-red-100 dark:border-red-900/30">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <p className="text-[11px] font-black uppercase tracking-wider">{error}</p>
                         </div>
                       )}
 
-                      <div className="flex gap-4 pt-2">
+                      <div className="flex gap-2.5 pt-1">
                         <button
                           type="submit"
                           disabled={loading}
-                          className="flex-1 py-5 bg-primary-electric text-white text-xs font-black uppercase tracking-widest rounded-2xl hover:bg-primary-electric/90 transition-all shadow-xl shadow-primary-electric/20 dark:shadow-none flex items-center justify-center disabled:opacity-50 haptic-feedback"
+                          className="flex-1 py-2.5 sm:py-3.5 bg-primary-electric text-white text-[11px] sm:text-xs font-black uppercase tracking-wider rounded-xl hover:bg-primary-electric/90 transition-all shadow-md shadow-primary-electric/20 flex items-center justify-center disabled:opacity-50 haptic-feedback"
                         >
-                          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Save Profile Changes'}
+                          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Changes'}
                         </button>
                         <button
                           type="button"
                           onClick={() => setIsEditing(false)}
-                          className="px-8 py-5 bg-white dark:bg-surface-low border border-gray-200 dark:border-surface-low text-gray-600 dark:text-gray-300 text-xs font-black uppercase tracking-widest rounded-2xl hover:bg-gray-100 dark:hover:bg-surface-highest transition-all haptic-feedback"
+                          className="px-4 py-2.5 sm:py-3.5 bg-white dark:bg-surface-low border border-gray-200 dark:border-surface-low text-gray-600 dark:text-gray-300 text-[11px] sm:text-xs font-black uppercase tracking-wider rounded-xl hover:bg-gray-100 dark:hover:bg-surface-highest transition-all haptic-feedback"
                         >
                           Cancel
                         </button>
                       </div>
                     </form>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6">
                       {/* Full Name Card */}
-                      <div className="p-8 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low group hover:border-primary-electric/20 transition-all duration-300 flex flex-col justify-between">
+                      <div className="p-3.5 sm:p-6 bg-gray-50/30 dark:bg-surface-low/30 rounded-xl sm:rounded-2xl border border-gray-100 dark:border-surface-low flex flex-col justify-between">
                         <div>
-                          <div className="flex items-center justify-between mb-3">
-                            <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Full Name</p>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider">Full Name</p>
                             <button
                               onClick={() => {
                                 setIsEditing(true);
                                 setEditForm({ name: user.name || '', phone: user.phone || '', address: user.address || '' });
                               }}
-                              className="text-xs font-bold text-primary-electric hover:underline flex items-center gap-1"
+                              className="text-[11px] font-bold text-primary-electric hover:underline flex items-center gap-0.5"
                             >
-                              <Edit3 className="w-3 h-3" />
+                              <Edit3 className="w-2.5 h-2.5" />
                               Change
                             </button>
                           </div>
                           <div className="flex items-center text-gray-800 dark:text-high-contrast">
-                            <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric">
-                              <User className="w-5 h-5" />
+                            <div className="p-2 sm:p-3 bg-white dark:bg-surface-highest rounded-xl mr-3 shadow-xs text-primary-electric shrink-0">
+                              <User className="w-4 h-4 sm:w-5 sm:h-5" />
                             </div>
-                            <span className="text-lg font-display font-black tracking-tight uppercase break-words">{user.name || 'Not set'}</span>
+                            <span className="text-xs sm:text-base font-display font-black tracking-tight uppercase truncate">{user.name || 'Not set'}</span>
                           </div>
                         </div>
                       </div>
 
                       {/* Address Card */}
-                      <div className="p-8 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low group hover:border-primary-electric/20 transition-all duration-300 flex flex-col justify-between">
+                      <div className="p-3.5 sm:p-6 bg-gray-50/30 dark:bg-surface-low/30 rounded-xl sm:rounded-2xl border border-gray-100 dark:border-surface-low flex flex-col justify-between">
                         <div>
-                          <div className="flex items-center justify-between mb-3">
-                            <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Delivery Addresses</p>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider">Delivery Addresses</p>
                             <button
                               onClick={() => {
                                 setIsEditing(true);
                                 setEditForm({ name: user.name || '', phone: user.phone || '', address: '' });
                               }}
-                              className="text-xs font-bold text-primary-electric hover:underline flex items-center gap-1"
+                              className="text-[11px] font-bold text-primary-electric hover:underline flex items-center gap-0.5"
                             >
-                              <Plus className="w-3 h-3" />
-                              Add Address
+                              <Plus className="w-2.5 h-2.5" />
+                              Add
                             </button>
                           </div>
                           
-                          <div className="space-y-4 mt-4">
+                          <div className="space-y-2 mt-2">
                             {Array.from(new Set([...(user?.savedAddresses || []), user?.address].filter(Boolean))).length > 0 ? (
                               Array.from(new Set([...(user?.savedAddresses || []), user?.address].filter(Boolean))).map((addr: string, i) => (
-                                <div key={i} className="flex items-start text-gray-800 dark:text-high-contrast bg-white dark:bg-surface-highest p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-surface-low relative group/addr">
-                                  <div className="p-2 bg-primary-electric/10 rounded-xl mr-4 text-primary-electric shrink-0">
-                                    <MapPin className="w-5 h-5" />
+                                <div key={i} className="flex items-start text-gray-800 dark:text-high-contrast bg-white dark:bg-surface-highest p-2.5 sm:p-3.5 rounded-xl shadow-xs border border-gray-100 dark:border-surface-low relative group/addr">
+                                  <div className="p-1.5 bg-primary-electric/10 rounded-lg mr-2.5 text-primary-electric shrink-0 mt-0.5">
+                                    <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                   </div>
-                                  <div className="flex-1">
-                                    <span className="text-sm font-bold tracking-tight text-gray-700 dark:text-gray-200 leading-relaxed block">{addr}</span>
+                                  <div className="flex-1 min-w-0 pr-6">
+                                    <span className="text-xs sm:text-sm font-bold tracking-tight text-gray-700 dark:text-gray-200 leading-snug break-words">{addr}</span>
                                   </div>
                                   <button 
                                     onClick={async (e) => {
@@ -585,25 +600,25 @@ const Profile: React.FC = () => {
                                         await updateUser({ savedAddresses: updatedSaved, address: newPrimary });
                                       }
                                     }}
-                                    className="opacity-0 group-hover/addr:opacity-100 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all absolute right-2 top-2"
+                                    className="opacity-70 sm:opacity-0 group-hover/addr:opacity-100 p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all absolute right-1.5 top-1.5"
                                   >
-                                    <Trash2 className="w-4 h-4" />
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
                               ))
                             ) : (
                               <div className="flex items-start text-gray-800 dark:text-high-contrast">
-                                <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric shrink-0">
-                                  <MapPin className="w-5 h-5" />
+                                <div className="p-2 sm:p-3 bg-white dark:bg-surface-highest rounded-xl mr-3 shadow-xs text-primary-electric shrink-0">
+                                  <MapPin className="w-4 h-4 sm:w-5 sm:h-5" />
                                 </div>
                                 <div>
-                                  <span className="text-sm font-semibold text-gray-400 dark:text-gray-500 block mb-2">No addresses added yet</span>
+                                  <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 block mb-1">No addresses saved yet</span>
                                   <button
                                     onClick={() => {
                                       setIsEditing(true);
                                       setEditForm({ name: user.name || '', phone: user.phone || '', address: '' });
                                     }}
-                                    className="px-4 py-2 bg-primary-electric text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-primary-electric/90 transition-all shadow-md"
+                                    className="px-2.5 py-1 bg-primary-electric text-white text-[9px] font-black uppercase tracking-wider rounded-lg hover:bg-primary-electric/90 transition-all shadow-xs"
                                   >
                                     + Add Address
                                   </button>
@@ -615,41 +630,41 @@ const Profile: React.FC = () => {
                       </div>
 
                       {/* Email Card */}
-                      <div className="p-8 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low group hover:border-primary-electric/20 transition-all duration-300">
-                        <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">Email Address</p>
-                        <div className="flex items-center text-gray-800 dark:text-high-contrast">
-                          <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric">
-                            <Mail className="w-5 h-5" />
+                      <div className="p-3.5 sm:p-6 bg-gray-50/30 dark:bg-surface-low/30 rounded-xl sm:rounded-2xl border border-gray-100 dark:border-surface-low">
+                        <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">Email Address</p>
+                        <div className="flex items-center text-gray-800 dark:text-high-contrast min-w-0">
+                          <div className="p-2 sm:p-3 bg-white dark:bg-surface-highest rounded-xl mr-3 shadow-xs text-primary-electric shrink-0">
+                            <Mail className="w-4 h-4 sm:w-5 sm:h-5" />
                           </div>
-                          <span className="text-base font-display font-black tracking-tight break-all">{user.email}</span>
+                          <span className="text-xs sm:text-base font-display font-black tracking-tight truncate">{user.email}</span>
                         </div>
                       </div>
 
                       {/* Phone Card */}
-                      <div className="p-8 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low group hover:border-primary-electric/20 transition-all duration-300">
-                        <div className="flex items-center justify-between mb-3">
-                          <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Phone Numbers</p>
+                      <div className="p-3.5 sm:p-6 bg-gray-50/30 dark:bg-surface-low/30 rounded-xl sm:rounded-2xl border border-gray-100 dark:border-surface-low">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider">Phone Numbers</p>
                           <button
                             onClick={() => {
                               setIsEditing(true);
                               setEditForm({ name: user.name || '', phone: '', address: user.address || '' });
                             }}
-                            className="text-xs font-bold text-primary-electric hover:underline flex items-center gap-1"
+                            className="text-[11px] font-bold text-primary-electric hover:underline flex items-center gap-0.5"
                           >
-                            <Plus className="w-3 h-3" />
-                            Add Phone
+                            <Plus className="w-2.5 h-2.5" />
+                            Add
                           </button>
                         </div>
                         
-                        <div className="space-y-4 mt-4">
+                        <div className="space-y-2 mt-2">
                           {Array.from(new Set([...(user?.savedPhones || []), user?.phone].filter(Boolean))).length > 0 ? (
                             Array.from(new Set([...(user?.savedPhones || []), user?.phone].filter(Boolean))).map((ph: string, i) => (
-                              <div key={i} className="flex items-center text-gray-800 dark:text-high-contrast bg-white dark:bg-surface-highest p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-surface-low relative group/phone">
-                                <div className="p-2 bg-primary-electric/10 rounded-xl mr-4 text-primary-electric shrink-0">
-                                  <PhoneCall className="w-5 h-5" />
+                              <div key={i} className="flex items-center text-gray-800 dark:text-high-contrast bg-white dark:bg-surface-highest p-2.5 sm:p-3 rounded-xl shadow-xs border border-gray-100 dark:border-surface-low relative group/phone">
+                                <div className="p-1.5 bg-primary-electric/10 rounded-lg mr-2.5 text-primary-electric shrink-0">
+                                  <PhoneCall className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                 </div>
-                                <div className="flex-1">
-                                  <span className="text-lg font-display font-black tracking-tight uppercase">{ph}</span>
+                                <div className="flex-1 min-w-0 pr-6">
+                                  <span className="text-xs sm:text-sm font-display font-black tracking-tight uppercase truncate block">{ph}</span>
                                 </div>
                                 <button 
                                   onClick={async (e) => {
@@ -661,70 +676,64 @@ const Profile: React.FC = () => {
                                       await updateUser({ savedPhones: updatedSaved, phone: newPrimary });
                                     }
                                   }}
-                                  className="opacity-0 group-hover/phone:opacity-100 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all absolute right-2"
+                                  className="opacity-70 sm:opacity-0 group-hover/phone:opacity-100 p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-all absolute right-1.5"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             ))
                           ) : (
                             <div className="flex items-center text-gray-800 dark:text-high-contrast">
-                              <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric shrink-0">
-                                <PhoneCall className="w-5 h-5" />
+                              <div className="p-2 sm:p-3 bg-white dark:bg-surface-highest rounded-xl mr-3 shadow-xs text-primary-electric shrink-0">
+                                <Phone className="w-4 h-4 sm:w-5 sm:h-5" />
                               </div>
-                              <div>
-                                <span className="text-sm font-semibold text-gray-400 dark:text-gray-500 block mb-2">No phone numbers added yet</span>
-                                <button
-                                  onClick={() => {
-                                    setIsEditing(true);
-                                    setEditForm({ name: user.name || '', phone: '', address: user.address || '' });
-                                  }}
-                                  className="px-4 py-2 bg-primary-electric text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-primary-electric/90 transition-all shadow-md"
-                                >
-                                  + Add Phone
-                                </button>
-                              </div>
+                              <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">No phone added</span>
                             </div>
                           )}
                         </div>
                       </div>
 
                       {user.studentId && (
-                        <div className="p-8 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low">
-                          <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">Student ID</p>
+                        <div className="p-3.5 sm:p-6 bg-gray-50/30 dark:bg-surface-low/30 rounded-xl sm:rounded-2xl border border-gray-100 dark:border-surface-low">
+                          <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">Student ID</p>
                           <div className="flex items-center text-gray-800 dark:text-high-contrast">
-                            <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric">
-                              <GraduationCap className="w-5 h-5" />
+                            <div className="p-2 sm:p-3 bg-white dark:bg-surface-highest rounded-xl mr-3 shadow-xs text-primary-electric shrink-0">
+                              <GraduationCap className="w-4 h-4 sm:w-5 sm:h-5" />
                             </div>
-                            <span className="text-lg font-display font-black tracking-tight uppercase">{user.studentId}</span>
+                            <span className="text-xs sm:text-base font-display font-black tracking-tight uppercase truncate">{user.studentId}</span>
                           </div>
                         </div>
                       )}
 
-                      <div className="p-8 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low">
-                        <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-3">Member Since</p>
+                      <div className="p-3.5 sm:p-6 bg-gray-50/30 dark:bg-surface-low/30 rounded-xl sm:rounded-2xl border border-gray-100 dark:border-surface-low">
+                        <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">Member Since</p>
                         <div className="flex items-center text-gray-800 dark:text-high-contrast">
-                          <div className="p-3 bg-white dark:bg-surface-highest rounded-2xl mr-4 shadow-sm text-primary-electric">
-                            <Calendar className="w-5 h-5" />
+                          <div className="p-2 sm:p-3 bg-white dark:bg-surface-highest rounded-xl mr-3 shadow-xs text-primary-electric shrink-0">
+                            <Calendar className="w-4 h-4 sm:w-5 sm:h-5" />
                           </div>
-                          <span className="text-lg font-display font-black tracking-tight uppercase">{new Date(user.createdAt).toLocaleDateString()}</span>
+                          <span className="text-xs sm:text-base font-display font-black tracking-tight uppercase truncate">{new Date(user.createdAt).toLocaleDateString()}</span>
                         </div>
                       </div>
                     </div>
                   )}
 
+                  {/* PWA App Installation Card */}
+                  <div className="pt-4 sm:pt-8 border-t border-gray-100 dark:border-surface-low">
+                    <PWAInstallButton variant="profile" />
+                  </div>
+
                   {/* Account Settings / Danger Zone Section */}
-                  <div className="pt-8 border-t border-gray-100 dark:border-surface-low">
-                    <div className="p-8 md:p-10 bg-red-50/50 dark:bg-red-950/20 rounded-3xl border border-red-100 dark:border-red-900/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <Trash2 className="w-5 h-5 text-red-600 dark:text-red-400" />
-                          <h3 className="text-lg font-display font-black text-red-700 dark:text-red-400 uppercase tracking-tight">
+                  <div className="pt-4 sm:pt-8 border-t border-gray-100 dark:border-surface-low">
+                    <div className="p-3.5 sm:p-8 bg-red-50/50 dark:bg-red-950/20 rounded-xl sm:rounded-2xl border border-red-100 dark:border-red-900/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-6">
+                      <div className="space-y-0.5 sm:space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
+                          <h3 className="text-xs sm:text-base font-display font-black text-red-700 dark:text-red-400 uppercase tracking-tight">
                             Delete Account
                           </h3>
                         </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 max-w-xl font-medium leading-relaxed">
-                          Permanently delete your profile, saved address, booking history, and wallet data. This action cannot be undone.
+                        <p className="text-[11px] sm:text-xs text-gray-600 dark:text-gray-400 max-w-xl font-medium leading-relaxed">
+                          Permanently delete your profile, addresses, and history. This cannot be undone.
                         </p>
                       </div>
                       <button
@@ -733,9 +742,9 @@ const Profile: React.FC = () => {
                           setDeleteError('');
                           setDeleteConfirmInput('');
                         }}
-                        className="px-6 py-3.5 bg-red-600 hover:bg-red-700 text-white text-xs font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-red-600/20 shrink-0 flex items-center gap-2 haptic-feedback"
+                        className="px-3.5 py-2 sm:px-6 sm:py-3.5 bg-red-600 hover:bg-red-700 text-white text-[10px] sm:text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-red-600/20 shrink-0 flex items-center gap-1.5 haptic-feedback"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3.5 h-3.5" />
                         Delete Account
                       </button>
                     </div>
@@ -1070,39 +1079,43 @@ const Profile: React.FC = () => {
               )}
 
               {activeTab === 'history' && (
-                <div className="space-y-12 relative z-10">
-                  <div className="px-4">
-                    <h3 className="text-4xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none mb-3">History</h3>
-                    <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Your past laundry sessions</p>
+                <div className="space-y-4 sm:space-y-8 relative z-10">
+                  <div className="px-1 sm:px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                    <div>
+                      <h3 className="text-xl sm:text-4xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none mb-1 sm:mb-2">History</h3>
+                      <p className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider">Your past laundry sessions</p>
+                    </div>
+                    <button
+                      onClick={() => navigate('/orders')}
+                      className="px-3.5 py-2 sm:px-5 sm:py-3 bg-primary-electric hover:bg-blue-600 text-white rounded-xl sm:rounded-2xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 self-start sm:self-center shadow-md shadow-primary-electric/20 haptic-feedback"
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      <span>Open Orders Hub</span>
+                      <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
+                    </button>
                   </div>
 
-                  <div className="space-y-8">
+                  <div className="space-y-2.5 sm:space-y-4">
                     {loadingBookings ? (
-                      <div className="flex flex-col items-center justify-center py-32 text-center">
-                        <div className="relative mb-8">
-                          <Loader2 className="w-16 h-16 animate-spin text-primary-electric" />
-                          <div className="absolute inset-0 blur-2xl bg-primary-electric/20 animate-pulse" />
-                        </div>
-                        <p className="text-xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase">Retrieving Records</p>
-                        <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-3">Just a moment...</p>
+                      <div className="flex flex-col items-center justify-center py-12 sm:py-24 text-center">
+                        <Loader2 className="w-8 h-8 sm:w-12 sm:h-12 animate-spin text-primary-electric mb-2" />
+                        <p className="text-xs sm:text-base font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase">Retrieving Records</p>
                       </div>
                     ) : bookings.length === 0 ? (
-                      <div className="text-center py-32 bg-gray-50/30 dark:bg-surface-low/30 rounded-[3rem] border-2 border-dashed border-gray-100 dark:border-surface-low">
-                        <div className="p-8 bg-white dark:bg-surface-highest rounded-3xl w-24 h-24 flex items-center justify-center mx-auto mb-8 shadow-sm">
-                          <AlertCircle className="w-12 h-12 text-gray-200 dark:text-gray-700" />
-                        </div>
-                        <p className="text-2xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase">No Bookings Yet</p>
-                        <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-3">Start your first wash today!</p>
+                      <div className="text-center py-12 sm:py-24 bg-gray-50/30 dark:bg-surface-low/30 rounded-2xl sm:rounded-[2.5rem] border border-dashed border-gray-100 dark:border-surface-low p-4 sm:p-8">
+                        <AlertCircle className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+                        <p className="text-sm sm:text-xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase">No Bookings Yet</p>
+                        <p className="text-[10px] text-gray-400 mt-1">Start your first wash today!</p>
                       </div>
                     ) : (
                       bookings.map((booking) => (
-                        <div key={booking.id} className="p-10 bg-gray-50/30 dark:bg-surface-low/30 rounded-3xl border border-gray-50 dark:border-surface-low flex flex-col md:flex-row md:items-center justify-between gap-10 group hover:border-primary-electric/20 transition-all duration-500">
-                          <div className="space-y-6">
-                            <div className="flex flex-wrap items-center gap-4">
-                              <span className="text-[10px] font-black text-primary-electric dark:text-primary-electric-light bg-primary-electric/5 dark:bg-primary-electric/10 px-4 py-2 rounded-full border border-primary-electric/10 uppercase tracking-widest">
+                        <div key={booking.id} className="p-3.5 sm:p-6 bg-gray-50/30 dark:bg-surface-low/30 rounded-xl sm:rounded-2xl border border-gray-100 dark:border-surface-low flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-6 group hover:border-primary-electric/20 transition-all">
+                          <div className="space-y-1.5 min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[9px] sm:text-[10px] font-black text-primary-electric dark:text-primary-electric-light bg-primary-electric/5 dark:bg-primary-electric/10 px-2 py-0.5 rounded border border-primary-electric/10 uppercase tracking-wider truncate">
                                 ID: {booking.bookingId || booking.id?.slice(-6).toUpperCase()}
                               </span>
-                              <span className={`text-[10px] font-black px-4 py-2 rounded-full uppercase tracking-widest border ${
+                              <span className={`text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-wider border ${
                                 booking.status === 'completed' ? 'bg-green-50 text-green-600 border-green-100' :
                                 booking.status === 'rejected' ? 'bg-red-50 text-red-600 border-red-100' :
                                 'bg-primary-electric/5 text-primary-electric border-primary-electric/10'
@@ -1110,25 +1123,25 @@ const Profile: React.FC = () => {
                                 {booking.status}
                               </span>
                             </div>
-                            <div>
-                              <p className="text-3xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase mb-2">{booking.serviceType}</p>
-                              <div className="flex items-center text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">
-                                <Calendar className="w-4 h-4 mr-3 text-primary-electric" />
-                                {booking.date} <span className="mx-3 opacity-30">•</span> {booking.timeSlot}
+                            <div className="min-w-0">
+                              <p className="text-xs sm:text-lg font-display font-black text-gray-800 dark:text-high-contrast tracking-tight uppercase truncate">{booking.serviceType}</p>
+                              <div className="flex items-center text-[9px] sm:text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                                <Calendar className="w-3 h-3 mr-1.5 text-primary-electric shrink-0" />
+                                <span>{booking.date} • {booking.timeSlot}</span>
                               </div>
                             </div>
                           </div>
-                          <div className="flex items-center gap-8">
-                            <div className="text-right">
-                              <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Total Paid</p>
-                              <p className="text-3xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter italic leading-none">₹{booking.price.toFixed(2)}</p>
+                          <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 dark:border-surface-low shrink-0">
+                            <div className="text-left sm:text-right">
+                              <p className="text-[8px] sm:text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider">Total</p>
+                              <p className="text-sm sm:text-xl font-display font-black text-gray-800 dark:text-high-contrast">₹{booking.price.toFixed(0)}</p>
                             </div>
                             <button 
                               onClick={() => {
                                 setSelectedBooking(booking);
                                 setShowDetailsModal(true);
                               }}
-                              className="px-10 py-5 bg-white dark:bg-surface-highest border border-gray-100 dark:border-surface-low text-gray-800 dark:text-high-contrast text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-gray-800 hover:text-white dark:hover:bg-white dark:hover:text-black transition-all shadow-sm haptic-feedback"
+                              className="px-3.5 py-1.5 sm:px-6 sm:py-2.5 bg-white dark:bg-surface-highest border border-gray-100 dark:border-surface-low text-gray-800 dark:text-high-contrast text-[10px] sm:text-xs font-black uppercase tracking-wider rounded-lg sm:rounded-xl hover:bg-primary-electric hover:text-white transition-all shadow-xs haptic-feedback"
                             >
                               Details
                             </button>
@@ -1141,25 +1154,25 @@ const Profile: React.FC = () => {
               )}
 
               {activeTab === 'support' && (
-                <div className="space-y-8 relative z-10">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 dark:border-surface-low pb-6">
+                <div className="space-y-4 sm:space-y-6 relative z-10">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-surface-low pb-3 sm:pb-4">
                     <div>
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800/50 mb-2">
-                        <Sparkles className="w-3 h-3" /> Customer Support & Feedback
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800/50 mb-1">
+                        <Sparkles className="w-2.5 h-2.5" /> Support & Feedback
                       </span>
-                      <h3 className="text-3xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none">
+                      <h3 className="text-xl sm:text-3xl font-display font-black text-gray-800 dark:text-high-contrast tracking-tighter uppercase leading-none">
                         Queries & Feedback
                       </h3>
-                      <p className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">
-                        Have a question, issue, or feedback? Inform our team directly.
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Have a question or feedback? We're here to help.
                       </p>
                     </div>
 
                     <button
                       onClick={() => setIsFeedbackModalOpen(true)}
-                      className="px-6 py-4 bg-primary-electric text-white text-xs font-black uppercase tracking-widest rounded-2xl hover:bg-primary-electric/90 transition-all shadow-lg shadow-primary-electric/20 shrink-0 flex items-center justify-center gap-2"
+                      className="px-3.5 py-2 sm:px-5 sm:py-3 bg-primary-electric text-white text-[11px] sm:text-xs font-black uppercase tracking-wider rounded-xl hover:bg-primary-electric/90 transition-all shadow-md shadow-primary-electric/20 shrink-0 flex items-center justify-center gap-1.5 self-start sm:self-center"
                     >
-                      <Plus className="w-4 h-4" /> Submit Query / Feedback
+                      <Plus className="w-3.5 h-3.5" /> Submit Query
                     </button>
                   </div>
 
@@ -1344,7 +1357,7 @@ const Profile: React.FC = () => {
 
                     {codeCopied && (
                       <p className="text-center text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                        ✓ Referral code copied to clipboard!
+                        Referral code copied to clipboard!
                       </p>
                     )}
                   </div>
@@ -1446,11 +1459,11 @@ const Profile: React.FC = () => {
                             <div className="flex items-center justify-between sm:justify-end gap-3">
                               {item.status === 'completed' ? (
                                 <span className="inline-flex items-center gap-1.5 font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100/80 dark:bg-emerald-950/40 px-3 py-1.5 rounded-xl text-xs uppercase tracking-wider">
-                                  ✓ +{item.rewardCredits || 20} Credits {item.rewardWalletCash > 0 ? `& +₹${item.rewardWalletCash} Cash` : '(Credits Only)'}
+                                  +{item.rewardCredits || 20} Credits {item.rewardWalletCash > 0 ? `& +₹${item.rewardWalletCash} Cash` : '(Credits Only)'}
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-950/40 px-3 py-1.5 rounded-xl text-xs uppercase tracking-wider">
-                                  ⏳ Awaiting First Wash Order
+                                  Awaiting First Wash Order
                                 </span>
                               )}
                             </div>
@@ -1566,12 +1579,17 @@ const Profile: React.FC = () => {
       {/* Add Funds Modal */}
       <AnimatePresence>
         {showAddFundsModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              onClick={() => setShowAddFundsModal(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-pointer"
+              aria-label="Close modal overlay"
+            />
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative"
+              className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative z-10"
             >
               <button
                 onClick={() => setShowAddFundsModal(false)}
@@ -1598,11 +1616,15 @@ const Profile: React.FC = () => {
                   <input
                     type="number"
                     min="10"
-                    max="10000"
+                    max="5000"
                     value={Number.isNaN(topUpAmount) ? '' : topUpAmount}
                     onChange={(e) => setTopUpAmount(e.target.value === '' ? 0 : (Number(e.target.value) || 0))}
                     className="w-full px-5 py-4 rounded-2xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-2xl font-bold text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2 flex items-center gap-1.5 font-medium">
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    Fraud Defense: ₹10 min to ₹5,000 max per single transaction.
+                  </p>
                 </div>
 
                 <div>
@@ -1651,12 +1673,17 @@ const Profile: React.FC = () => {
 
         {/* Delete Account Confirmation Modal */}
         {showDeleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              onClick={() => setShowDeleteModal(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-md cursor-pointer"
+              aria-label="Close modal overlay"
+            />
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-surface-container border border-red-200 dark:border-red-900/40 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative overflow-hidden"
+              className="bg-white dark:bg-surface-container border border-red-200 dark:border-red-900/40 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative overflow-hidden z-10"
             >
               <button
                 onClick={() => setShowDeleteModal(false)}
@@ -1689,7 +1716,41 @@ const Profile: React.FC = () => {
                   <li>Active bookings and wallet balance will be lost permanently.</li>
                 </ul>
 
+                {/* Reason to leave */}
                 <div className="pt-2">
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-1.5">
+                    Reason for leaving <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={deleteReason}
+                    onChange={(e) => setDeleteReason(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-surface-low border border-gray-200 dark:border-gray-700 rounded-xl text-xs font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500/30"
+                  >
+                    <option value="Moving to another city / area">Moving to another city / area</option>
+                    <option value="Completed college / graduated">Completed college / graduated</option>
+                    <option value="Found alternative laundry service">Found alternative laundry service</option>
+                    <option value="Service quality or timing issues">Service quality or timing issues</option>
+                    <option value="Pricing / subscription costs">Pricing / subscription costs</option>
+                    <option value="App or technical difficulty">App or technical difficulty</option>
+                    <option value="Other / personal preference">Other / personal preference</option>
+                  </select>
+                </div>
+
+                {/* Optional Feedback */}
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-1.5">
+                    Help us improve (Optional Feedback)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={deleteFeedback}
+                    onChange={(e) => setDeleteFeedback(e.target.value)}
+                    placeholder="Tell us what we could have done better..."
+                    className="w-full px-3.5 py-2 bg-gray-50 dark:bg-surface-low border border-gray-200 dark:border-gray-700 rounded-xl text-xs text-gray-900 dark:text-white placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-red-500/30 resize-none"
+                  />
+                </div>
+
+                <div className="pt-1">
                   <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-2">
                     Type <span className="text-red-600 font-bold">DELETE</span> to confirm:
                   </label>

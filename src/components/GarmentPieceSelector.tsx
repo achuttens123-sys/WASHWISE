@@ -86,17 +86,17 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
     : catalog.filter(item => item.category === activeCategoryTab);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3 sm:space-y-6">
       {/* Limited-Time Offer Global Notice Banner */}
       {isOfferActive && !isSubscriber && (
-        <div className="p-3.5 bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/10 border border-amber-500/30 dark:border-amber-500/20 rounded-2xl flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-black uppercase tracking-wider rounded-md shadow-xs flex items-center gap-1">
-              <Tag className="w-3 h-3" />
-              LIMITED-TIME OFFER
+        <div className="p-2.5 sm:p-3.5 bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/10 border border-amber-500/30 dark:border-amber-500/20 rounded-xl sm:rounded-2xl flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2">
+            <span className="px-1.5 sm:px-2 py-0.5 bg-amber-500 text-white text-[9px] sm:text-[10px] font-black uppercase tracking-wider rounded-md shadow-xs flex items-center gap-1 shrink-0">
+              <Tag className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+              OFFER
             </span>
-            <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
-              Special promotional piece rates applied. Save up to ₹10 on every garment!
+            <p className="text-[11px] sm:text-xs font-bold text-amber-900 dark:text-amber-200 truncate">
+              Promotional piece rates applied. Save up to ₹10/item!
             </p>
           </div>
         </div>
@@ -104,36 +104,36 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
 
       {/* Subscriber Credits Context Banner */}
       {isSubscriber && (
-        <div className="p-4 bg-gradient-to-r from-emerald-500/10 via-green-500/10 to-teal-500/10 border border-green-500/20 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-green-500/20 text-green-600 dark:text-green-400 flex items-center justify-center shrink-0">
-              <Zap className="w-5 h-5" />
+        <div className="p-2.5 sm:p-4 bg-gradient-to-r from-emerald-500/10 via-green-500/10 to-teal-500/10 border border-green-500/20 rounded-xl sm:rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-green-500/20 text-green-600 dark:text-green-400 flex items-center justify-center shrink-0">
+              <Zap className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-black uppercase tracking-wider text-green-700 dark:text-green-300">
-                  Subscriber Laundry Credits
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-green-700 dark:text-green-300">
+                  Laundry Credits
                 </span>
-                <span className="px-2 py-0.5 bg-green-500/20 text-green-700 dark:text-green-300 text-[10px] font-black rounded-full">
-                  ACTIVE BENEFIT
+                <span className="px-1.5 py-0.2 bg-green-500/20 text-green-700 dark:text-green-300 text-[8.5px] sm:text-[10px] font-black rounded-full">
+                  ACTIVE
                 </span>
               </div>
-              <p className="text-xs text-gray-600 dark:text-gray-300">
-                Piece selections are automatically deducted from your monthly credit allowance (1 KG = 10 Credits).
+              <p className="text-[10px] sm:text-xs text-gray-600 dark:text-gray-300 truncate">
+                Deducted from monthly credit allowance (1 KG = 10 Credits).
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3 self-end sm:self-center bg-white dark:bg-gray-800/80 px-4 py-2 rounded-xl border border-green-500/20 shadow-sm">
-            <span className="text-[10px] font-black uppercase text-gray-500 tracking-wider">Available Balance:</span>
-            <span className="text-sm font-black text-green-600 dark:text-green-400">
-              🧺 {subscriberCreditsLeft} / {totalMonthlyCredits} Credits
+          <div className="flex items-center gap-2 self-end sm:self-center bg-white dark:bg-gray-800/80 px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl border border-green-500/20 shadow-xs shrink-0">
+            <span className="text-[9px] sm:text-[10px] font-black uppercase text-gray-500 tracking-wider">Balance:</span>
+            <span className="text-xs sm:text-sm font-black text-green-600 dark:text-green-400">
+              {subscriberCreditsLeft} / {totalMonthlyCredits} Cr
             </span>
           </div>
         </div>
       )}
 
       {/* Category filter tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+      <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-2 scrollbar-none">
         {(['All', ...GARMENT_CATEGORIES] as const).map(tab => {
           const isSelected = activeCategoryTab === tab;
           const countInTab = tab === 'All' 
@@ -145,16 +145,16 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
               key={tab}
               type="button"
               onClick={() => setActiveCategoryTab(tab)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-2 shrink-0 ${
+              className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 sm:gap-2 shrink-0 ${
                 isSelected
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-none'
+                  ? 'bg-blue-600 text-white shadow-sm'
                   : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
               }`}
             >
               {tab !== 'All' && getCategoryIcon(tab)}
               <span>{tab}</span>
               {countInTab > 0 && (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                <span className={`px-1 sm:px-1.5 py-0.2 rounded-full text-[9px] sm:text-[10px] font-black ${
                   isSelected ? 'bg-white text-blue-600' : 'bg-blue-600 text-white'
                 }`}>
                   {countInTab}
@@ -166,7 +166,7 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
       </div>
 
       {/* Garments Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3.5">
         {filteredItems.map(item => {
           const count = garmentCounts[item.id] || 0;
           const isSelected = count > 0;
@@ -181,80 +181,80 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
             <motion.div
               key={item.id}
               layout
-              className={`p-4 sm:p-5 rounded-2xl border-2 transition-all flex flex-col justify-between relative ${
+              className={`p-2.5 sm:p-4 rounded-xl sm:rounded-2xl border transition-all flex flex-col justify-between relative overflow-hidden ${
                 isSelected
                   ? isSubscriber
-                    ? 'bg-green-50/70 dark:bg-green-950/20 border-green-500 shadow-sm'
-                    : 'bg-blue-50/70 dark:bg-blue-900/20 border-blue-600 shadow-sm'
+                    ? 'bg-green-50/70 dark:bg-green-950/20 border-green-500 shadow-xs'
+                    : 'bg-blue-50/70 dark:bg-blue-900/20 border-blue-600 shadow-xs'
                   : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
               }`}
             >
               {/* Limited offer mini badge */}
               {itemOfferActive && !isSubscriber && (
-                <div className="absolute top-3 right-3 flex items-center gap-1.5">
-                  <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[9px] font-black uppercase tracking-wider rounded-full shadow-xs">
-                    LIMITED OFFER
+                <div className="absolute top-2 right-2 flex items-center gap-1">
+                  <span className="px-1.5 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[8.5px] font-black uppercase tracking-wider rounded-md shadow-xs">
+                    OFFER
                   </span>
                 </div>
               )}
 
               <div>
-                <div className="flex items-start justify-between gap-2 mb-2 pr-16 sm:pr-24">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="inline-block text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-100/70 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
+                <div className="flex items-start justify-between gap-1 mb-1 pr-14 sm:pr-20">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className="inline-block text-[9px] sm:text-[10px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded bg-blue-100/70 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
                         {item.subCategory}
                       </span>
                       {item.avgWeight && (
-                        <span className="inline-block text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
+                        <span className="inline-block text-[9px] sm:text-[10px] font-bold text-gray-400 bg-gray-100 dark:bg-gray-800 px-1 py-0.2 rounded">
                           avg {item.avgWeight}
                         </span>
                       )}
                     </div>
-                    <h4 className="font-bold text-sm sm:text-base text-gray-900 dark:text-gray-100 leading-snug">
+                    <h4 className="font-bold text-xs sm:text-sm text-gray-900 dark:text-gray-100 leading-tight">
                       {item.name}
                     </h4>
                   </div>
                 </div>
 
                 {item.includes && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 italic">
+                  <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 mb-1.5 italic truncate">
                     Includes: {item.includes}
                   </p>
                 )}
 
-                {/* Hero Pricing Display with Strikethrough & Big Offer Price */}
-                <div className="mt-2 mb-4 p-2.5 bg-gray-50/70 dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                  <div className="flex items-baseline gap-2 flex-wrap">
+                {/* Pricing Display */}
+                <div className="mt-1.5 mb-2.5 p-1.5 sm:p-2 bg-gray-50/70 dark:bg-gray-800/40 rounded-lg sm:rounded-xl border border-gray-100 dark:border-gray-800 flex items-center justify-between gap-1">
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
                     {isSubscriber ? (
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-lg font-black text-green-600 dark:text-green-400">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-sm sm:text-base font-black text-green-600 dark:text-green-400">
                           {unitCredits} Credits
                         </span>
-                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">
+                        <span className="text-[10px] sm:text-xs font-bold text-gray-500 dark:text-gray-400">
                           (₹{activeUnitPrice})
                         </span>
                       </div>
                     ) : itemOfferActive ? (
-                      <div className="flex items-baseline gap-2 flex-wrap">
+                      <div className="flex items-baseline gap-1.5 flex-wrap">
                         {/* Strikethrough Regular Price */}
-                        <span className="text-xs sm:text-sm font-bold text-gray-400 dark:text-gray-500 line-through">
+                        <span className="text-[11px] sm:text-xs font-bold text-gray-400 dark:text-gray-500 line-through">
                           ₹{regPrice}
                         </span>
                         {/* Bold Offer Price */}
-                        <span className="text-xl sm:text-2xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
+                        <span className="text-base sm:text-xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
                           ₹{offPrice}
                         </span>
-                        <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase">
+                        <span className="text-[9px] sm:text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">
                           / item
                         </span>
                       </div>
                     ) : (
-                      <div className="flex items-baseline gap-1.5">
-                        <span className="text-xl sm:text-2xl font-black text-gray-900 dark:text-gray-100">
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-base sm:text-xl font-black text-gray-900 dark:text-gray-100">
                           ₹{regPrice}
                         </span>
-                        <span className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase">
+                        <span className="text-[9px] sm:text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">
                           / item
                         </span>
                       </div>
@@ -263,9 +263,9 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
 
                   {/* Savings Tag */}
                   {itemOfferActive && !isSubscriber && (
-                    <div className="flex items-center gap-1 px-2 py-0.5 bg-green-50 dark:bg-green-950/40 border border-green-200 dark:border-green-800 rounded-md">
-                      <ArrowDownRight className="w-3 h-3 text-green-600 dark:text-green-400" />
-                      <span className="text-[10px] font-black text-green-600 dark:text-green-400 uppercase">
+                    <div className="flex items-center gap-0.5 px-1.5 py-0.2 bg-green-50 dark:bg-green-950/40 border border-green-200 dark:border-green-800 rounded">
+                      <ArrowDownRight className="w-2.5 h-2.5 text-green-600 dark:text-green-400" />
+                      <span className="text-[9px] font-black text-green-600 dark:text-green-400 uppercase">
                         Save ₹{perItemSavings}
                       </span>
                     </div>
@@ -274,39 +274,39 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
               </div>
 
               {/* Quantity Stepper and Subtotal Footer */}
-              <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                <div className="text-xs text-gray-500 dark:text-gray-400">
+              <div className="pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-1">
+                <div className="text-[11px] text-gray-500 dark:text-gray-400 min-w-0 truncate">
                   {count > 0 ? (
                     isSubscriber ? (
-                      <span className="font-bold text-green-600 dark:text-green-400">
-                        Subtotal: {count * unitCredits} Credits <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">(₹{count * activeUnitPrice})</span>
+                      <span className="font-bold text-green-600 dark:text-green-400 truncate block">
+                        {count * unitCredits} Cr <span className="text-[10px] font-normal text-gray-400">(₹{count * activeUnitPrice})</span>
                       </span>
                     ) : (
-                      <div className="flex flex-col">
-                        <span className="font-bold text-blue-600 dark:text-blue-400">
+                      <div className="flex flex-col truncate">
+                        <span className="font-bold text-blue-600 dark:text-blue-400 truncate">
                           Subtotal: ₹{count * activeUnitPrice}
                         </span>
                         {itemOfferActive && (
-                          <span className="text-[10px] font-bold text-green-600 dark:text-green-400">
-                            Saved: ₹{count * perItemSavings}
+                          <span className="text-[9px] font-bold text-green-600 dark:text-green-400">
+                            Saved ₹{count * perItemSavings}
                           </span>
                         )}
                       </div>
                     )
                   ) : (
-                    <span className="text-[11px] text-gray-400">
-                      Select quantity
+                    <span className="text-[10px] text-gray-400">
+                      Select qty
                     </span>
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
                     onClick={() => updateCount(item.id, -1)}
                     disabled={count === 0}
                     aria-label={`Decrease ${item.name}`}
-                    className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all haptic-feedback touch-manipulation ${
                       count > 0
                         ? isSubscriber
                           ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 hover:bg-green-200'
@@ -314,7 +314,7 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
                         : 'bg-gray-100 dark:bg-gray-800 text-gray-300 dark:text-gray-600 cursor-not-allowed'
                     }`}
                   >
-                    <Minus className="w-3.5 h-3.5" />
+                    <Minus className="w-3 h-3" />
                   </button>
 
                   <input
@@ -324,18 +324,18 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
                     value={count === 0 ? '' : count}
                     placeholder="0"
                     onChange={(e) => setCountDirect(item.id, parseInt(e.target.value, 10))}
-                    className="w-10 h-8 text-center font-bold text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-800 dark:text-gray-100"
+                    className="w-8 h-7 text-center font-bold text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-1 focus:ring-blue-500 outline-none text-gray-800 dark:text-gray-100"
                   />
 
                   <button
                     type="button"
                     onClick={() => updateCount(item.id, 1)}
                     aria-label={`Increase ${item.name}`}
-                    className={`w-8 h-8 rounded-xl text-white flex items-center justify-center transition-all shadow-sm ${
+                    className={`w-7 h-7 rounded-lg text-white flex items-center justify-center transition-all shadow-xs haptic-feedback touch-manipulation ${
                       isSubscriber ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'
                     }`}
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="w-3 h-3" />
                   </button>
                 </div>
               </div>
@@ -346,72 +346,72 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
 
       {/* Warnings if credits exceeded */}
       {isCreditsExceeded && (
-        <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 rounded-2xl flex items-start gap-3 text-amber-800 dark:text-amber-200 text-xs">
-          <AlertCircle className="w-5 h-5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+        <div className="p-2.5 sm:p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 rounded-xl sm:rounded-2xl flex items-start gap-2 text-amber-800 dark:text-amber-200 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
           <div>
-            <p className="font-bold uppercase tracking-wider">Credit Allowance Exceeded</p>
-            <p className="mt-0.5">
-              You selected {totalCredits} Credits (₹{totalPrice}) worth of garments, but have {subscriberCreditsLeft} Credits remaining this cycle. You can pay for excess items using direct ₹ pricing at checkout.
+            <p className="font-bold uppercase tracking-wider text-[11px] sm:text-xs">Credit Allowance Exceeded</p>
+            <p className="mt-0.5 text-[10px] sm:text-xs">
+              Selected {totalCredits} Credits (₹{totalPrice}) exceeds your {subscriberCreditsLeft} Credits remaining. Excess is payable at checkout.
             </p>
           </div>
         </div>
       )}
 
       {/* Total Pieces & Subtotal Bar with Strikethrough & Savings */}
-      <div className={`p-4 sm:p-5 rounded-2xl border flex flex-wrap items-center justify-between gap-4 ${
+      <div className={`p-2.5 sm:p-4 rounded-xl sm:rounded-2xl border flex flex-wrap items-center justify-between gap-2 sm:gap-4 ${
         isSubscriber
           ? 'bg-green-50/80 dark:bg-green-950/40 border-green-200/70 dark:border-green-800/50'
           : 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-200/70 dark:border-blue-800/50'
       }`}>
-        <div className="flex items-center gap-3.5">
-          <div className={`w-11 h-11 rounded-xl text-white flex items-center justify-center font-black text-base shadow-sm ${
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl text-white flex items-center justify-center font-black text-xs sm:text-sm shadow-xs shrink-0 ${
             isSubscriber ? 'bg-green-600' : 'bg-blue-600'
           }`}>
             {totalPieces}
           </div>
-          <div>
-            <p className={`text-xs font-black uppercase tracking-wider ${
+          <div className="min-w-0">
+            <p className={`text-[11px] sm:text-xs font-black uppercase tracking-wider truncate ${
               isSubscriber ? 'text-green-900 dark:text-green-200' : 'text-blue-900 dark:text-blue-200'
             }`}>
-              {totalPieces === 1 ? '1 Garment Selected' : `${totalPieces} Garments Selected`}
+              {totalPieces === 1 ? '1 Garment' : `${totalPieces} Garments`}
             </p>
-            <p className={`text-[11px] ${
+            <p className={`text-[9.5px] sm:text-[11px] truncate ${
               isSubscriber ? 'text-green-700/80 dark:text-green-300/80' : 'text-blue-700/80 dark:text-blue-300/80'
             }`}>
-              {totalPieces > 0 ? 'Itemized custom garment wash & fold' : 'Select your tops, bottoms, combos, activewear or whites'}
+              {totalPieces > 0 ? 'Custom garment wash & fold' : 'Select items above'}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 ml-auto">
           <div className="text-right">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 block">
-              {isSubscriber ? 'Credits Required' : 'Total Piece Amount'}
+            <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 block">
+              {isSubscriber ? 'Credits Due' : 'Amount'}
             </span>
             {isSubscriber ? (
-              <div className="flex items-baseline gap-1.5 justify-end">
-                <span className="text-xl font-black text-green-600 dark:text-green-400">
-                  {totalCredits} Credits
+              <div className="flex items-baseline gap-1 justify-end">
+                <span className="text-sm sm:text-base font-black text-green-600 dark:text-green-400">
+                  {totalCredits} Cr
                 </span>
-                <span className="text-sm font-bold text-gray-600 dark:text-gray-300">
+                <span className="text-[10px] sm:text-xs font-bold text-gray-500">
                   (₹{totalPrice})
                 </span>
               </div>
             ) : (
-              <div className="flex items-baseline gap-2 justify-end">
+              <div className="flex items-baseline gap-1 justify-end">
                 {isOfferActive && totalSavings > 0 && (
-                  <span className="text-sm font-bold text-gray-400 dark:text-gray-500 line-through">
+                  <span className="text-[10px] sm:text-xs font-bold text-gray-400 dark:text-gray-500 line-through">
                     ₹{totalRegularPrice}
                   </span>
                 )}
-                <span className="text-xl sm:text-2xl font-black text-blue-600 dark:text-blue-400">
+                <span className="text-sm sm:text-lg font-black text-blue-600 dark:text-blue-400">
                   ₹{totalPrice}
                 </span>
               </div>
             )}
             {!isSubscriber && isOfferActive && totalSavings > 0 && (
-              <span className="text-[11px] font-black text-green-600 dark:text-green-400 block">
-                You save ₹{totalSavings} with Offer!
+              <span className="text-[9px] font-black text-green-600 dark:text-green-400 block">
+                Save ₹{totalSavings}
               </span>
             )}
           </div>
@@ -420,10 +420,10 @@ export const GarmentPieceSelector: React.FC<GarmentPieceSelectorProps> = ({
             <button
               type="button"
               onClick={handleReset}
-              className="p-2.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors"
+              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors shrink-0"
               title="Reset Selection"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
           )}
         </div>

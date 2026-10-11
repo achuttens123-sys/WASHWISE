@@ -19,6 +19,11 @@ const TermsModal: React.FC<TermsModalProps> = ({
 }) => {
   const [view, setView] = useState<'disclaimer' | 'detailed'>(mode);
 
+  // Sync view when mode or isOpen changes
+  React.useEffect(() => {
+    setView(mode);
+  }, [mode, isOpen]);
+
   const disclaimerPoints = [
     "We provide washing, cleaning, and basic garment care services. Our service is intended for routine laundry and hygiene maintenance.",
     "While we strive to clean garments thoroughly, we do not guarantee complete removal of tough stains such as oil, ink, dye, paint, or old stains.",
@@ -32,12 +37,17 @@ const TermsModal: React.FC<TermsModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div 
+        onClick={onClose}
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-pointer"
+        aria-label="Close modal overlay"
+      />
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="bg-white dark:bg-gray-900 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl border border-blue-50 dark:border-gray-800 flex flex-col"
+        className="relative z-10 bg-white dark:bg-gray-900 rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-2xl border border-blue-50 dark:border-gray-800 flex flex-col"
       >
         {/* Header */}
         <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-blue-50/50 dark:bg-blue-900/10">

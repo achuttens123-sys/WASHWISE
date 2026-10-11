@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- WashWise Vibrant Royal Blue Gradient -->
+    <linearGradient id="ww-mask-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b5bfd"/>
+      <stop offset="100%" stop-color="#2d4af7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Full-bleed background color for Android maskable icon safe zone -->
+  <rect width="512" height="512" fill="url(#ww-mask-blue)"/>
+
+  <!-- Centered Inner White Squircle Border scaled within 80% safe zone circle -->
+  <rect x="100" y="100" width="312" height="312" rx="78" fill="none" stroke="#ffffff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

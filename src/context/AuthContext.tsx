@@ -13,6 +13,7 @@ interface AuthContextType {
   isAuthReady: boolean;
   isAdmin: boolean;
   isSuperAdmin: boolean;
+  isStoreAdmin: boolean;
   isStoreManager: boolean;
   isStoreStaff: boolean;
   isDeliveryStaff: boolean;
@@ -26,6 +27,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export const DEVICE_SESSION_KEY = 'washwise_device_auth_session';
+export const DEVICE_REMEMBER_FLAG = 'washwise_remember_device';
+
 const cleanData = (data: any) => {
   const cleaned = { ...data };
   Object.keys(cleaned).forEach(key => {
@@ -37,16 +41,48 @@ const cleanData = (data: any) => {
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  // Restore user instantly from device memory to eliminate flash of logged-out state
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(DEVICE_SESSION_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.uid) {
+            return parsed as User;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to parse device auth memory:', e);
+      }
+    }
+    return null;
+  });
+
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  
+  // If user was already cached in device memory, don't block render with loading spinner
+  const [loading, setLoading] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(DEVICE_SESSION_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.uid) return false;
+        }
+      } catch (e) {}
+    }
+    return true;
+  });
+
   const [isAuthReady, setIsAuthReady] = useState(false);
 
   const isSuperAdmin = user?.adminRole === 'super_admin' || isSuperAdminEmail(user?.email);
-  const isStoreManager = user?.adminRole === 'store_manager';
+  const isStoreAdmin = user?.adminRole === 'store_admin';
+  const isStoreManager = user?.adminRole === 'store_manager' || isStoreAdmin;
   const isStoreStaff = user?.adminRole === 'store_staff';
-  const isDeliveryStaff = user?.adminRole === 'delivery_staff';
-  const isAdmin = isSuperAdmin || isStoreManager || isStoreStaff || isDeliveryStaff || user?.role === 'admin' || !!user?.adminRole;
+  const isDeliveryStaff = user?.adminRole === 'delivery_staff' || user?.adminRole === 'delivery_partner';
+  const isAdmin = isSuperAdmin || isStoreAdmin || isStoreManager || isStoreStaff || isDeliveryStaff || user?.role === 'admin' || !!user?.adminRole;
 
   useEffect(() => {
     let userUnsubscribe: (() => void) | null = null;
@@ -65,6 +101,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const userData = docSnap.data() as User;
             if (userData.isSuspended) {
               setUser(null);
+              localStorage.removeItem(DEVICE_SESSION_KEY);
+              localStorage.removeItem(DEVICE_REMEMBER_FLAG);
               auth.signOut();
               alert('Your account has been suspended. Please contact support.');
             } else {
@@ -116,10 +154,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 updateDoc(doc(db, 'users', fbUser.uid), { referralCode: newCode }).catch(() => {});
               }
 
+              // Store persistent device memory so user stays logged in across sessions
+              try {
+                localStorage.setItem(DEVICE_SESSION_KEY, JSON.stringify(userData));
+                localStorage.setItem(DEVICE_REMEMBER_FLAG, 'true');
+              } catch (e) {
+                console.warn('Could not save device session:', e);
+              }
+
               setUser(userData);
             }
           } else {
-            setUser(null);
+            // User record does not exist yet in Firestore
+            // Keep user from device memory if available during signup/registration transition
+            const saved = localStorage.getItem(DEVICE_SESSION_KEY);
+            if (!saved) {
+              setUser(null);
+            }
           }
           setLoading(false);
           setIsAuthReady(true);
@@ -130,6 +181,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setIsAuthReady(true);
         });
       } else {
+        // Firebase Auth reported no active user
+        // Clear cached device memory only if there is genuinely no user
+        localStorage.removeItem(DEVICE_SESSION_KEY);
+        localStorage.removeItem(DEVICE_REMEMBER_FLAG);
         setUser(null);
         setLoading(false);
         setIsAuthReady(true);
@@ -146,6 +201,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanedUserData = cleanData(userData);
     setUser(cleanedUserData);
     try {
+      localStorage.setItem(DEVICE_SESSION_KEY, JSON.stringify(cleanedUserData));
+      localStorage.setItem(DEVICE_REMEMBER_FLAG, 'true');
       await setDoc(doc(db, 'users', userData.uid), cleanedUserData, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${userData.uid}`);
@@ -158,6 +215,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updatedUser = { ...user, ...cleanedUpdate };
     setUser(updatedUser);
     try {
+      localStorage.setItem(DEVICE_SESSION_KEY, JSON.stringify(updatedUser));
       await updateDoc(doc(db, 'users', user.uid), cleanedUpdate);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
@@ -186,9 +244,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    await auth.signOut();
-    setUser(null);
-    setFirebaseUser(null);
+    try {
+      localStorage.removeItem(DEVICE_SESSION_KEY);
+      localStorage.removeItem(DEVICE_REMEMBER_FLAG);
+      await auth.signOut();
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      setUser(null);
+      setFirebaseUser(null);
+      setLoading(false);
+    }
   };
 
   return (
@@ -199,6 +265,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isAuthReady, 
       isAdmin, 
       isSuperAdmin, 
+      isStoreAdmin,
       isStoreManager, 
       isStoreStaff,
       isDeliveryStaff,

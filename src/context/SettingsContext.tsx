@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from './AuthContext';
-import { GarmentPieceItem, PricingSettings, SubscriptionPlan, ReferralSettings, LoyaltySettings } from '../types';
+import { GarmentPieceItem, PricingSettings, SubscriptionPlan, ReferralSettings, LoyaltySettings, ReminderSettings, DEFAULT_REMINDER_SETTINGS, TIME_SLOTS, sortTimeSlots } from '../types';
 import { GARMENT_CATALOG, normalizeGarmentItem } from '../data/garmentCatalog';
 
 export const DEFAULT_LOYALTY_SETTINGS: LoyaltySettings = {
@@ -55,6 +55,8 @@ export interface GlobalSettings {
   garmentCatalog?: GarmentPieceItem[];
   referral?: ReferralSettings;
   loyalty?: LoyaltySettings;
+  reminders?: ReminderSettings;
+  customSlots?: string[];
 }
 
 export const DEFAULT_SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
@@ -222,7 +224,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       discounts: [],
       promos: [],
       referral: DEFAULT_REFERRAL_SETTINGS,
-      loyalty: DEFAULT_LOYALTY_SETTINGS
+      loyalty: DEFAULT_LOYALTY_SETTINGS,
+      reminders: DEFAULT_REMINDER_SETTINGS,
+      customSlots: TIME_SLOTS
     };
 
     const unsub = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
@@ -281,7 +285,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           discounts: data?.discounts || defaultSettings.discounts,
           promos: data?.promos || defaultSettings.promos,
           referral: data?.referral ? { ...DEFAULT_REFERRAL_SETTINGS, ...data.referral } : DEFAULT_REFERRAL_SETTINGS,
-          loyalty: data?.loyalty ? { ...DEFAULT_LOYALTY_SETTINGS, ...data.loyalty } : DEFAULT_LOYALTY_SETTINGS
+          loyalty: data?.loyalty ? { ...DEFAULT_LOYALTY_SETTINGS, ...data.loyalty } : DEFAULT_LOYALTY_SETTINGS,
+          reminders: data?.reminders ? { ...DEFAULT_REMINDER_SETTINGS, ...data.reminders, templates: data.reminders.templates || DEFAULT_REMINDER_SETTINGS.templates } : DEFAULT_REMINDER_SETTINGS,
+          customSlots: Array.isArray(data?.customSlots) && data.customSlots.length > 0 ? sortTimeSlots(data.customSlots) : TIME_SLOTS
         };
         setSettings(mergedSettings);
         

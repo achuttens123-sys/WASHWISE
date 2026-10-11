@@ -2,7 +2,60 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Gracefully prevent benign Vite dev server WebSocket disconnect warnings from surfacing in AI Studio iframe
+      (function() {
+        var origConsoleError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          var text = args.map(function(a) { 
+            return (a && a.stack) ? a.stack : (typeof a === 'object' ? (a.message || JSON.stringify(a)) : String(a)); 
+          }).join(' ');
+          if (text.indexOf('WebSocket') !== -1 || text.indexOf('closed without opened') !== -1 || text.indexOf('@vite/client') !== -1) {
+            return; // Gracefully filter benign Vite dev server WebSocket disconnect error
+          }
+          origConsoleError.apply(console, arguments);
+        };
+
+        window.addEventListener('error', function(e) {
+          if (e && (
+            (e.message && (e.message.indexOf('WebSocket') !== -1 || e.message.indexOf('closed without opened') !== -1)) ||
+            (e.error && e.error.message && (e.error.message.indexOf('WebSocket') !== -1 || e.error.message.indexOf('closed without opened') !== -1)) ||
+            (e.filename && e.filename.indexOf('@vite/client') !== -1)
+          )) {
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            if (e.preventDefault) e.preventDefault();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(e) {
+          if (e && e.reason) {
+            var msg = (typeof e.reason === 'string') ? e.reason : (e.reason.message || '');
+            if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('closed without opened') !== -1) {
+              if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+              if (e.preventDefault) e.preventDefault();
+            }
+          }
+        }, true);
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#3b5bfd" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#10131a" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="WashWise" />
+    <meta name="application-name" content="WashWise" />
+    <meta name="format-detection" content="telephone=no" />
+    
+    <!-- PWA App Icons & Manifest -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
     <title>WASHWISE</title>
     <meta name="description" content="A student-friendly laundry booking service with slot-based machine assignment." />
     <meta property="og:title" content="WASHWISE" />

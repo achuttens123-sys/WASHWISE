@@ -323,8 +323,16 @@ export const TagScannerModal: React.FC<TagScannerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] w-full max-w-2xl border border-gray-100 dark:border-gray-800 shadow-2xl overflow-hidden my-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div 
+        onClick={() => {
+          stopCamera();
+          onClose();
+        }}
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm cursor-pointer"
+        aria-label="Close modal overlay"
+      />
+      <div className="relative z-10 bg-white dark:bg-gray-900 rounded-[2.5rem] w-full max-w-2xl border border-gray-100 dark:border-gray-800 shadow-2xl overflow-hidden my-6">
         
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/50 dark:bg-gray-800/50">

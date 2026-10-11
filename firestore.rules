@@ -50,24 +50,28 @@ service cloud.firestore {
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('storeId', '') : '';
     }
 
+    function isStoreAdmin() {
+      return isAuthenticated() && (isSuperAdmin() || getAdminRole() == 'store_admin' || getAdminRole() == 'store_manager');
+    }
+
     function isStoreManager() {
-      return isAuthenticated() && (isSuperAdmin() || getAdminRole() == 'store_manager');
+      return isAuthenticated() && (isSuperAdmin() || getAdminRole() == 'store_manager' || getAdminRole() == 'store_admin');
     }
 
     function isStoreStaff() {
-      return isAuthenticated() && (isSuperAdmin() || isStoreManager() || getAdminRole() == 'store_staff');
+      return isAuthenticated() && (isSuperAdmin() || isStoreManager() || isStoreAdmin() || getAdminRole() == 'store_staff');
     }
 
     function isDeliveryStaff() {
-      return isAuthenticated() && (isSuperAdmin() || getAdminRole() == 'delivery_staff');
+      return isAuthenticated() && (isSuperAdmin() || getAdminRole() == 'delivery_staff' || getAdminRole() == 'delivery_partner');
     }
 
     function canAccessBooking(bookingData) {
       return (isAuthenticated() && request.auth.uid == bookingData.userId) || 
              isAdmin() ||
              isSuperAdmin() || 
-             (isStoreManager() && bookingData.get('storeId', '') == getStoreId()) ||
-             (isStoreStaff() && bookingData.get('staffId', '') == request.auth.uid) ||
+             (isStoreManager() && (getStoreId() == '' || bookingData.get('storeId', '') == getStoreId() || bookingData.get('storeId', '') == 'default')) ||
+             (isStoreStaff() && (getStoreId() == '' || bookingData.get('storeId', '') == getStoreId() || bookingData.get('staffId', '') == request.auth.uid)) ||
              (isDeliveryStaff() && bookingData.get('deliveryStaffId', '') == request.auth.uid);
     }
 
@@ -123,6 +127,8 @@ service cloud.firestore {
           (request.resource.data.get('role', 'user') == resource.data.get('role', 'user')) &&
           (request.resource.data.get('adminRole', '') == resource.data.get('adminRole', '')) &&
           (request.resource.data.get('isSuspended', false) == resource.data.get('isSuspended', false)) &&
+          (request.resource.data.get('riskLevel', 'low') == resource.data.get('riskLevel', 'low')) &&
+          (request.resource.data.get('riskScore', 0) == resource.data.get('riskScore', 0)) &&
           // Financial immutability on client (must use backend APIs)
           (request.resource.data.get('walletBalance', 0) == resource.data.get('walletBalance', 0)) &&
           (request.resource.data.get('laundryCredits', 0) == resource.data.get('laundryCredits', 0)) &&
@@ -237,6 +243,12 @@ service cloud.firestore {
         isAdmin() || 
         isSuperAdmin()
       );
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    // Fraud and Risk Protection Incident Logs
+    match /risk_logs/{logId} {
+      allow read: if isAdmin() || isSuperAdmin();
       allow write: if isAdmin() || isSuperAdmin();
     }
   }

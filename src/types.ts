@@ -29,6 +29,10 @@ export interface User {
   totalMonthlyCredits?: number;
   creditResetDate?: string;
   isSuspended?: boolean;
+  suspendedReason?: string;
+  riskLevel?: 'low' | 'medium' | 'high' | 'blocked';
+  riskScore?: number;
+  riskFlags?: string[];
   walletBalance?: number;
   photoURL?: string;
   referralCode?: string;
@@ -52,6 +56,51 @@ export interface LoyaltySettings {
   redemptionThreshold: number; // e.g. 40
   rewardOnFreeWash?: boolean;
 }
+
+export interface ReminderTemplate {
+  id: string;
+  text: string;
+  tag?: 'weekly_checkin' | 'weekend_vibe' | 'weekday_smart' | 'fomo_slot' | 'custom';
+  active: boolean;
+}
+
+export interface ReminderSettings {
+  enabled: boolean;
+  daysAfterLastBooking: number; // default: 5 days
+  quietHoursStart?: number; // e.g. 22 (10 PM)
+  quietHoursEnd?: number; // e.g. 8 (8 AM)
+  maxRemindersPerWeek?: number; // default: 1 to prevent irritation
+  templates: ReminderTemplate[];
+  upcomingWashHoursNotice?: number; // default: 2 hours prior
+  subscriptionDaysNotice?: number; // default: 3 days prior
+}
+
+export const DEFAULT_REMINDER_TEMPLATES: ReminderTemplate[] = [
+  { id: '1', text: 'New week alle… ningal busy aayal mathi, laundry njangal handle cheyyam', tag: 'weekly_checkin', active: true },
+  { id: '2', text: 'Just checking… laundry plan undo? 😏', tag: 'weekly_checkin', active: true },
+  { id: '3', text: 'Half week kazhinju… little refresh venam alle?', tag: 'weekday_smart', active: true },
+  { id: '4', text: '“Innu small wash cheythal… weekend free aakum 😌”', tag: 'weekday_smart', active: true },
+  { id: '5', text: '“Ningal relax cheyyan… njangal laundry handle cheyyam 🤍”', tag: 'weekday_smart', active: true },
+  { id: '6', text: '“Weekend plans undo? 👀 clothes ready aano? 😉”', tag: 'weekend_vibe', active: true },
+  { id: '7', text: '“Friday vibe set aakan… fresh clothes must alle 😏”', tag: 'weekend_vibe', active: true },
+  { id: '8', text: '“Innu perfect day aanu… laundry kazhinjal full relax 😌”', tag: 'weekend_vibe', active: true },
+  { id: '9', text: '“Saturday chillinu munpe… oru quick wash cheyyam? 😊”', tag: 'weekend_vibe', active: true },
+  { id: '10', text: '“Hey… ningal relax cheyyu 🤍 but slots fast fill aavunnu… book cheyyumo? 😊”', tag: 'fomo_slot', active: true },
+  { id: '11', text: '“Innu wash njangal handle cheyyam… but kurachu slots mathram baki 😌”', tag: 'fomo_slot', active: true },
+  { id: '12', text: '“Ningalk vendi oru slot save cheyyan thonni 😏 but others fast aayi book cheyyunnu 👀”', tag: 'fomo_slot', active: true },
+  { id: '13', text: '“Late aayal… ningal miss aakum 😌 njangal wait cheyyunnu ketto”', tag: 'fomo_slot', active: true },
+];
+
+export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
+  enabled: true,
+  daysAfterLastBooking: 5,
+  quietHoursStart: 22,
+  quietHoursEnd: 8,
+  maxRemindersPerWeek: 1,
+  templates: DEFAULT_REMINDER_TEMPLATES,
+  upcomingWashHoursNotice: 2,
+  subscriptionDaysNotice: 3,
+};
 
 export interface ReferralSettings {
   enabled: boolean;
@@ -374,6 +423,32 @@ export const TIME_SLOTS = [
   "07:00-08:00 PM"
 ];
 
+// Helper to convert time slot strings like "08:00-09:00 AM" into sortable minutes from midnight
+export const parseSlotToMinutes = (slotStr: string): number => {
+  try {
+    const parts = slotStr.trim().split(' ');
+    const range = parts[0] || '';
+    const period = (parts[1] || '').toUpperCase();
+    const startTime = range.split('-')[0] || '';
+    let [hours, minutes] = startTime.split(':').map(Number);
+    if (isNaN(hours)) hours = 0;
+    if (isNaN(minutes)) minutes = 0;
+    
+    if (period === 'PM' && hours < 12) {
+      hours += 12;
+    } else if (period === 'AM' && hours === 12) {
+      hours = 0;
+    }
+    return hours * 60 + minutes;
+  } catch (e) {
+    return 0;
+  }
+};
+
+export const sortTimeSlots = (slots: string[]): string[] => {
+  return [...slots].sort((a, b) => parseSlotToMinutes(a) - parseSlotToMinutes(b));
+};
+
 export const checkIsSubscriber = (user: any): boolean => {
   if (!user) return false;
   return Boolean(
@@ -384,3 +459,40 @@ export const checkIsSubscriber = (user: any): boolean => {
     (typeof user.kilosLeft === 'number' && user.kilosLeft > 0)
   );
 };
+
+export type RiskType = 
+  | 'HIGH_BOOKING_VELOCITY'
+  | 'EXCESSIVE_COD_ORDERS'
+  | 'PROMO_BRUTE_FORCE'
+  | 'SUSPICIOUS_TOPUP'
+  | 'SUSPENDED_ACCOUNT_ATTEMPT'
+  | 'REFERRAL_RING_DETECTED'
+  | 'TAMPERED_CLIENT_PRICE'
+  | 'UNAUTHORIZED_ADMIN_ATTEMPT';
+
+export type RiskSeverity = 'low' | 'medium' | 'high' | 'critical';
+export type RiskAction = 'blocked' | 'flagged' | 'warned';
+
+export interface RiskLog {
+  id?: string;
+  userId?: string;
+  userEmail?: string;
+  ipAddress?: string;
+  riskType: RiskType;
+  severity: RiskSeverity;
+  actionTaken: RiskAction;
+  details: string;
+  metadata?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface RiskSettings {
+  maxDailyBookingsPerUser: number;
+  maxActiveCodBookings: number;
+  maxSingleWalletTopup: number;
+  maxDailyWalletTopup: number;
+  promoAttemptLimit: number;
+  enforceIpReferralCheck: boolean;
+  autoBlockHighRisk: boolean;
+}
+

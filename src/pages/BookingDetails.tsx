@@ -19,7 +19,7 @@ const BookingDetails: React.FC = () => {
   const { user, updateUser } = useAuth();
   const { settings } = useSettings();
   
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(true);
   const [isTermsOpen, setIsTermsOpen] = useState(false);
   const [isAddingNewAddress, setIsAddingNewAddress] = useState(false);
   const [newAddressText, setNewAddressText] = useState('');
@@ -31,7 +31,7 @@ const BookingDetails: React.FC = () => {
 
   const [bookingData, setBookingData] = useState({
     pickupDrop: false,
-    pickupDropAnswered: false,
+    pickupDropAnswered: true,
     serviceType: 'Wash & Fold' as 'Wash & Fold' | 'Express Wash' | 'Wash & Fold (Per Piece)',
     serviceTypeSelected: true,
     approxLoad: '1-4 kg' as '1-4 kg' | '5 kg' | '6 kg' | '7+ kg',
@@ -59,6 +59,17 @@ const BookingDetails: React.FC = () => {
       }
     };
     fetchStores();
+
+    // Prefetch next checkout steps for fast 0ms booking transitions
+    const prefetchNextSteps = () => {
+      import('./Billing').catch(() => {});
+      import('./Confirmation').catch(() => {});
+    };
+    if ('requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(prefetchNextSteps);
+    } else {
+      setTimeout(prefetchNextSteps, 800);
+    }
   }, []);
 
   useEffect(() => {
@@ -201,10 +212,10 @@ const BookingDetails: React.FC = () => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-3 sm:px-4 py-3 sm:py-8 pb-28 sm:pb-32">
+    <div className="max-w-2xl mx-auto px-1 sm:px-4 py-2 sm:py-8 pb-24 sm:pb-32">
       <button 
         onClick={() => navigate('/dashboard')}
-        className="flex items-center text-gray-500 hover:text-blue-600 mb-4 sm:mb-8 transition-colors text-xs sm:text-sm font-medium"
+        className="flex items-center text-gray-500 hover:text-blue-600 mb-2.5 sm:mb-8 transition-colors text-xs sm:text-sm font-medium"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Change Slot
@@ -213,14 +224,14 @@ const BookingDetails: React.FC = () => {
       <motion.div
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white dark:bg-gray-900 p-4 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
+        className="bg-white dark:bg-gray-900 p-3 sm:p-8 rounded-xl sm:rounded-3xl shadow-sm sm:shadow-xl border border-blue-50 dark:border-gray-800"
       >
         {/* Selected Slot Header Card */}
-        <div className="mb-5 sm:mb-8 p-3 sm:p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl sm:rounded-2xl flex items-center justify-between">
+        <div className="mb-3.5 sm:mb-8 p-2.5 sm:p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl sm:rounded-2xl flex items-center justify-between">
           <div>
-            <p className="text-[10px] sm:text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Selected Slot</p>
-            <h2 className="text-sm sm:text-lg font-bold text-gray-800 dark:text-gray-100">{dateStr} | {timeSlot}</h2>
-            <p className="text-[11px] sm:text-xs font-semibold mt-0.5">
+            <p className="text-[9px] sm:text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Selected Slot</p>
+            <h2 className="text-xs sm:text-lg font-bold text-gray-800 dark:text-gray-100">{dateStr} | {timeSlot}</h2>
+            <p className="text-[10px] sm:text-xs font-semibold mt-0.5">
               {isSubscriber ? (
                 <span className="text-emerald-700 dark:text-emerald-300">
                   Amount to be paid: <strong className="font-bold">₹0 ({totalCreditsNeeded} Credits • ₹{currentTotalPrice.toFixed(2)} value)</strong>
@@ -232,30 +243,30 @@ const BookingDetails: React.FC = () => {
               )}
             </p>
           </div>
-          <div className="bg-white dark:bg-gray-800 p-1.5 sm:p-2 rounded-xl shadow-xs shrink-0 ml-2">
+          <div className="bg-white dark:bg-gray-800 p-1.5 sm:p-2 rounded-lg sm:rounded-xl shadow-xs shrink-0 ml-2">
             <Check className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />
           </div>
         </div>
 
-        <div className="space-y-6 sm:space-y-8">
+        <div className="space-y-3 sm:space-y-5">
           {/* STEP 1: Store Selection */}
           <section>
-            <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center">
-              <StoreIcon className="w-4 h-4 mr-2 text-blue-600 dark:text-blue-400" /> 1. Select Store
+            <h3 className="text-xs sm:text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 sm:mb-3 flex items-center">
+              <StoreIcon className="w-3.5 h-3.5 mr-1.5 text-blue-600 dark:text-blue-400" /> 1. Select Store
             </h3>
             
-            <div className="relative mb-3">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <div className="relative mb-2">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
               <input 
                 type="text"
-                placeholder="Search for a store by name or location..."
+                placeholder="Search store name or location..."
                 value={storeSearch}
                 onChange={(e) => setStoreSearch(e.target.value)}
-                className="w-full pl-11 pr-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100"
+                className="w-full pl-9 pr-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg sm:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100"
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-2.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700">
+            <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700">
               {stores
                 .filter(s => {
                   const search = (storeSearch || '').toLowerCase();
@@ -270,24 +281,24 @@ const BookingDetails: React.FC = () => {
                       setSelectedStore(store);
                       setBookingData(prev => ({ ...prev, storeId: store.id }));
                     }}
-                    className={`p-3.5 rounded-2xl border-2 transition-all text-left flex items-center justify-between ${
+                    className={`p-2.5 sm:p-3 rounded-xl border-2 transition-all text-left flex items-center justify-between ${
                       bookingData.storeId === store.id 
                         ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600' 
                         : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-xl ${bookingData.storeId === store.id ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'}`}>
-                        <StoreIcon className="w-4 h-4" />
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                      <div className={`p-1.5 rounded-lg shrink-0 ${bookingData.storeId === store.id ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'}`}>
+                        <StoreIcon className="w-3.5 h-3.5" />
                       </div>
-                      <div>
-                        <p className="font-bold text-sm text-gray-800 dark:text-gray-100">{store.name}</p>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{store.location}</p>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-xs sm:text-sm text-gray-800 dark:text-gray-100 truncate">{store.name}</p>
+                        <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-widest truncate">{store.location}</p>
                       </div>
                     </div>
                     {bookingData.storeId === store.id && (
-                      <div className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center">
-                        <Check className="w-3.5 h-3.5 text-white" />
+                      <div className="w-4 h-4 bg-blue-600 rounded-full flex items-center justify-center shrink-0">
+                        <Check className="w-3 h-3 text-white" />
                       </div>
                     )}
                   </button>
@@ -298,7 +309,7 @@ const BookingDetails: React.FC = () => {
                        (s.location || '').toLowerCase().includes(search) ||
                        (s.address || '').toLowerCase().includes(search);
               }).length === 0 && (
-                <div className="py-6 text-center">
+                <div className="py-4 text-center">
                   <p className="text-gray-500 dark:text-gray-400 text-xs font-medium">No stores found matching your search.</p>
                 </div>
               )}
@@ -313,41 +324,41 @@ const BookingDetails: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 15 }}
               >
-                <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center">
-                  <Truck className="w-4 h-4 mr-2 text-blue-600 dark:text-blue-400" /> 2. Pickup & Drop
+                <h3 className="text-xs sm:text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 sm:mb-3 flex items-center">
+                  <Truck className="w-3.5 h-3.5 mr-1.5 text-blue-600 dark:text-blue-400" /> 2. Pickup & Drop
                 </h3>
-                <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-4 mb-3 sm:mb-4">
                   <motion.button
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => setBookingData(prev => ({ ...prev, pickupDrop: true, pickupDropAnswered: true }))}
-                    className={`p-4 rounded-2xl border-2 transition-all text-left ${
+                    className={`p-2.5 sm:p-3.5 rounded-xl border-2 transition-all text-left ${
                       bookingData.pickupDropAnswered && bookingData.pickupDrop ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600' : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
                     }`}
                   >
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="font-bold text-gray-800 dark:text-gray-100">Yes</span>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="font-bold text-xs sm:text-sm text-gray-800 dark:text-gray-100">Yes</span>
                       {bookingData.pickupDropAnswered && bookingData.pickupDrop && (
-                        <motion.div layoutId="pickup-dot" className="w-4 h-4 bg-blue-600 rounded-full" />
+                        <motion.div layoutId="pickup-dot" className="w-3.5 h-3.5 bg-blue-600 rounded-full" />
                       )}
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Doorstep service</p>
+                    <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">Doorstep service</p>
                   </motion.button>
                   <motion.button
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => setBookingData(prev => ({ ...prev, pickupDrop: false, pickupDropAnswered: true }))}
-                    className={`p-4 rounded-2xl border-2 transition-all text-left ${
+                    className={`p-2.5 sm:p-3.5 rounded-xl border-2 transition-all text-left ${
                       bookingData.pickupDropAnswered && !bookingData.pickupDrop ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600' : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
                     }`}
                   >
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="font-bold text-gray-800 dark:text-gray-100">No</span>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="font-bold text-xs sm:text-sm text-gray-800 dark:text-gray-100">No</span>
                       {bookingData.pickupDropAnswered && !bookingData.pickupDrop && (
-                        <motion.div layoutId="pickup-dot" className="w-4 h-4 bg-blue-600 rounded-full" />
+                        <motion.div layoutId="pickup-dot" className="w-3.5 h-3.5 bg-blue-600 rounded-full" />
                       )}
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Self drop (Free)</p>
+                    <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">Self drop (Free)</p>
                   </motion.button>
                 </div>
 
@@ -357,31 +368,31 @@ const BookingDetails: React.FC = () => {
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
-                      className="space-y-6 overflow-hidden mb-6"
+                      className="space-y-4 overflow-hidden mb-4"
                     >
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Pickup Address</label>
+                        <label className="text-[10px] sm:text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Pickup Address</label>
                         
                         {!isAddingNewAddress && (user?.savedAddresses?.length || user?.address) ? (
-                          <div className="space-y-3">
+                          <div className="space-y-2">
                             {Array.from(new Set([...(user?.savedAddresses || []), user?.address].filter(Boolean))).map((addr: string, i) => (
                               <div 
                                 key={i} 
                                 onClick={() => setBookingData(prev => ({ ...prev, address: addr }))}
-                                className={`p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-4 ${
+                                className={`p-2.5 sm:p-3 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
                                   bookingData.address === addr 
                                     ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600' 
                                     : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
                                 }`}
                               >
-                                <div className="mt-1">
+                                <div className="mt-0.5">
                                   {bookingData.address === addr ? (
-                                    <motion.div layoutId="pickup-addr-dot" className="w-4 h-4 bg-blue-600 rounded-full" />
+                                    <motion.div layoutId="pickup-addr-dot" className="w-3.5 h-3.5 bg-blue-600 rounded-full" />
                                   ) : (
-                                    <div className="w-4 h-4 border-2 border-gray-300 dark:border-gray-600 rounded-full" />
+                                    <div className="w-3.5 h-3.5 border-2 border-gray-300 dark:border-gray-600 rounded-full" />
                                   )}
                                 </div>
-                                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{addr}</span>
+                                <span className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-200">{addr}</span>
                               </div>
                             ))}
                             
@@ -390,15 +401,15 @@ const BookingDetails: React.FC = () => {
                                 setIsAddingNewAddress(true);
                                 setNewAddressText('');
                               }}
-                              className="flex items-center gap-2 text-sm font-bold text-blue-600 dark:text-blue-400 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-colors w-full"
+                              className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 p-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors w-full"
                             >
-                              <Plus className="w-4 h-4" /> Add New Address
+                              <Plus className="w-3.5 h-3.5" /> Add New Address
                             </button>
                           </div>
                         ) : (
-                          <div className="space-y-3">
+                          <div className="space-y-2">
                             <div className="relative">
-                              <Home className="absolute left-4 top-4 w-5 h-5 text-gray-400 dark:text-gray-500" />
+                              <Home className="absolute left-3 top-3 w-4 h-4 text-gray-400 dark:text-gray-500" />
                               <textarea
                                 required
                                 value={newAddressText}
@@ -407,11 +418,11 @@ const BookingDetails: React.FC = () => {
                                   setBookingData(prev => ({ ...prev, address: e.target.value }));
                                 }}
                                 placeholder="Enter your full address with landmarks..."
-                                rows={3}
-                                className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 resize-none text-sm"
+                                rows={2}
+                                className="w-full pl-9 pr-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 resize-none text-xs sm:text-sm"
                               />
                             </div>
-                            <div className="flex gap-3">
+                            <div className="flex gap-2">
                               <button
                                 onClick={async () => {
                                   if (!newAddressText.trim()) return;
@@ -423,7 +434,7 @@ const BookingDetails: React.FC = () => {
                                   setBookingData(prev => ({ ...prev, address: newAddressText.trim() }));
                                   setIsAddingNewAddress(false);
                                 }}
-                                className="flex-1 py-3 bg-blue-600 text-white font-bold text-sm rounded-xl hover:bg-blue-700 transition-colors"
+                                className="flex-1 py-2 bg-blue-600 text-white font-bold text-xs rounded-xl hover:bg-blue-700 transition-colors"
                               >
                                 Save & Use This Address
                               </button>
@@ -433,7 +444,7 @@ const BookingDetails: React.FC = () => {
                                     setIsAddingNewAddress(false);
                                     setBookingData(prev => ({ ...prev, address: user.address || user.savedAddresses?.[0] || '' }));
                                   }}
-                                  className="px-6 py-3 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold text-sm rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                                  className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold text-xs rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
                                 >
                                   Cancel
                                 </button>
@@ -443,102 +454,100 @@ const BookingDetails: React.FC = () => {
                         )}
                       </div>
 
-                      <div className="p-4 rounded-2xl flex items-start gap-4 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200">
-                        <Info className="w-5 h-5 mt-0.5 shrink-0" />
+                      <div className="p-2.5 rounded-xl flex items-start gap-2.5 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200">
+                        <Info className="w-4 h-4 mt-0.5 shrink-0" />
                         <div>
-                          <p className="text-sm font-bold">Delivery Information</p>
-                          <p className="text-xs opacity-80 mt-0.5">
+                          <p className="text-xs font-bold">Delivery Fee</p>
+                          <p className="text-[11px] opacity-80 mt-0.5">
                             {isSubscriber 
                               ? 'Delivery is FREE for subscribers!' 
-                              : `A flat delivery fee of ₹${settings?.pricing?.deliveryFee ?? 30} applies for pickup and drop service.`}
+                              : `A flat delivery fee of ₹${settings?.pricing?.deliveryFee ?? 30} applies.`}
                           </p>
                         </div>
                       </div>
 
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Contact Phone</label>
-                          
-                          {!isAddingNewPhone && (user?.savedPhones?.length || user?.phone) ? (
-                            <div className="space-y-3">
-                              {Array.from(new Set([...(user?.savedPhones || []), user?.phone].filter(Boolean))).map((ph: string, i) => (
-                                <div 
-                                  key={i} 
-                                  onClick={() => setBookingData(prev => ({ ...prev, phone: ph }))}
-                                  className={`p-4 rounded-xl border-2 transition-all cursor-pointer flex gap-4 ${
-                                    bookingData.phone === ph 
-                                      ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600' 
-                                      : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
-                                  }`}
-                                >
-                                  <div className="mt-1">
-                                    {bookingData.phone === ph ? (
-                                      <motion.div layoutId="contact-phone-dot" className="w-4 h-4 bg-blue-600 rounded-full" />
-                                    ) : (
-                                      <div className="w-4 h-4 border-2 border-gray-300 dark:border-gray-600 rounded-full" />
-                                    )}
-                                  </div>
-                                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{ph}</span>
-                                </div>
-                              ))}
-                              
-                              <button 
-                                onClick={() => {
-                                  setIsAddingNewPhone(true);
-                                  setNewPhoneText('');
-                                }}
-                                className="flex items-center gap-2 text-sm font-bold text-blue-600 dark:text-blue-400 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-colors w-full"
+                      <div className="space-y-2">
+                        <label className="text-[10px] sm:text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Contact Phone</label>
+                        
+                        {!isAddingNewPhone && (user?.savedPhones?.length || user?.phone) ? (
+                          <div className="space-y-2">
+                            {Array.from(new Set([...(user?.savedPhones || []), user?.phone].filter(Boolean))).map((ph: string, i) => (
+                              <div 
+                                key={i} 
+                                onClick={() => setBookingData(prev => ({ ...prev, phone: ph }))}
+                                className={`p-2.5 sm:p-3 rounded-xl border-2 transition-all cursor-pointer flex gap-3 ${
+                                  bookingData.phone === ph 
+                                    ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600' 
+                                    : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
+                                }`}
                               >
-                                <Plus className="w-4 h-4" /> Add New Phone
+                                <div className="mt-0.5">
+                                  {bookingData.phone === ph ? (
+                                    <motion.div layoutId="contact-phone-dot" className="w-3.5 h-3.5 bg-blue-600 rounded-full" />
+                                  ) : (
+                                    <div className="w-3.5 h-3.5 border-2 border-gray-300 dark:border-gray-600 rounded-full" />
+                                  )}
+                                </div>
+                                <span className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-200">{ph}</span>
+                              </div>
+                            ))}
+                            
+                            <button 
+                              onClick={() => {
+                                setIsAddingNewPhone(true);
+                                setNewPhoneText('');
+                              }}
+                              className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 p-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors w-full"
+                            >
+                              <Plus className="w-3.5 h-3.5" /> Add New Phone
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="relative">
+                              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                              <input
+                                type="tel"
+                                required
+                                value={newPhoneText}
+                                onChange={(e) => {
+                                  setNewPhoneText(e.target.value);
+                                  setBookingData(prev => ({ ...prev, phone: e.target.value }));
+                                }}
+                                placeholder="Enter your contact phone number"
+                                className="w-full pl-9 pr-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 text-xs sm:text-sm"
+                              />
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={async () => {
+                                  if (!newPhoneText.trim()) return;
+                                  const currentSaved = user?.savedPhones || [];
+                                  const newSaved = [...currentSaved, newPhoneText.trim()];
+                                  if (updateUser) {
+                                    await updateUser({ savedPhones: newSaved, phone: user?.phone || newPhoneText.trim() });
+                                  }
+                                  setBookingData(prev => ({ ...prev, phone: newPhoneText.trim() }));
+                                  setIsAddingNewPhone(false);
+                                }}
+                                className="flex-1 py-2 bg-blue-600 text-white font-bold text-xs rounded-xl hover:bg-blue-700 transition-colors"
+                              >
+                                Save & Use This Number
                               </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              <div className="relative">
-                                <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
-                                <input
-                                  type="tel"
-                                  required
-                                  value={newPhoneText}
-                                  onChange={(e) => {
-                                    setNewPhoneText(e.target.value);
-                                    setBookingData(prev => ({ ...prev, phone: e.target.value }));
-                                  }}
-                                  placeholder="Enter your contact phone number"
-                                  className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 text-sm"
-                                />
-                              </div>
-                              <div className="flex gap-3">
+                              {(user?.savedPhones?.length || user?.phone) ? (
                                 <button
-                                  onClick={async () => {
-                                    if (!newPhoneText.trim()) return;
-                                    const currentSaved = user?.savedPhones || [];
-                                    const newSaved = [...currentSaved, newPhoneText.trim()];
-                                    if (updateUser) {
-                                      await updateUser({ savedPhones: newSaved, phone: user?.phone || newPhoneText.trim() });
-                                    }
-                                    setBookingData(prev => ({ ...prev, phone: newPhoneText.trim() }));
+                                  onClick={() => {
                                     setIsAddingNewPhone(false);
+                                    setBookingData(prev => ({ ...prev, phone: user.phone || user.savedPhones?.[0] || '' }));
                                   }}
-                                  className="flex-1 py-3 bg-blue-600 text-white font-bold text-sm rounded-xl hover:bg-blue-700 transition-colors"
+                                  className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold text-xs rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
                                 >
-                                  Save & Use This Number
+                                  Cancel
                                 </button>
-                                {(user?.savedPhones?.length || user?.phone) ? (
-                                  <button
-                                    onClick={() => {
-                                      setIsAddingNewPhone(false);
-                                      setBookingData(prev => ({ ...prev, phone: user.phone || user.savedPhones?.[0] || '' }));
-                                    }}
-                                    className="px-6 py-3 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold text-sm rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-                                  >
-                                    Cancel
-                                  </button>
-                                ) : null}
-                              </div>
+                              ) : null}
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}
@@ -547,7 +556,7 @@ const BookingDetails: React.FC = () => {
             )}
           </AnimatePresence>
 
-          {/* STEP 3: Service Type (Unveils once Pickup & Drop is answered) */}
+          {/* STEP 3: Service Type - SIZED AND STRUCTURED EXACTLY AS APPROXIMATE LOAD BOXES */}
           <AnimatePresence>
             {isStepStoreValid && bookingData.pickupDropAnswered && (
               <motion.section
@@ -555,43 +564,43 @@ const BookingDetails: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 15 }}
               >
-                <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center">
-                  <Package className="w-4 h-4 mr-2 text-blue-600 dark:text-blue-400" /> 3. Service Type
+                <h3 className="text-xs sm:text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 sm:mb-3 flex items-center">
+                  <Package className="w-3.5 h-3.5 mr-1.5 text-blue-600 dark:text-blue-400" /> 3. Service Type
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3.5">
                   {[
                     { 
                       type: 'Wash & Fold', 
                       title: 'Wash & Fold',
                       subtitle: 'Per Weight',
-                      desc: 'Standard laundry care', 
+                      desc: 'Standard', 
                       unitPrice: standardRate,
                       regularUnitPrice: isOfferActive && regularStandardRate > standardRate ? regularStandardRate : null,
-                      unitLabel: '/ kg',
+                      unitLabel: '/kg',
                       isPerPiece: false,
-                      badge: isOfferActive ? 'LIMITED OFFER' : null
+                      badge: isOfferActive ? 'OFFER' : null
                     },
                     { 
                       type: 'Express Wash', 
                       title: 'Express Wash',
-                      subtitle: 'Priority Wash',
-                      desc: 'Same-day faster turnaround', 
+                      subtitle: 'Priority',
+                      desc: 'Fastest', 
                       unitPrice: expressRate,
                       regularUnitPrice: isOfferActive && regularExpressRate > expressRate ? regularExpressRate : null,
-                      unitLabel: '/ kg',
+                      unitLabel: '/kg',
                       isPerPiece: false,
-                      badge: isOfferActive ? 'FASTEST' : null
+                      badge: isOfferActive ? 'FAST' : null
                     },
                     { 
                       type: 'Wash & Fold (Per Piece)', 
                       title: 'Wash & Fold',
                       subtitle: 'Per Piece',
-                      desc: 'Itemized custom count', 
+                      desc: 'Itemized', 
                       unitPrice: isOfferActive ? minOfferPiecePrice : minRegularPiecePrice,
                       regularUnitPrice: isOfferActive && minRegularPiecePrice > minOfferPiecePrice ? minRegularPiecePrice : null,
-                      unitLabel: '/ piece',
+                      unitLabel: '/pc',
                       isPerPiece: true,
-                      badge: isOfferActive ? 'LIMITED OFFER' : null
+                      badge: isOfferActive ? 'OFFER' : null
                     }
                   ].map(({ type, title, subtitle, desc, unitPrice, regularUnitPrice, unitLabel, isPerPiece: isPiece, badge }) => {
                     const isSelected = bookingData.serviceType === type;
@@ -603,68 +612,61 @@ const BookingDetails: React.FC = () => {
                         whileHover={{ scale: 1.02, y: -2 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={() => setBookingData(prev => ({ ...prev, serviceType: type as any }))}
-                        className={`p-4 sm:p-5 rounded-2xl border-2 transition-all text-left flex flex-col justify-between relative shadow-sm ${
+                        className={`p-2 sm:p-3.5 rounded-xl sm:rounded-2xl border-2 transition-all text-center flex flex-col items-center justify-between min-h-[105px] sm:min-h-[135px] relative shadow-xs sm:shadow-sm ${
                           isSelected 
                             ? 'bg-blue-50/90 dark:bg-blue-900/30 border-blue-600 ring-2 ring-blue-500/20 dark:ring-blue-400/20' 
-                            : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md'
+                            : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
                         }`}
                       >
                         {badge && (
-                          <span className="absolute -top-2.5 right-3 px-2.5 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[9px] font-black uppercase tracking-wider rounded-full shadow-sm">
+                          <span className="absolute -top-2 right-1 sm:right-2 px-1.5 py-0.2 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[8px] sm:text-[9px] font-black uppercase tracking-wider rounded-full shadow-xs">
                             {badge}
                           </span>
                         )}
 
-                        {/* Top: Title, Subtitle, Description */}
-                        <div>
-                          <div className="flex justify-between items-start mb-1">
-                            <div>
-                              <span className="font-black text-base sm:text-lg text-gray-900 dark:text-gray-100 leading-snug block">
-                                {title}
-                              </span>
-                              <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
-                                {subtitle}
-                              </span>
-                            </div>
-                            {isSelected ? (
-                              <motion.div layoutId="service-dot" className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center shrink-0 ml-1 mt-0.5 shadow-sm">
-                                <Check className="w-3.5 h-3.5 text-white stroke-[3]" />
-                              </motion.div>
-                            ) : (
-                              <div className="w-5 h-5 rounded-full border-2 border-gray-200 dark:border-gray-700 shrink-0 ml-1 mt-0.5" />
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3">{desc}</p>
+                        {/* Top: Title & Subtitle */}
+                        <div className="flex flex-col items-center w-full">
+                          <span className="font-extrabold text-[11px] sm:text-sm text-gray-900 dark:text-gray-100 tracking-tight leading-tight truncate w-full">
+                            {title}
+                          </span>
+                          <span className="text-[8.5px] sm:text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider mt-0.5 truncate w-full">
+                            {subtitle}
+                          </span>
                         </div>
 
-                        {/* Bottom: Hero Price Section with Strong Hierarchy */}
-                        <div className="pt-3 border-t border-gray-100 dark:border-gray-800/80 mt-auto">
-                          <div className="flex items-baseline gap-1.5 flex-wrap">
-                            {isPiece && (
-                              <span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-tight">
-                                From
-                              </span>
-                            )}
-                            <span className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
+                        {/* Center: Price Section (Same as Approximate Load) */}
+                        <div className="flex flex-col items-center my-0.5 sm:my-1">
+                          <div className="flex items-baseline gap-0.5">
+                            {isPiece && <span className="text-[8px] sm:text-[10px] font-bold text-gray-400 uppercase">From</span>}
+                            <span className="text-lg sm:text-2xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
                               ₹{unitPrice}
                             </span>
-                            <span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            <span className="text-[8px] sm:text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">
                               {unitLabel}
                             </span>
                           </div>
 
                           {/* Regular Price Strikethrough & Savings Tag */}
                           {regularUnitPrice && (
-                            <div className="mt-1.5 flex items-center gap-2">
-                              <span className="text-xs text-gray-400 dark:text-gray-500 line-through font-bold">
-                                ₹{regularUnitPrice}{unitLabel}
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-[8.5px] sm:text-[10px] text-gray-400 dark:text-gray-500 line-through font-bold">
+                                ₹{regularUnitPrice}
                               </span>
-                              <span className="text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/60 border border-emerald-300/60 dark:border-emerald-800/60 px-1.5 py-0.5 rounded-md">
-                                Save ₹{savingsPerKg}/kg
+                              <span className="text-[7.5px] sm:text-[8.5px] font-black uppercase text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/60 px-1 py-0.2 rounded">
+                                -₹{savingsPerKg}
                               </span>
                             </div>
                           )}
                         </div>
+
+                        {/* Bottom Pill (Same as Approximate Load) */}
+                        <span className={`text-[8.5px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded-full truncate max-w-full ${
+                          isSelected 
+                            ? 'bg-blue-100/80 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 font-bold' 
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                        }`}>
+                          {desc}
+                        </span>
                       </motion.button>
                     );
                   })}
@@ -682,12 +684,12 @@ const BookingDetails: React.FC = () => {
                 exit={{ opacity: 0, y: 15 }}
               >
                 {!isPerPiece ? (
-                  /* Standard / Express Load Options */
+                  /* Standard / Express Load Options - COMPACT BOXES */
                   <div>
-                    <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center">
-                      <Weight className="w-4 h-4 mr-2 text-blue-600 dark:text-blue-400" /> 4. Approximate Load
+                    <h3 className="text-xs sm:text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 sm:mb-3 flex items-center">
+                      <Weight className="w-3.5 h-3.5 mr-1.5 text-blue-600 dark:text-blue-400" /> 4. Approximate Load
                     </h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3.5">
                       {[
                         { id: '1-4 kg', label: '1-4 kg', outfits: '5–6 outfits' },
                         { id: '5 kg', label: '5 kg', outfits: '6–7 outfits' },
@@ -705,37 +707,37 @@ const BookingDetails: React.FC = () => {
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ delay: 0.05 + index * 0.04 }}
-                            whileHover={{ scale: 1.03, y: -2 }}
-                            whileTap={{ scale: 0.97 }}
+                            whileHover={{ scale: 1.02, y: -2 }}
+                            whileTap={{ scale: 0.98 }}
                             onClick={() => setBookingData(prev => ({ ...prev, approxLoad: option.id as any }))}
-                            className={`p-4 rounded-2xl border-2 transition-all text-center flex flex-col items-center justify-between min-h-[140px] relative shadow-sm ${
+                            className={`p-2 sm:p-3.5 rounded-xl sm:rounded-2xl border-2 transition-all text-center flex flex-col items-center justify-between min-h-[105px] sm:min-h-[135px] relative shadow-xs sm:shadow-sm ${
                               bookingData.approxLoad === option.id
                                 ? 'bg-blue-50/90 dark:bg-blue-900/30 border-blue-600 ring-2 ring-blue-500/20 dark:ring-blue-400/20'
-                                : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800 hover:shadow-md'
+                                : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-blue-200 dark:hover:border-blue-800'
                             }`}
                           >
-                            <span className="font-extrabold text-sm sm:text-base text-gray-900 dark:text-gray-100 tracking-tight">
+                            <span className="font-extrabold text-[11px] sm:text-sm text-gray-900 dark:text-gray-100 tracking-tight">
                               {option.label}
                             </span>
                             
-                            <div className="flex flex-col items-center my-1">
-                              <span className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
+                            <div className="flex flex-col items-center my-0.5 sm:my-1">
+                              <span className="text-lg sm:text-2xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
                                 ₹{loadBasePrice}
                               </span>
                               
                               {hasDiscount && (
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  <span className="text-xs text-gray-400 dark:text-gray-500 line-through font-bold">
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  <span className="text-[8.5px] sm:text-[10px] text-gray-400 dark:text-gray-500 line-through font-bold">
                                     ₹{loadRegularPrice}
                                   </span>
-                                  <span className="text-[9px] font-black uppercase text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded">
+                                  <span className="text-[7.5px] sm:text-[8.5px] font-black uppercase text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-950/60 px-1 py-0.2 rounded">
                                     -₹{savingsAmount}
                                   </span>
                                 </div>
                               )}
                             </div>
 
-                            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                            <span className={`text-[8.5px] sm:text-[10px] font-medium px-1.5 sm:px-2 py-0.5 rounded-full ${
                               bookingData.approxLoad === option.id 
                                 ? 'bg-blue-100/80 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 font-bold' 
                                 : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
@@ -747,62 +749,53 @@ const BookingDetails: React.FC = () => {
                       })}
                     </div>
 
-                    <div className="mt-4 p-4 bg-amber-50/90 dark:bg-amber-950/30 rounded-2xl border border-amber-200/70 dark:border-amber-800/50 space-y-3">
-                      {/* Minimum Charge Disclaimer */}
-                      <div className="flex items-start gap-2.5">
-                        <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                        <div className="text-xs text-amber-900 dark:text-amber-200 leading-relaxed">
-                          <span className="font-bold">Minimum Charge Disclaimer: </span>
+                    {/* Compact Disclaimer & Quick Outfit Guide */}
+                    <div className="mt-2.5 p-2.5 sm:p-3 bg-amber-50/90 dark:bg-amber-950/30 rounded-xl border border-amber-200/70 dark:border-amber-800/50 space-y-1.5">
+                      <div className="flex items-start gap-2">
+                        <Info className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                        <div className="text-[10px] sm:text-xs text-amber-900 dark:text-amber-200 leading-snug">
+                          <span className="font-bold">Min Charge: </span>
                           {isExpress ? (
                             <span>
-                              A minimum charge of <strong className="font-bold">₹{4 * expressRate}</strong> applies for Express Wash loads up to 4 kg
+                              ₹{4 * expressRate} min applies for loads up to 4 kg
                               {isOfferActive && regularExpressRate > expressRate && (
-                                <span className="text-amber-700/80 dark:text-amber-300/80"> (Regular <span className="line-through">₹{4 * regularExpressRate}</span>)</span>
+                                <span className="text-amber-700/80 dark:text-amber-300/80"> (Reg <span className="line-through">₹{4 * regularExpressRate}</span>)</span>
                               )}.
                             </span>
                           ) : (
                             <span>
-                              A minimum charge of <strong className="font-bold">₹{4 * standardRate}</strong> applies for laundry loads up to 4 kg
+                              ₹{4 * standardRate} min applies for loads up to 4 kg
                               {isOfferActive && regularStandardRate > standardRate && (
-                                <span className="text-amber-700/80 dark:text-amber-300/80"> (Regular <span className="line-through">₹{4 * regularStandardRate}</span>)</span>
+                                <span className="text-amber-700/80 dark:text-amber-300/80"> (Reg <span className="line-through">₹{4 * regularStandardRate}</span>)</span>
                               )}.
                             </span>
                           )}
                         </div>
                       </div>
 
-                      {/* Outfit Guide */}
-                      <div className="pt-2.5 border-t border-amber-200/60 dark:border-amber-800/40 text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
-                        <div className="font-bold text-[11px] sm:text-xs text-amber-800 dark:text-amber-300">
-                          1 outfit ≈ 1 top + 1 bottom
-                        </div>
-                        <div className="inline-flex flex-wrap items-center gap-2 bg-amber-100/70 dark:bg-amber-900/30 px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-amber-800 dark:text-amber-300">
-                          <span>T-shirt ≈ 250g</span>
-                          <span className="text-amber-400 dark:text-amber-600">|</span>
-                          <span>Jeans ≈ 550g</span>
-                          <span className="text-amber-400 dark:text-amber-600">|</span>
-                          <span>Pants ≈ 400g</span>
-                        </div>
-                      </div>
-
-                      {/* Weight verification & excess policy */}
-                      <div className="pt-2.5 border-t border-amber-200/60 dark:border-amber-800/40 text-[11px] sm:text-xs text-amber-900/90 dark:text-amber-200/90 leading-relaxed">
-                        <p>
-                          Your laundry may be weighed before processing. If the actual weight exceeds your selected category, the applicable higher category may be charged. However, don’t worry—if it’s only a small variation, it's on us.
-                        </p>
+                      {/* Outfit reference weights inline */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-amber-200/50 dark:border-amber-800/40 text-[9.5px] sm:text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                        <span className="font-bold">Guide:</span>
+                        <span>1 outfit ≈ 1 top + 1 bottom</span>
+                        <span>•</span>
+                        <span>T-shirt ≈ 250g</span>
+                        <span>•</span>
+                        <span>Jeans ≈ 550g</span>
+                        <span>•</span>
+                        <span>Pants ≈ 400g</span>
                       </div>
                     </div>
                   </div>
                 ) : (
                   /* Per-Piece Garment Item Selection */
                   <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center">
-                        <Shirt className="w-4 h-4 mr-2 text-blue-600 dark:text-blue-400" /> 4. Select Garment Pieces
+                    <div className="flex items-center justify-between mb-2 sm:mb-3">
+                      <h3 className="text-xs sm:text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider flex items-center">
+                        <Shirt className="w-3.5 h-3.5 mr-1.5 text-blue-600 dark:text-blue-400" /> 4. Select Garment Pieces
                       </h3>
                       {totalPieces > 0 && (
-                        <span className="text-xs font-black text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 rounded-lg">
-                          {totalPieces} {totalPieces === 1 ? 'piece' : 'pieces'} {isSubscriber ? `• ${totalCreditsNeeded} Credits (₹${pieceTotalPrice})` : `(₹${pieceTotalPrice})`}
+                        <span className="text-[10px] sm:text-xs font-black text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded-lg">
+                          {totalPieces} {totalPieces === 1 ? 'pc' : 'pcs'} {isSubscriber ? `• ${totalCreditsNeeded} Cr (₹${pieceTotalPrice})` : `(₹${pieceTotalPrice})`}
                         </span>
                       )}
                     </div>
@@ -830,18 +823,16 @@ const BookingDetails: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 15 }}
               >
-                <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4 flex items-center">
-                  <AlertTriangle className="w-4 h-4 mr-2 text-blue-600 dark:text-blue-400" /> 5. Special Instructions & Care
+                <h3 className="text-xs sm:text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 sm:mb-3 flex items-center">
+                  <AlertTriangle className="w-3.5 h-3.5 mr-1.5 text-blue-600 dark:text-blue-400" /> 5. Special Instructions & Care
                 </h3>
-                <div className="space-y-3">
-                  <label className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Garment Care Details</label>
-                  
-                  <div className="p-3.5 bg-blue-50/80 dark:bg-blue-950/30 rounded-xl border border-blue-200/60 dark:border-blue-800/40 flex items-start gap-2.5">
-                    <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
-                    <div className="text-xs text-blue-900 dark:text-blue-200 space-y-1">
-                      <p className="font-bold uppercase tracking-wider text-[11px] text-blue-700 dark:text-blue-300">Garment Care & Color Bleeding Disclaimer:</p>
+                <div className="space-y-2">
+                  <div className="p-2.5 sm:p-3 bg-blue-50/80 dark:bg-blue-950/30 rounded-lg sm:rounded-xl border border-blue-200/60 dark:border-blue-800/40 flex items-start gap-2">
+                    <AlertTriangle className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                    <div className="text-[10.5px] sm:text-xs text-blue-900 dark:text-blue-200 space-y-0.5">
+                      <p className="font-bold uppercase tracking-wider text-[10px] sm:text-[11px] text-blue-700 dark:text-blue-300">Care & Color Bleeding Note:</p>
                       <p>
-                        Please specify any <strong>color-bleeding garments, white clothes, delicate fabrics, or specific washing needs</strong> below. WashWise is not liable for color bleeding or damage if unflagged in care details.
+                        Specify any <strong>color-bleeding, whites, delicate fabrics, or special washing needs</strong>.
                       </p>
                     </div>
                   </div>
@@ -849,9 +840,9 @@ const BookingDetails: React.FC = () => {
                   <textarea
                     value={bookingData.garmentInstructions}
                     onChange={(e) => setBookingData(prev => ({ ...prev, garmentInstructions: e.target.value }))}
-                    placeholder="e.g. Red cotton shirt bleeds color (wash separately), white linen shirt needs gentle wash, delicate silk item, remove stain on sleeve..."
-                    rows={3}
-                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 resize-none text-xs sm:text-sm"
+                    placeholder="e.g. Red shirt bleeds color, wash whites separately, delicate silk item..."
+                    rows={2}
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg sm:rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-gray-100 resize-none text-xs sm:text-sm"
                   />
                 </div>
               </motion.section>
@@ -864,56 +855,56 @@ const BookingDetails: React.FC = () => {
           <motion.div 
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
-            className={`mt-8 p-5 sm:p-6 rounded-3xl border-2 shadow-sm ${
+            className={`mt-4 sm:mt-8 p-3.5 sm:p-6 rounded-xl sm:rounded-3xl border shadow-xs sm:shadow-sm ${
               isSubscriber 
                 ? 'bg-gradient-to-br from-green-50/90 via-emerald-50/30 to-teal-50/70 dark:from-gray-900 dark:via-gray-800/80 dark:to-gray-900 border-green-200/80 dark:border-green-800/50'
                 : 'bg-gradient-to-br from-blue-50/90 via-indigo-50/30 to-blue-50/70 dark:from-gray-900 dark:via-gray-800/80 dark:to-gray-900 border-blue-200/80 dark:border-blue-800/50'
             }`}
           >
-            <div className={`flex items-center justify-between pb-3 border-b ${
+            <div className={`flex items-center justify-between pb-2.5 sm:pb-3 border-b ${
               isSubscriber ? 'border-green-200/60 dark:border-green-800/40' : 'border-blue-200/60 dark:border-blue-800/40'
             }`}>
-              <div className="flex items-center gap-2">
-                <Receipt className={`w-4 h-4 sm:w-5 sm:h-5 ${isSubscriber ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`} />
-                <span className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-gray-200">
-                  {isSubscriber ? 'Subscriber Booking Summary' : 'Live Price Estimate'}
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <Receipt className={`w-3.5 h-3.5 sm:w-5 sm:h-5 ${isSubscriber ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`} />
+                <span className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-gray-800 dark:text-gray-200">
+                  {isSubscriber ? 'Subscriber Summary' : 'Live Estimate'}
                 </span>
               </div>
-              <span className={`text-xs font-bold px-3 py-1 rounded-xl ${
+              <span className={`text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-0.5 sm:py-1 rounded-lg sm:rounded-xl ${
                 isSubscriber 
                   ? 'text-green-700 dark:text-green-300 bg-green-100/80 dark:bg-green-900/50'
                   : 'text-blue-700 dark:text-blue-300 bg-blue-100/80 dark:bg-blue-900/50'
               }`}>
-                {bookingData.serviceType} • {isPerPiece ? `${totalPieces} pieces` : bookingData.approxLoad}
+                {bookingData.serviceType} • {isPerPiece ? `${totalPieces} pcs` : bookingData.approxLoad}
               </span>
             </div>
 
-            <div className="space-y-2.5 py-3.5 text-xs sm:text-sm">
+            <div className="space-y-2 py-2.5 sm:py-3.5 text-xs sm:text-sm">
               <div className="flex justify-between items-center text-gray-600 dark:text-gray-300">
-                <span>
+                <span className="truncate pr-2">
                   {isPerPiece 
-                    ? `Wash & Fold (Per Piece: ${totalPieces} items)`
+                    ? `Wash & Fold (${totalPieces} items)`
                     : `${bookingData.serviceType} (${bookingData.approxLoad} @ ₹${currentRatePerKg}/kg)`}
                 </span>
                 {isSubscriber ? (
-                  <span className="font-black text-green-600 dark:text-green-400">
+                  <span className="font-black text-green-600 dark:text-green-400 shrink-0">
                     {totalCreditsNeeded} Credits <span className="font-bold text-gray-500 dark:text-gray-400">({isPerPiece ? `₹${pieceTotalPrice}` : `₹${currentBasePrice}`})</span>
                   </span>
                 ) : (
-                  <span className="font-bold text-gray-800 dark:text-gray-100">₹{currentBasePrice}</span>
+                  <span className="font-bold text-gray-800 dark:text-gray-100 shrink-0">₹{currentBasePrice}</span>
                 )}
               </div>
 
               {isPerPiece && pieceBreakdown.length > 0 && (
-                <div className={`pl-3 py-1 border-l-2 space-y-1 ${
+                <div className={`pl-2.5 py-1 border-l-2 space-y-0.5 ${
                   isSubscriber ? 'border-green-400 dark:border-green-600' : 'border-blue-300 dark:border-blue-700'
                 }`}>
                   {pieceBreakdown.map((item) => (
-                    <div key={item.id} className="flex justify-between text-[11px] text-gray-500 dark:text-gray-400">
+                    <div key={item.id} className="flex justify-between text-[10px] sm:text-[11px] text-gray-500 dark:text-gray-400">
                       <span>{item.count}x {item.name}</span>
                       {isSubscriber ? (
                         <span className="font-semibold text-green-600 dark:text-green-400">
-                          {item.totalCredits} Credits <span className="text-gray-500 dark:text-gray-400">(₹{item.totalPrice})</span>
+                          {item.totalCredits} Cr <span className="text-gray-500 dark:text-gray-400">(₹{item.totalPrice})</span>
                         </span>
                       ) : (
                         <span>₹{item.totalPrice}</span>
@@ -926,71 +917,71 @@ const BookingDetails: React.FC = () => {
               {bookingData.pickupDrop ? (
                 <div className="flex justify-between items-center text-gray-600 dark:text-gray-300">
                   <span className="flex items-center gap-1.5">
-                    <Truck className={`w-3.5 h-3.5 ${isSubscriber ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`} /> Pickup & Drop Delivery Fee
+                    <Truck className={`w-3.5 h-3.5 ${isSubscriber ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`} /> Pickup & Drop Fee
                   </span>
                   <span className="font-bold text-gray-800 dark:text-gray-100">
-                    {isSubscriber ? <span className="text-green-600 dark:text-green-400 font-bold">FREE (Subscriber Benefit)</span> : `+₹${deliveryFee}`}
+                    {isSubscriber ? <span className="text-green-600 dark:text-green-400 font-bold">FREE</span> : `+₹${deliveryFee}`}
                   </span>
                 </div>
               ) : (
-                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400 text-xs">
+                <div className="flex justify-between items-center text-gray-500 dark:text-gray-400 text-[11px] sm:text-xs">
                   <span>Store Visit (Self Drop & Pickup)</span>
-                  <span className="text-green-600 dark:text-green-400 font-bold">₹0 (No delivery charge)</span>
+                  <span className="text-green-600 dark:text-green-400 font-bold">₹0</span>
                 </div>
               )}
 
               {isSubscriber && (
-                <div className="p-3 bg-white/80 dark:bg-gray-800/80 rounded-xl border border-green-500/20 flex items-center justify-between text-xs">
-                  <span className="text-gray-600 dark:text-gray-300 font-medium">Your Monthly Credit Balance:</span>
+                <div className="p-2 sm:p-3 bg-white/80 dark:bg-gray-800/80 rounded-lg sm:rounded-xl border border-green-500/20 flex items-center justify-between text-[11px] sm:text-xs">
+                  <span className="text-gray-600 dark:text-gray-300 font-medium">Monthly Credit Balance:</span>
                   <span className="font-black text-green-700 dark:text-green-300">
-                    🧺 {user?.laundryCredits ?? 160} Credits Available
+                    {user?.laundryCredits ?? 160} Cr Available
                   </span>
                 </div>
               )}
             </div>
 
-            <div className={`pt-3.5 border-t flex justify-between items-center ${
+            <div className={`pt-2.5 sm:pt-3.5 border-t flex justify-between items-center ${
               isSubscriber ? 'border-green-200/60 dark:border-green-800/40' : 'border-blue-200/60 dark:border-blue-800/40'
             }`}>
               <div>
-                <span className="text-xs font-black text-gray-700 dark:text-gray-300 uppercase tracking-widest block">
+                <span className="text-[10px] sm:text-xs font-black text-gray-700 dark:text-gray-300 uppercase tracking-widest block">
                   {isSubscriber ? 'Credits to Deduct' : 'Total Bill Price'}
                 </span>
-                <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                <span className="text-[9px] sm:text-[10px] text-gray-500 dark:text-gray-400">
                   {isSubscriber 
-                    ? 'Covered under your active membership' 
-                    : bookingData.pickupDrop ? `(₹${currentBasePrice} wash + ₹${deliveryFee} delivery)` : '(Inclusive of all charges)'}
+                    ? 'Covered under your plan' 
+                    : bookingData.pickupDrop ? `(₹${currentBasePrice} + ₹${deliveryFee} delivery)` : '(Inclusive of taxes)'}
                 </span>
               </div>
               <div className="text-right">
                 {isSubscriber ? (
                   <div className="flex flex-col items-end">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-2xl sm:text-3xl font-black text-green-600 dark:text-green-400 tracking-tight">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-xl sm:text-3xl font-black text-green-600 dark:text-green-400 tracking-tight">
                         {totalCreditsNeeded} Credits
                       </span>
-                      <span className="text-lg sm:text-xl font-bold text-gray-500 dark:text-gray-400">
+                      <span className="text-sm sm:text-xl font-bold text-gray-500 dark:text-gray-400">
                         (₹{currentTotalPrice})
                       </span>
                     </div>
-                    <span className="text-[11px] font-bold text-green-700 dark:text-green-400">
+                    <span className="text-[10px] sm:text-[11px] font-bold text-green-700 dark:text-green-400">
                       ₹0 to pay (Covered by Credits)
                     </span>
                   </div>
                 ) : (
                   <div className="flex flex-col items-end">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
                         ₹{currentTotalPrice}
                       </span>
                       {isOfferActive && currentTotalSavings > 0 && (
-                        <span className="text-sm sm:text-base text-gray-400 dark:text-gray-500 line-through font-bold">
+                        <span className="text-xs sm:text-base text-gray-400 dark:text-gray-500 line-through font-bold">
                           ₹{currentRegularTotalPrice}
                         </span>
                       )}
                     </div>
                     {isOfferActive && currentTotalSavings > 0 && (
-                      <span className="text-[10px] sm:text-xs font-black text-green-600 dark:text-green-400 uppercase tracking-tight">
+                      <span className="text-[9px] sm:text-xs font-black text-green-600 dark:text-green-400 uppercase tracking-tight">
                         You save ₹{currentTotalSavings}!
                       </span>
                     )}
@@ -1002,13 +993,13 @@ const BookingDetails: React.FC = () => {
         )}
 
         {/* Terms and Conditions Checkbox */}
-        <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 flex items-center gap-3">
+        <div className="mt-4 sm:mt-6 p-3 sm:p-4 bg-gray-50 dark:bg-gray-800/60 rounded-xl sm:rounded-2xl border border-gray-200/80 dark:border-gray-700/80 flex items-center gap-2.5 sm:gap-3">
           <input
             type="checkbox"
             id="termsCheckbox"
             checked={acceptedTerms}
             onChange={(e) => setAcceptedTerms(e.target.checked)}
-            className="w-5 h-5 text-blue-600 rounded-md border-gray-300 focus:ring-blue-500 cursor-pointer accent-blue-600 shrink-0"
+            className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 rounded-md border-gray-300 focus:ring-blue-500 cursor-pointer accent-blue-600 shrink-0"
           />
           <label htmlFor="termsCheckbox" className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 font-medium select-none cursor-pointer">
             I accept the{' '}
@@ -1024,7 +1015,7 @@ const BookingDetails: React.FC = () => {
 
         {/* Validation warning if per piece is chosen but 0 pieces selected */}
         {isPerPiece && totalPieces === 0 && (
-          <p className="mt-3 text-xs text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1.5">
+          <p className="mt-2.5 sm:mt-3 text-xs text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1.5">
             <Info className="w-3.5 h-3.5 shrink-0" />
             Please select at least 1 garment piece to proceed.
           </p>
@@ -1033,7 +1024,7 @@ const BookingDetails: React.FC = () => {
         <button
           onClick={handleNext}
           disabled={!canProceed}
-          className={`w-full mt-6 py-4 font-bold rounded-2xl transition-all shadow-lg flex items-center justify-center gap-2 ${
+          className={`w-full mt-4 sm:mt-6 py-3 sm:py-4 font-bold rounded-xl sm:rounded-2xl transition-all shadow-md sm:shadow-lg flex items-center justify-center gap-2 text-xs sm:text-base haptic-feedback touch-manipulation ${
             !canProceed
               ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed shadow-none'
               : isSubscriber
@@ -1048,6 +1039,38 @@ const BookingDetails: React.FC = () => {
           </span>
           <ArrowLeft className="w-4 h-4 rotate-180" />
         </button>
+
+        {/* Mobile Sticky Floating Quick Action Bar */}
+        <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md p-3 border-t border-gray-200/80 dark:border-gray-800 shadow-2xl flex items-center justify-between gap-3 safe-area-pb">
+          <div className="min-w-0">
+            <span className="text-[10px] uppercase font-black tracking-wider text-gray-400 block truncate">
+              {isSubscriber ? 'Membership Order' : 'Estimated Total'}
+            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className={`text-base font-display font-black leading-tight ${isSubscriber ? 'text-emerald-600 dark:text-emerald-400' : 'text-blue-600 dark:text-blue-400'}`}>
+                {isSubscriber ? '₹0' : `₹${currentTotalPrice}`}
+              </span>
+              {isSubscriber && (
+                <span className="text-[10px] font-bold text-gray-500">({totalCreditsNeeded} Cr)</span>
+              )}
+            </div>
+          </div>
+
+          <button
+            onClick={handleNext}
+            disabled={!canProceed}
+            className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all shadow-md haptic-feedback touch-manipulation ${
+              !canProceed
+                ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                : isSubscriber
+                  ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-600/20'
+                  : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/20'
+            }`}
+          >
+            <span>Proceed</span>
+            <ArrowLeft className="w-3.5 h-3.5 rotate-180" />
+          </button>
+        </div>
 
         <TermsModal
           isOpen={isTermsOpen}

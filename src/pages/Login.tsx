@@ -39,12 +39,26 @@ import { authFetch } from '../utils/api';
 const Login: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { user, loading: authLoading, isAdmin, login } = useAuth();
   
   // Read mode from URL query string or default to 'login'
   const initialMode = searchParams.get('mode') === 'signup' ? 'signup' : 'login';
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
   
+  // Remember this device - stays logged in until user explicitly decides to logout
+  const [rememberDevice, setRememberDevice] = useState(true);
+
+  // If already authenticated on this device, immediately forward to dashboard
+  useEffect(() => {
+    if (!authLoading && user) {
+      if (isAdmin || user.adminRole || user.role === 'admin') {
+        navigate('/admin', { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
+    }
+  }, [user, authLoading, isAdmin, navigate]);
+
   // Auth method selection: 'email' | 'google'
   const [authMethod, setAuthMethod] = useState<'email' | 'google'>('google');
 
@@ -55,6 +69,28 @@ const Login: React.FC = () => {
     phone: '',
     fullName: ''
   });
+
+  // Restore remembered email on device if available
+  useEffect(() => {
+    try {
+      const savedEmail = localStorage.getItem('washwise_remembered_email');
+      if (savedEmail) {
+        setFormData(prev => ({ ...prev, email: savedEmail }));
+      }
+    } catch (e) {}
+  }, []);
+
+  // Prefetch Dashboard in background for instant transition on login
+  useEffect(() => {
+    const prefetchDashboard = () => {
+      import('./Dashboard').catch(() => {});
+    };
+    if ('requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(prefetchDashboard);
+    } else {
+      setTimeout(prefetchDashboard, 500);
+    }
+  }, []);
 
   // Referral code state
   const [referralInput, setReferralInput] = useState(searchParams.get('ref') || '');
@@ -284,6 +320,16 @@ const Login: React.FC = () => {
           delete updatedData.adminRole;
         }
         
+        // Store device memory so user stays logged in across sessions on this device
+        try {
+          if (rememberDevice) {
+            localStorage.setItem('washwise_remember_device', 'true');
+            if (fbUser.email || formData.email) {
+              localStorage.setItem('washwise_remembered_email', fbUser.email || formData.email);
+            }
+          }
+        } catch (e) {}
+
         await login(updatedData as any);
         if (updatedData.adminRole || updatedData.role === 'admin') {
           navigate('/admin');
@@ -352,6 +398,16 @@ const Login: React.FC = () => {
       // Check if user entered a referral code during signup
       const trimmedRef = referralInput.trim().toUpperCase();
       
+      // Store device memory so new user stays logged in across sessions on this device
+      try {
+        if (rememberDevice) {
+          localStorage.setItem('washwise_remember_device', 'true');
+          if (finalData.email) {
+            localStorage.setItem('washwise_remembered_email', finalData.email);
+          }
+        }
+      } catch (e) {}
+
       // Save user profile first
       await login(finalData);
 
@@ -528,10 +584,10 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto px-3.5 sm:px-4 py-4 sm:py-12">
+    <div className="w-full max-w-md mx-auto px-3.5 sm:px-4 py-2 sm:py-6 my-auto flex flex-col justify-center">
       <button 
         onClick={() => navigate('/')}
-        className="flex items-center text-gray-500 hover:text-primary-electric mb-4 sm:mb-8 transition-colors text-xs sm:text-sm font-bold uppercase tracking-wider"
+        className="inline-flex items-center text-gray-500 hover:text-primary-electric mb-2.5 sm:mb-4 transition-colors text-xs sm:text-sm font-bold uppercase tracking-wider self-start"
       >
         <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
         Back to Home
@@ -893,6 +949,24 @@ const Login: React.FC = () => {
                 </div>
               )}
 
+              {/* Stay Logged In on this Device Memory Option */}
+              <div className="flex items-center justify-between px-1 py-1">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                  <input
+                    type="checkbox"
+                    checked={rememberDevice}
+                    onChange={(e) => setRememberDevice(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500/20 border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 transition-colors"
+                  />
+                  <span className="text-xs font-bold text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                    Stay logged in on this device
+                  </span>
+                </label>
+                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                  Until Logout
+                </span>
+              </div>
+
               <button
                 type="submit"
                 disabled={loading}
@@ -964,6 +1038,25 @@ const Login: React.FC = () => {
                   )}
                 </div>
               )}
+
+              {/* Stay Logged In on this Device Memory Option */}
+              <div className="flex items-center justify-between px-1 py-1">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                  <input
+                    type="checkbox"
+                    checked={rememberDevice}
+                    onChange={(e) => setRememberDevice(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500/20 border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 transition-colors"
+                  />
+                  <span className="text-xs font-bold text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                    Stay logged in on this device
+                  </span>
+                </label>
+                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                  Until Logout
+                </span>
+              </div>
+
               <button
                 onClick={handleGoogleLogin}
                 disabled={loading}
@@ -993,12 +1086,17 @@ const Login: React.FC = () => {
 
       {/* Forgot Password Modal */}
       {showForgotPassword && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            onClick={() => setShowForgotPassword(false)}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-pointer"
+            aria-label="Close modal overlay"
+          />
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="bg-white dark:bg-surface-container w-full max-w-md p-6 sm:p-8 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-2xl relative overflow-hidden"
+            className="bg-white dark:bg-surface-container w-full max-w-md p-6 sm:p-8 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-2xl relative overflow-hidden z-10"
           >
             <button
               onClick={() => setShowForgotPassword(false)}

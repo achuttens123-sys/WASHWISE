@@ -39,6 +39,7 @@ import { useAuth } from '../context/AuthContext';
 import { Notification } from '../services/NotificationService';
 import LoadingScreen from '../components/LoadingScreen';
 import ConfirmModal from '../components/ConfirmModal';
+import FraudRiskCenter from '../components/FraudRiskCenter';
 
 // Initialize secondary app for user creation
 const secondaryApp = initializeApp(firebaseConfig, 'Secondary');
@@ -47,12 +48,15 @@ const secondaryAuth = getAuth(secondaryApp);
 const AdminDashboard: React.FC = () => {
   const { user: currentUser, isSuperAdmin, isStoreManager, isAdmin } = useAuth();
   const { settings } = useSettings();
+  const availableSlots = settings?.customSlots && Array.isArray(settings.customSlots) && settings.customSlots.length > 0
+    ? settings.customSlots
+    : TIME_SLOTS;
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [limitedOffers, setLimitedOffers] = useState<any[]>([]);
   const [adminRoles, setAdminRoles] = useState<{ email: string; role: AdminRole }[]>([]);
-  const [activeTab, setActiveTab] = useState<'bookings' | 'notifications' | 'stores' | 'team' | 'users' | 'offers'>('bookings');
+  const [activeTab, setActiveTab] = useState<'bookings' | 'notifications' | 'stores' | 'team' | 'users' | 'offers' | 'fraud'>('bookings');
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [userSearchTerm, setUserSearchTerm] = useState('');
@@ -131,15 +135,20 @@ const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     if (!isAdmin) return;
-    const q = isSuperAdmin 
-      ? query(collection(db, 'bookings'), orderBy('createdAt', 'desc'))
-      : query(collection(db, 'bookings'), where('storeId', '==', currentUser?.storeId || ''), orderBy('createdAt', 'desc'));
+    const q = isSuperAdmin || !currentUser?.storeId
+      ? collection(db, 'bookings')
+      : query(collection(db, 'bookings'), where('storeId', 'in', [currentUser.storeId, 'default']));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const bookingsData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as Booking[];
+      bookingsData.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : (a.date ? new Date(a.date).getTime() : 0);
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : (b.date ? new Date(b.date).getTime() : 0);
+        return timeB - timeA;
+      });
       setBookings(bookingsData);
       setLoading(false);
     }, (error) => {
@@ -148,7 +157,7 @@ const AdminDashboard: React.FC = () => {
     });
 
     return () => unsubscribe();
-  }, [isAdmin]);
+  }, [isAdmin, isSuperAdmin, currentUser?.storeId]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -732,7 +741,28 @@ const AdminDashboard: React.FC = () => {
             )}
           </button>
         )}
+        {(isAdmin || isSuperAdmin) && (
+          <button
+            onClick={() => setActiveTab('fraud')}
+            className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-1.5 ${
+              activeTab === 'fraud' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+            }`}
+          >
+            <ShieldAlert className="w-4 h-4" />
+            Fraud & Risk Protection
+            {activeTab === 'fraud' && (
+              <motion.div
+                layoutId="activeTab"
+                className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-600 dark:bg-indigo-400"
+              />
+            )}
+          </button>
+        )}
       </div>
+
+      {activeTab === 'fraud' && (
+        <FraudRiskCenter onRefreshStats={() => {}} />
+      )}
 
       {activeTab === 'offers' && (
         <div className="space-y-6">
@@ -1748,7 +1778,7 @@ const AdminDashboard: React.FC = () => {
                   onChange={(e) => setNewSlot(e.target.value)}
                   className="w-full p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-bold text-gray-700 dark:text-gray-300"
                 >
-                  {TIME_SLOTS.map(slot => (
+                  {availableSlots.map(slot => (
                     <option key={slot} value={slot}>{slot}</option>
                   ))}
                 </select>

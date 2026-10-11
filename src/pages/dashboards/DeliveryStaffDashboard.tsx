@@ -34,15 +34,21 @@ const DeliveryStaffDashboard: React.FC = () => {
     // Fetch pickups or deliveries assigned to the store
     const q = query(
       collection(db, 'bookings'),
-      where('storeId', '==', user.storeId),
-      where('pickupDrop', '==', true),
-      where('status', 'in', ['paid', 'Ready for pick up', 'Ready to deliver', 'Out for delivery']),
-      orderBy('createdAt', 'asc')
+      where('storeId', '==', user.storeId)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Booking[];
-      setTasks(data);
+      const allowedStatuses = ['paid', 'Ready for pick up', 'Ready to deliver', 'Out for delivery'];
+      const data = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() })) as Booking[];
+      const filtered = data
+        .filter(b => b.pickupDrop === true && allowedStatuses.includes(b.status))
+        .sort((a, b) => {
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeA - timeB;
+        });
+      setTasks(filtered);
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'bookings');
@@ -159,7 +165,7 @@ const DeliveryStaffDashboard: React.FC = () => {
                       </span>
                       {task.paymentType === 'pay_at_store' && (
                         <span className="px-3 py-1 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 text-[10px] font-black uppercase tracking-widest rounded-full border border-amber-200 dark:border-amber-800/50">
-                          💵 Collect Cash: ₹{(task.remainingAmount ?? (task.price - (task.prepaidAmount ?? 39))).toFixed(2)}
+                          Collect Cash: ₹{(task.remainingAmount ?? (task.price - (task.prepaidAmount ?? 39))).toFixed(2)}
                         </span>
                       )}
                     </div>

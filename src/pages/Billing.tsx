@@ -267,78 +267,78 @@ const Billing: React.FC = () => {
 
   const isPayingWithCredits = !isSubscription && paymentOption === 'credits';
 
-  const applyPromoCode = () => {
+  const applyPromoCode = async () => {
     setPromoError('');
     const code = promoCode.trim().toUpperCase();
     
-    if (!settings?.promos) {
-      setPromoError('Promo codes currently unavailable');
+    if (!code) {
+      setPromoError('Please enter a promo code');
       return;
     }
 
-    const foundPromo = settings.promos.find(p => p.code.toUpperCase() === code && p.active);
+    try {
+      // Validate on server to trigger brute-force / enumeration shields
+      const res = await authFetch('/api/booking/validate-promo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          promoCode: code,
+          cartValue: computedBasePrice,
+          serviceType: bookingInfo.serviceType,
+          userId: user?.uid
+        })
+      });
 
-    if (foundPromo) {
-      const target = foundPromo.applicableFor || 'all';
-      if (target === 'subscription' && !isSubscription) {
-        setPromoError('This promo code is valid for subscription orders only');
+      const serverData = await res.json();
+      if (!res.ok || !serverData.valid) {
+        setPromoError(serverData.error || 'Invalid promo code');
         setDiscount(0);
         setPromoApplied(false);
         return;
       }
-      if (target === 'wash' && isSubscription) {
-        setPromoError('This promo code is valid for wash orders only');
-        setDiscount(0);
-        setPromoApplied(false);
+
+      if (!settings?.promos) {
+        setPromoError('Promo codes currently unavailable');
         return;
       }
 
-      // Check start date if exists
-      if (foundPromo.startDate) {
-        const todayStr = new Date().toISOString().split('T')[0];
-        if (todayStr < foundPromo.startDate) {
-          setPromoError(`This offer starts on ${new Date(foundPromo.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`);
+      const foundPromo = settings.promos.find(p => p.code.toUpperCase() === code && p.active);
+
+      if (foundPromo) {
+        const target = foundPromo.applicableFor || 'all';
+        if (target === 'subscription' && !isSubscription) {
+          setPromoError('This promo code is valid for subscription orders only');
           setDiscount(0);
           setPromoApplied(false);
           return;
         }
-      }
-
-      // Check expiry if exists
-      if (foundPromo.expiryDate) {
-        const expiry = new Date(foundPromo.expiryDate);
-        if (expiry < new Date()) {
-          setPromoError('This promo code has expired');
+        if (target === 'wash' && isSubscription) {
+          setPromoError('This promo code is valid for wash orders only');
           setDiscount(0);
           setPromoApplied(false);
           return;
         }
-      }
 
-      // Check redemption limit if exists (e.g. first 100 bookings)
-      if (foundPromo.maxRedemptions && Number(foundPromo.redemptionCount || 0) >= Number(foundPromo.maxRedemptions)) {
-        setPromoError(`Offer fully claimed! This discount was limited to the first ${foundPromo.maxRedemptions} bookings.`);
-        setDiscount(0);
-        setPromoApplied(false);
-        return;
-      }
-
-      if (foundPromo.discountType === 'percentage') {
-        setDiscount(foundPromo.discountValue / 100);
-      } else if (foundPromo.discountType === 'price_per_kg') {
-        // e.g. ₹1 for 1 Kg
-        const ratePerKg = Number(foundPromo.discountValue || 1);
-        const targetPrice = Math.max(1, subscriberLoadKg * ratePerKg);
-        const discountAmount = Math.max(0, computedBasePrice - targetPrice);
-        const fraction = discountAmount / (computedBasePrice || 1);
-        setDiscount(fraction);
+        if (foundPromo.discountType === 'percentage') {
+          setDiscount(foundPromo.discountValue / 100);
+        } else if (foundPromo.discountType === 'price_per_kg') {
+          const ratePerKg = Number(foundPromo.discountValue || 1);
+          const targetPrice = Math.max(1, subscriberLoadKg * ratePerKg);
+          const discountAmount = Math.max(0, computedBasePrice - targetPrice);
+          const fraction = discountAmount / (computedBasePrice || 1);
+          setDiscount(fraction);
+        } else {
+          const fraction = foundPromo.discountValue / (computedBasePrice || 1);
+          setDiscount(fraction);
+        }
+        setPromoApplied(true);
       } else {
-        const fraction = foundPromo.discountValue / (computedBasePrice || 1);
-        setDiscount(fraction);
+        setPromoError('Invalid promo code');
+        setDiscount(0);
+        setPromoApplied(false);
       }
-      setPromoApplied(true);
-    } else {
-      setPromoError('Invalid promo code');
+    } catch (err: any) {
+      setPromoError(err.message || 'Failed to validate promo code');
       setDiscount(0);
       setPromoApplied(false);
     }
@@ -479,7 +479,8 @@ const Billing: React.FC = () => {
             codConvenienceFee: 0,
             discountAmount: appliedDiscountAmount,
             appliedPromoCode: promoApplied ? promoCode : undefined,
-            appliedOfferId: appliedLimitedOffer?.offerId || undefined
+            appliedOfferId: appliedLimitedOffer?.offerId || undefined,
+            appliedOfferDiscount: appliedLimitedOffer?.discountValue || appliedLimitedOffer?.discount || 0
           }
         })
       });
@@ -512,23 +513,23 @@ const Billing: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-3 sm:py-8">
+    <div className="max-w-4xl mx-auto px-1 sm:px-4 py-2 sm:py-8 pb-20 md:pb-8">
       <button 
         onClick={() => navigate(-1)}
-        className="flex items-center text-gray-500 hover:text-blue-600 mb-4 sm:mb-8 transition-colors text-xs sm:text-sm font-medium"
+        className="flex items-center text-gray-500 hover:text-blue-600 mb-2.5 sm:mb-8 transition-colors text-xs sm:text-sm font-medium"
       >
-        <ArrowLeft className="w-4 h-4 mr-2" />
+        <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
         Back
       </button>
 
       {isSubscription && !selectedPackage ? (
-        <div className="space-y-6 sm:space-y-8">
-          <div className="text-center mb-8 sm:mb-12">
-            <h1 className="text-2xl sm:text-4xl font-black text-gray-900 dark:text-white tracking-tight uppercase mb-2 sm:mb-4">Select Your Plan</h1>
-            <p className="text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-[10px] sm:text-sm">Choose the perfect subscription for your laundry needs</p>
+        <div className="space-y-4 sm:space-y-8">
+          <div className="text-center mb-5 sm:mb-12">
+            <h1 className="text-xl sm:text-4xl font-black text-gray-900 dark:text-white tracking-tight uppercase mb-1 sm:mb-4">Select Your Plan</h1>
+            <p className="text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-[9.5px] sm:text-sm">Choose the perfect subscription for your laundry needs</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-8">
             {(settings?.subscriptionPlans || []).map((plan) => {
               const regPrice = plan.regular_price || plan.originalPrice || ((plan.kgLimit || 12) * (settings?.pricing?.regular_price_per_kg || 69));
               const activePrice = plan.price;
@@ -539,46 +540,46 @@ const Billing: React.FC = () => {
                 <motion.div
                   key={plan.id}
                   whileHover={{ y: -8 }}
-                  className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-[3rem] border-2 border-gray-100 dark:border-gray-800 shadow-xl hover:border-blue-500 transition-all flex flex-col"
+                  className="bg-white dark:bg-gray-900 p-4 sm:p-8 rounded-xl sm:rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-md sm:shadow-xl hover:border-blue-500 transition-all flex flex-col"
                 >
-                  <div className="mb-6">
-                    <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight uppercase mb-2">{plan.name}</h3>
+                  <div className="mb-4 sm:mb-6">
+                    <h3 className="text-lg sm:text-2xl font-black text-gray-900 dark:text-white tracking-tight uppercase mb-1 sm:mb-2">{plan.name}</h3>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-3xl sm:text-4xl font-black tracking-tight text-blue-600 dark:text-blue-400">₹{activePrice}</span>
-                      <span className="text-gray-400 font-bold uppercase text-[10px] tracking-wider">/ month</span>
+                      <span className="text-2xl sm:text-4xl font-black tracking-tight text-blue-600 dark:text-blue-400">₹{activePrice}</span>
+                      <span className="text-gray-400 font-bold uppercase text-[9px] sm:text-[10px] tracking-wider">/ month</span>
                     </div>
                     {hasDiscount && (
-                      <div className="flex items-center gap-2 mt-2">
+                      <div className="flex items-center gap-2 mt-1 sm:mt-2">
                         <span className="text-xs sm:text-sm text-gray-400 dark:text-gray-500 line-through font-bold">₹{regPrice}</span>
-                        <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 uppercase bg-emerald-100/90 dark:bg-emerald-950/60 border border-emerald-300/60 dark:border-emerald-800/60 px-2 py-0.5 rounded-md shadow-xs">
+                        <span className="text-[9px] sm:text-[10px] font-black text-emerald-700 dark:text-emerald-300 uppercase bg-emerald-100/90 dark:bg-emerald-950/60 border border-emerald-300/60 dark:border-emerald-800/60 px-1.5 py-0.5 rounded-md shadow-xs">
                           Save ₹{savings}
                         </span>
                       </div>
                     )}
                   </div>
 
-                  <div className="space-y-4 mb-8 flex-1">
-                    <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
-                      <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                  <div className="space-y-2.5 sm:space-y-4 mb-5 sm:mb-8 flex-1">
+                    <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-gray-600 dark:text-gray-300">
+                      <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500 shrink-0" />
                       <span>{plan.kgLimit} KG Monthly Limit</span>
                     </div>
-                    <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
-                      <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                    <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-gray-600 dark:text-gray-300">
+                      <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500 shrink-0" />
                       <span>{plan.credits || ((plan.kgLimit || 12) * 10)} Monthly Credits</span>
                     </div>
-                    <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
-                      <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                    <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-gray-600 dark:text-gray-300">
+                      <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500 shrink-0" />
                       <span>Priority Machine Access</span>
                     </div>
-                    <div className="flex items-center gap-3 text-sm font-bold text-gray-600 dark:text-gray-300">
-                      <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                    <div className="flex items-center gap-2.5 text-xs sm:text-sm font-bold text-gray-600 dark:text-gray-300">
+                      <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500 shrink-0" />
                       <span>Exclusive Rewards</span>
                     </div>
                   </div>
 
                   <button
                     onClick={() => navigate(`/billing?type=subscription&packageId=${plan.id}`)}
-                    className="w-full py-4 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
+                    className="w-full py-3 sm:py-4 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl sm:rounded-2xl hover:bg-blue-700 transition-all shadow-md shadow-blue-200 dark:shadow-none haptic-feedback glow-blue"
                   >
                     Select {plan.name}
                   </button>
@@ -588,22 +589,22 @@ const Billing: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-8">
-          <div className="md:col-span-8 space-y-4 sm:space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-8">
+          <div className="md:col-span-8 space-y-3 sm:space-y-6">
             {/* Ask for option to pay through credits or through direct payment */}
             {!isSubscription && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-white dark:bg-gray-900 p-5 sm:p-6 rounded-2xl sm:rounded-3xl shadow-xl border border-gray-100 dark:border-gray-800 space-y-4"
+                className="bg-white dark:bg-gray-900 p-3.5 sm:p-6 rounded-xl sm:rounded-3xl shadow-sm sm:shadow-xl border border-gray-100 dark:border-gray-800 space-y-3 sm:space-y-4"
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-base sm:text-lg font-black text-gray-900 dark:text-white uppercase tracking-tight flex items-center gap-2">
-                      <Sparkles className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                    <h2 className="text-sm sm:text-lg font-black text-gray-900 dark:text-white uppercase tracking-tight flex items-center gap-1.5 sm:gap-2">
+                      <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 dark:text-blue-400" />
                       Payment Option
                     </h2>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-0.5">
+                    <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 font-medium mt-0.5">
                       Choose how you would like to settle this wash booking
                     </p>
                   </div>
@@ -612,7 +613,7 @@ const Billing: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4">
                   {/* Option 1: Pay through Credits */}
                   <motion.button
                     type="button"
@@ -623,37 +624,37 @@ const Billing: React.FC = () => {
                       setPaymentMethod('subscription_credits');
                       setError('');
                     }}
-                    className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-all relative flex flex-col justify-between haptic-feedback overflow-hidden ${
+                    className={`p-3 sm:p-5 rounded-xl sm:rounded-2xl border-2 text-left transition-all relative flex flex-col justify-between haptic-feedback overflow-hidden ${
                       isPayingWithCredits
                         ? 'border-emerald-600 bg-emerald-50/80 dark:bg-emerald-950/30 shadow-md ring-2 ring-emerald-500/20'
                         : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-emerald-300 dark:hover:border-emerald-700/60'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2 mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2.5 rounded-xl ${isPayingWithCredits ? 'bg-emerald-600 text-white shadow-sm' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'}`}>
-                          <Zap className="w-5 h-5" />
+                    <div className="flex items-start justify-between gap-2 mb-2 sm:mb-3">
+                      <div className="flex items-center gap-2.5 sm:gap-3">
+                        <div className={`p-2 sm:p-2.5 rounded-lg sm:rounded-xl shrink-0 ${isPayingWithCredits ? 'bg-emerald-600 text-white shadow-sm' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'}`}>
+                          <Zap className="w-4 h-4 sm:w-5 sm:h-5" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-black text-sm text-gray-900 dark:text-white uppercase tracking-tight">Pay through Credits</span>
+                            <span className="font-black text-xs sm:text-sm text-gray-900 dark:text-white uppercase tracking-tight">Pay through Credits</span>
                           </div>
-                          <p className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                            Deduct {bookingCreditsNeeded} Credits (₹{finalPrice.toFixed(2)}) • ₹0.00 to pay
+                          <p className="text-[10px] sm:text-[11px] font-bold text-emerald-600 dark:text-emerald-400 leading-tight">
+                            Deduct {bookingCreditsNeeded} Cr (₹{finalPrice.toFixed(0)}) • ₹0 to pay
                           </p>
                         </div>
                       </div>
-                      <div className={`w-5 h-5 rounded-full flex items-center justify-center border-2 shrink-0 ${isPayingWithCredits ? 'border-emerald-600' : 'border-gray-300 dark:border-gray-600'}`}>
-                        {isPayingWithCredits && <div className="w-2.5 h-2.5 bg-emerald-600 rounded-full" />}
+                      <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center border-2 shrink-0 ${isPayingWithCredits ? 'border-emerald-600' : 'border-gray-300 dark:border-gray-600'}`}>
+                        {isPayingWithCredits && <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 bg-emerald-600 rounded-full" />}
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-emerald-100 dark:border-emerald-900/40 flex items-center justify-between text-xs font-semibold text-gray-600 dark:text-gray-300">
-                      <span>Available: <strong>🧺 {userCurrentCredits} Credits</strong></span>
+                    <div className="pt-1.5 sm:pt-2 border-t border-emerald-100 dark:border-emerald-900/40 flex items-center justify-between text-[11px] sm:text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      <span>Available: <strong>{userCurrentCredits} Cr</strong></span>
                       {hasInsufficientCredits ? (
-                        <span className="text-[10px] font-black text-red-600 bg-red-100 dark:bg-red-900/40 px-2 py-0.5 rounded-md">Short {userDeficitCredits}</span>
+                        <span className="text-[9px] sm:text-[10px] font-black text-red-600 bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded">Short {userDeficitCredits}</span>
                       ) : (
-                        <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 rounded-md uppercase">100% Free Wash</span>
+                        <span className="text-[9px] sm:text-[10px] font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/50 px-1.5 py-0.5 rounded uppercase">Free Wash</span>
                       )}
                     </div>
                   </motion.button>
@@ -670,34 +671,34 @@ const Billing: React.FC = () => {
                       }
                       setError('');
                     }}
-                    className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-all relative flex flex-col justify-between haptic-feedback overflow-hidden ${
+                    className={`p-3 sm:p-5 rounded-xl sm:rounded-2xl border-2 text-left transition-all relative flex flex-col justify-between haptic-feedback overflow-hidden ${
                       !isPayingWithCredits
                         ? 'border-blue-600 bg-blue-50/80 dark:bg-blue-950/30 shadow-md ring-2 ring-blue-500/20'
                         : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-blue-300 dark:hover:border-blue-700/60'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2 mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2.5 rounded-xl ${!isPayingWithCredits ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'}`}>
-                          <CreditCard className="w-5 h-5" />
+                    <div className="flex items-start justify-between gap-2 mb-2 sm:mb-3">
+                      <div className="flex items-center gap-2.5 sm:gap-3">
+                        <div className={`p-2 sm:p-2.5 rounded-lg sm:rounded-xl shrink-0 ${!isPayingWithCredits ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'}`}>
+                          <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-black text-sm text-gray-900 dark:text-white uppercase tracking-tight">Direct Payment</span>
+                            <span className="font-black text-xs sm:text-sm text-gray-900 dark:text-white uppercase tracking-tight">Direct Payment</span>
                           </div>
-                          <p className="text-[11px] font-bold text-blue-600 dark:text-blue-400">
-                            ₹{finalPrice.toFixed(2)} • Wallet, UPI, Cards, Store
+                          <p className="text-[10px] sm:text-[11px] font-bold text-blue-600 dark:text-blue-400 leading-tight">
+                            ₹{finalPrice.toFixed(2)} • UPI, Cards, COD
                           </p>
                         </div>
                       </div>
-                      <div className={`w-5 h-5 rounded-full flex items-center justify-center border-2 shrink-0 ${!isPayingWithCredits ? 'border-blue-600' : 'border-gray-300 dark:border-gray-600'}`}>
-                        {!isPayingWithCredits && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full" />}
+                      <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center border-2 shrink-0 ${!isPayingWithCredits ? 'border-blue-600' : 'border-gray-300 dark:border-gray-600'}`}>
+                        {!isPayingWithCredits && <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 bg-blue-600 rounded-full" />}
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-blue-100 dark:border-blue-900/40 flex items-center justify-between text-xs font-semibold text-gray-600 dark:text-gray-300">
-                      <span className="truncate">Save credits for later</span>
-                      <span className="text-[10px] font-black text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-2 py-0.5 rounded-md uppercase">Earn +5 Credits</span>
+                    <div className="pt-1.5 sm:pt-2 border-t border-blue-100 dark:border-blue-900/40 flex items-center justify-between text-[11px] sm:text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      <span className="truncate">Save credits</span>
+                      <span className="text-[9px] sm:text-[10px] font-black text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-1.5 py-0.5 rounded uppercase">+5 Cr Reward</span>
                     </div>
                   </motion.button>
                 </div>
@@ -709,57 +710,57 @@ const Billing: React.FC = () => {
               <motion.div
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border-2 border-green-500/30 dark:border-green-500/20"
+                className="bg-white dark:bg-gray-900 p-3.5 sm:p-8 rounded-xl sm:rounded-3xl shadow-sm sm:shadow-xl border-2 border-green-500/30 dark:border-green-500/20"
               >
-                <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-3">
-                    <div className="p-3 bg-green-500/10 text-green-600 dark:text-green-400 rounded-2xl">
-                      {isSubscriber ? <Zap className="w-6 h-6" /> : <Coins className="w-6 h-6" />}
+                <div className="flex items-center justify-between mb-3.5 sm:mb-6 pb-2.5 sm:pb-4 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="p-2 sm:p-3 bg-green-500/10 text-green-600 dark:text-green-400 rounded-xl sm:rounded-2xl shrink-0">
+                      {isSubscriber ? <Zap className="w-4 h-4 sm:w-6 sm:h-6" /> : <Coins className="w-4 h-4 sm:w-6 sm:h-6" />}
                     </div>
                     <div>
-                      <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 uppercase tracking-tight">
+                      <h2 className="text-sm sm:text-xl font-bold text-gray-800 dark:text-gray-100 uppercase tracking-tight">
                         {isSubscriber ? 'Subscriber Account' : 'Loyalty Credits'}
                       </h2>
-                      <p className="text-xs text-green-600 dark:text-green-400 font-bold uppercase tracking-wider">
+                      <p className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 font-bold uppercase tracking-wider">
                         {isSubscriber ? 'Active Subscription Coverage' : 'Loyalty Reward Coverage'}
                       </p>
                     </div>
                   </div>
-                  <span className="px-3 py-1 bg-green-500/10 text-green-600 dark:text-green-400 text-[10px] font-black uppercase rounded-full tracking-widest border border-green-500/20">
+                  <span className="px-2 py-0.5 sm:px-3 sm:py-1 bg-green-500/10 text-green-600 dark:text-green-400 text-[9px] sm:text-[10px] font-black uppercase rounded-full tracking-wider border border-green-500/20">
                     {isSubscriber ? (user?.package ? `${user.package.toUpperCase()} PLAN` : 'BASIC PLAN') : 'LOYALTY REWARDS'}
                   </span>
                 </div>
 
-                <div className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/20 rounded-2xl border border-green-100 dark:border-green-900/40 space-y-4 mb-6">
-                  <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300">
-                    <span>Current Credits Balance:</span>
-                    <span className="text-xl font-black text-gray-900 dark:text-white">
-                      🧺 {userCurrentCredits} {isSubscriber ? `/ ${subscriberTotalMonthlyCredits}` : ''} Credits
+                <div className="p-3 sm:p-6 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/20 rounded-xl sm:rounded-2xl border border-green-100 dark:border-green-900/40 space-y-2.5 sm:space-y-4 mb-3.5 sm:mb-6">
+                  <div className="flex justify-between items-center text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-300">
+                    <span>Credits Balance:</span>
+                    <span className="text-base sm:text-xl font-black text-gray-900 dark:text-white">
+                      {userCurrentCredits} {isSubscriber ? `/ ${subscriberTotalMonthlyCredits}` : ''} Cr
                     </span>
                   </div>
-                  <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300">
+                  <div className="flex justify-between items-center text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-300">
                     <span>
-                      {isPerPiece ? `Garment Pieces Selected (${bookingInfo.totalPieces} pcs):` : `Laundry Weight (${bookingInfo.approxLoad}):`}
+                      {isPerPiece ? `Garments (${bookingInfo.totalPieces} pcs):` : `Weight (${bookingInfo.approxLoad}):`}
                     </span>
-                    <span className="text-xl font-black text-green-600 dark:text-green-400">
-                      {bookingCreditsNeeded} Credits <span className="text-sm font-bold text-gray-500 dark:text-gray-400">(₹{finalPrice.toFixed(2)})</span>
+                    <span className="text-base sm:text-xl font-black text-green-600 dark:text-green-400">
+                      {bookingCreditsNeeded} Cr <span className="text-xs font-bold text-gray-500 dark:text-gray-400">(₹{finalPrice.toFixed(0)})</span>
                     </span>
                   </div>
-                  <div className="pt-3 border-t border-green-200 dark:border-green-900/50 flex justify-between items-center">
-                    <span className="text-xs font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">
-                      Credits Balance After Order:
+                  <div className="pt-2 sm:pt-3 border-t border-green-200 dark:border-green-900/50 flex justify-between items-center">
+                    <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Remaining After Order:
                     </span>
-                    <span className={`text-2xl font-black ${userRemainingCredits >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600'}`}>
-                      🧺 {userRemainingCredits} Credits
+                    <span className={`text-base sm:text-2xl font-black ${userRemainingCredits >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600'}`}>
+                      {userRemainingCredits} Cr
                     </span>
                   </div>
                 </div>
 
                 {hasInsufficientCredits && (
-                  <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl text-xs font-bold space-y-3">
+                  <div className="mb-3.5 sm:mb-6 p-3 sm:p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-xl text-xs font-bold space-y-2 sm:space-y-3">
                     <div>
-                      <p className="font-black uppercase tracking-wider">⚠️ Credit Balance Exceeded</p>
-                      <p className="mt-1">
+                      <p className="font-black uppercase tracking-wider text-[11px] sm:text-xs">Credit Balance Exceeded</p>
+                      <p className="mt-0.5 text-[10px] sm:text-xs">
                         This booking requires <strong>{bookingCreditsNeeded} Credits</strong>, but you only have <strong>{userCurrentCredits} Credits</strong> available.
                       </p>
                     </div>
@@ -770,7 +771,7 @@ const Billing: React.FC = () => {
                         setPaymentMethod('wallet');
                         setError('');
                       }}
-                      className="px-3 py-2 bg-blue-600 text-white rounded-lg font-bold text-[11px] uppercase tracking-wider hover:bg-blue-700 transition-colors inline-flex items-center gap-1.5"
+                      className="px-2.5 py-1.5 sm:px-3 sm:py-2 bg-blue-600 text-white rounded-lg font-bold text-[10px] sm:text-[11px] uppercase tracking-wider hover:bg-blue-700 transition-colors inline-flex items-center gap-1.5"
                     >
                       <CreditCard className="w-3.5 h-3.5" />
                       Switch to Direct Payment (₹{finalPrice.toFixed(2)})
@@ -779,7 +780,7 @@ const Billing: React.FC = () => {
                 )}
 
                 {error && (
-                  <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold uppercase tracking-wide">
+                  <div className="mb-3.5 sm:mb-6 p-3 sm:p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-xs font-bold uppercase tracking-wide">
                     {error}
                   </div>
                 )}
@@ -789,7 +790,7 @@ const Billing: React.FC = () => {
                   whileTap={{ scale: hasInsufficientCredits ? 1 : 0.98 }}
                   onClick={handleSubscriberBook}
                   disabled={loading || hasInsufficientCredits}
-                  className={`w-full py-5 text-white font-black text-sm uppercase tracking-widest rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3 haptic-feedback ${
+                  className={`w-full py-3.5 sm:py-5 text-white font-black text-xs sm:text-sm uppercase tracking-wider rounded-xl sm:rounded-2xl shadow-md sm:shadow-xl transition-all flex items-center justify-center gap-2 sm:gap-3 haptic-feedback ${
                     hasInsufficientCredits 
                       ? 'bg-gray-400 cursor-not-allowed shadow-none' 
                       : 'bg-green-600 hover:bg-green-700 shadow-green-600/20 glow-green'
@@ -797,13 +798,13 @@ const Billing: React.FC = () => {
                 >
                   {loading ? (
                     <>
-                      <Loader2 className="w-6 h-6 animate-spin" />
-                      <span>Confirming Booking...</span>
+                      <Loader2 className="w-4 h-4 sm:w-6 sm:h-6 animate-spin" />
+                      <span>Confirming...</span>
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 className="w-6 h-6" />
-                      <span>Confirm and Deduct {bookingCreditsNeeded} Credits (₹{finalPrice.toFixed(2)})</span>
+                      <CheckCircle2 className="w-4 h-4 sm:w-6 sm:h-6" />
+                      <span>Confirm & Deduct {bookingCreditsNeeded} Cr (₹{finalPrice.toFixed(0)})</span>
                     </>
                   )}
                 </motion.button>
@@ -812,21 +813,21 @@ const Billing: React.FC = () => {
               <motion.div
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-2xl sm:rounded-3xl shadow-xl border border-blue-50 dark:border-gray-800"
+                className="bg-white dark:bg-gray-900 p-3.5 sm:p-8 rounded-xl sm:rounded-3xl shadow-sm sm:shadow-xl border border-blue-50 dark:border-gray-800"
               >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center">
-                  <CreditCard className="w-6 h-6 mr-2 text-blue-600 dark:text-blue-400" />
+              <div className="flex items-center justify-between mb-3.5 sm:mb-6">
+                <h2 className="text-sm sm:text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center">
+                  <CreditCard className="w-4 h-4 sm:w-6 sm:h-6 mr-1.5 sm:mr-2 text-blue-600 dark:text-blue-400" />
                   {isSubscription ? 'Payment Method' : 'Direct Payment Method'}
                 </h2>
                 {!isSubscription && isSubscriber && (
-                  <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300/60 dark:border-emerald-800/60 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                    Free Delivery Active
+                  <span className="text-[9px] sm:text-[10px] font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300/60 dark:border-emerald-800/60 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full uppercase tracking-wider">
+                    Free Delivery
                   </span>
                 )}
               </div>
               
-              <div className="space-y-4">
+              <div className="space-y-2.5 sm:space-y-4">
                 {/* Wallet Option */}
                 <motion.button
                   initial={{ opacity: 0, y: 10 }}
@@ -834,26 +835,26 @@ const Billing: React.FC = () => {
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
                   onClick={() => { setPaymentMethod('wallet'); setError(''); }}
-                  className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback relative overflow-hidden ${
+                  className={`w-full p-3 sm:p-4 rounded-xl sm:rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback relative overflow-hidden ${
                     paymentMethod === 'wallet' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
                   }`}
                 >
-                  <div className="flex items-center">
-                    <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'wallet' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                      <Wallet className={`w-5 h-5 ${paymentMethod === 'wallet' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
+                  <div className="flex items-center gap-2.5 sm:gap-4 min-w-0 flex-1 mr-2">
+                    <div className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${paymentMethod === 'wallet' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                      <Wallet className={`w-4 h-4 sm:w-5 sm:h-5 ${paymentMethod === 'wallet' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
                     </div>
-                    <div className="text-left">
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-gray-800 dark:text-gray-100">Student Wallet</p>
-                        <span className="px-2 py-0.5 bg-emerald-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">₹0 Fee</span>
+                    <div className="text-left min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-bold text-xs sm:text-base text-gray-800 dark:text-gray-100 truncate">Student Wallet</p>
+                        <span className="px-1.5 py-0.2 bg-emerald-600 text-white text-[8px] sm:text-[9px] font-black uppercase rounded tracking-wider shrink-0">₹0 Fee</span>
                       </div>
-                      <p className={`text-xs font-medium ${paymentMethod === 'wallet' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                        Balance: ₹{(user?.walletBalance || 0).toFixed(2)} • Zero convenience fee
+                      <p className={`text-[10px] sm:text-xs font-medium truncate ${paymentMethod === 'wallet' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                        Balance: ₹{(user?.walletBalance || 0).toFixed(2)} • Zero fee
                       </p>
                     </div>
                   </div>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'wallet' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
-                    {paymentMethod === 'wallet' && <motion.div layoutId="payment-dot" className="w-3 h-3 bg-blue-600 rounded-full" />}
+                  <div className={`w-4 h-4 sm:w-6 sm:h-6 rounded-full flex items-center justify-center border-2 shrink-0 ${paymentMethod === 'wallet' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
+                    {paymentMethod === 'wallet' && <motion.div layoutId="payment-dot" className="w-2 h-2 sm:w-3 sm:h-3 bg-blue-600 rounded-full" />}
                   </div>
                 </motion.button>
 
@@ -865,33 +866,33 @@ const Billing: React.FC = () => {
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
                   onClick={() => { setPaymentMethod('card'); setError(''); }}
-                  className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback relative overflow-hidden ${
+                  className={`w-full p-3 sm:p-4 rounded-xl sm:rounded-2xl border-2 transition-all flex items-center justify-between haptic-feedback relative overflow-hidden ${
                     paymentMethod === 'card' ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 glow-blue' : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-blue-200 dark:hover:border-blue-800'
                   }`}
                 >
-                  <div className="flex items-center">
-                    <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'card' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                      <CreditCard className={`w-5 h-5 ${paymentMethod === 'card' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
+                  <div className="flex items-center gap-2.5 sm:gap-4 min-w-0 flex-1 mr-2">
+                    <div className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${paymentMethod === 'card' ? 'bg-blue-600' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                      <CreditCard className={`w-4 h-4 sm:w-5 sm:h-5 ${paymentMethod === 'card' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
                     </div>
-                    <div className="text-left">
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-gray-800 dark:text-gray-100">Online Payment (UPI & Cards)</p>
-                        <span className="px-2 py-0.5 bg-emerald-600 text-white text-[9px] font-black uppercase rounded-md tracking-wider">₹0 Fee</span>
+                    <div className="text-left min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-bold text-xs sm:text-base text-gray-800 dark:text-gray-100 truncate">Online (UPI & Cards)</p>
+                        <span className="px-1.5 py-0.2 bg-emerald-600 text-white text-[8px] sm:text-[9px] font-black uppercase rounded tracking-wider shrink-0">₹0 Fee</span>
                       </div>
-                      <p className={`text-xs font-medium ${paymentMethod === 'card' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                        UPI, Cards & NetBanking • Free (No convenience fee)
+                      <p className={`text-[10px] sm:text-xs font-medium truncate ${paymentMethod === 'card' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                        UPI, Cards & NetBanking • Free
                       </p>
                     </div>
                   </div>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 ${paymentMethod === 'card' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
-                    {paymentMethod === 'card' && <motion.div layoutId="payment-dot" className="w-3 h-3 bg-blue-600 rounded-full" />}
+                  <div className={`w-4 h-4 sm:w-6 sm:h-6 rounded-full flex items-center justify-center border-2 shrink-0 ${paymentMethod === 'card' ? 'border-blue-600' : 'border-gray-200 dark:border-gray-700'}`}>
+                    {paymentMethod === 'card' && <motion.div layoutId="payment-dot" className="w-2 h-2 sm:w-3 sm:h-3 bg-blue-600 rounded-full" />}
                   </div>
                 </motion.button>
 
                 {/* Cash on Delivery Option with ₹39 or 20% Prepayment (Non-subscription orders only) */}
                 {!isSubscription && (
                   <div
-                    className={`rounded-2xl border-2 transition-all overflow-hidden ${
+                    className={`rounded-xl sm:rounded-2xl border-2 transition-all overflow-hidden ${
                       paymentMethod === 'pay_at_store'
                         ? 'border-amber-500 bg-amber-50/40 dark:bg-amber-950/20 glow-amber'
                         : 'border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-amber-200 dark:hover:border-amber-800'
@@ -900,28 +901,28 @@ const Billing: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => { setPaymentMethod('pay_at_store'); setError(''); }}
-                      className="w-full p-4 flex items-center justify-between text-left haptic-feedback"
+                      className="w-full p-3 sm:p-4 flex items-center justify-between text-left haptic-feedback"
                     >
-                      <div className="flex items-center">
-                        <div className={`p-2 rounded-lg mr-4 ${paymentMethod === 'pay_at_store' ? 'bg-amber-500' : 'bg-gray-100 dark:bg-gray-800'}`}>
-                          <Store className={`w-5 h-5 ${paymentMethod === 'pay_at_store' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
+                      <div className="flex items-center gap-2.5 sm:gap-4 min-w-0 flex-1 mr-2">
+                        <div className={`p-1.5 sm:p-2 rounded-lg shrink-0 ${paymentMethod === 'pay_at_store' ? 'bg-amber-500' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                          <Store className={`w-4 h-4 sm:w-5 sm:h-5 ${paymentMethod === 'pay_at_store' ? 'text-white' : 'text-gray-500 dark:text-gray-400'}`} />
                         </div>
-                        <div className="text-left">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-bold text-gray-800 dark:text-gray-100">Cash on Delivery / Pay at Store</p>
-                            <span className="px-2 py-0.5 bg-amber-500 text-white text-[9px] font-black uppercase rounded-md tracking-wider">
-                              {isPerPiece ? '20% Advance Online' : '₹39 Flat Booking Fee'}
+                        <div className="text-left min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="font-bold text-xs sm:text-base text-gray-800 dark:text-gray-100 truncate">Cash on Delivery / Pay at Store</p>
+                            <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[8px] sm:text-[9px] font-black uppercase rounded tracking-wider shrink-0">
+                              {isPerPiece ? '20% Advance Online' : '₹39 Booking Fee'}
                             </span>
                           </div>
-                          <p className={`text-xs font-medium mt-0.5 ${paymentMethod === 'pay_at_store' ? 'text-amber-800 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`}>
+                          <p className={`text-[10px] sm:text-xs font-medium mt-0.5 leading-snug ${paymentMethod === 'pay_at_store' ? 'text-amber-800 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`}>
                             {isPerPiece
-                              ? `Pay 20% advance (₹${codPrepaidAmount.toFixed(2)}) online now • Rest 80% (₹${codRemainingAmount.toFixed(2)}) in cash after wash`
-                              : `Prepay ₹${codPrepaidAmount.toFixed(2)} slot fee online now • Rest ₹${codRemainingAmount.toFixed(2)} in cash after wash`}
+                              ? `Pay 20% (₹${codPrepaidAmount.toFixed(0)}) online • Rest 80% (₹${codRemainingAmount.toFixed(0)}) COD`
+                              : `Prepay ₹${codPrepaidAmount.toFixed(0)} slot fee online • Rest ₹${codRemainingAmount.toFixed(0)} COD`}
                           </p>
                         </div>
                       </div>
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 shrink-0 ${paymentMethod === 'pay_at_store' ? 'border-amber-500' : 'border-gray-200 dark:border-gray-700'}`}>
-                        {paymentMethod === 'pay_at_store' && <div className="w-3 h-3 bg-amber-500 rounded-full" />}
+                      <div className={`w-4 h-4 sm:w-6 sm:h-6 rounded-full flex items-center justify-center border-2 shrink-0 ${paymentMethod === 'pay_at_store' ? 'border-amber-500' : 'border-gray-200 dark:border-gray-700'}`}>
+                        {paymentMethod === 'pay_at_store' && <div className="w-2 h-2 sm:w-3 sm:h-3 bg-amber-500 rounded-full" />}
                       </div>
                     </button>
 
@@ -930,50 +931,50 @@ const Billing: React.FC = () => {
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
-                        className="px-4 pb-4 pt-1 border-t border-amber-200/60 dark:border-amber-900/40 space-y-3"
+                        className="px-3 sm:px-4 pb-3 sm:pb-4 pt-1 border-t border-amber-200/60 dark:border-amber-900/40 space-y-2 sm:space-y-3"
                       >
-                        <div className="p-3 bg-white dark:bg-gray-900 rounded-xl border border-amber-200/80 dark:border-amber-800/50 space-y-2">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="font-bold text-gray-700 dark:text-gray-300">Total Order Value:</span>
+                        <div className="p-2.5 sm:p-3 bg-white dark:bg-gray-900 rounded-lg sm:rounded-xl border border-amber-200/80 dark:border-amber-800/50 space-y-1.5">
+                          <div className="flex justify-between items-center text-[11px] sm:text-xs">
+                            <span className="font-bold text-gray-700 dark:text-gray-300">Total Order:</span>
                             <span className="font-extrabold text-gray-900 dark:text-gray-100">₹{finalPrice.toFixed(2)}</span>
                           </div>
-                          <div className="flex justify-between items-center text-xs text-blue-600 dark:text-blue-400 font-bold">
-                            <span>Prepay Slot Allocation Fee (Pay Online Now):</span>
-                            <span>₹{codPrepaidAmount.toFixed(2)} ({isPerPiece ? '20%' : 'Flat ₹39'})</span>
+                          <div className="flex justify-between items-center text-[11px] sm:text-xs text-blue-600 dark:text-blue-400 font-bold">
+                            <span>Prepay Slot Fee Online Now:</span>
+                            <span>₹{codPrepaidAmount.toFixed(2)}</span>
                           </div>
-                          <div className="flex justify-between items-center text-xs text-amber-700 dark:text-amber-300 font-extrabold pt-1.5 border-t border-amber-100 dark:border-amber-900/40">
+                          <div className="flex justify-between items-center text-[11px] sm:text-xs text-amber-700 dark:text-amber-300 font-extrabold pt-1 border-t border-amber-100 dark:border-amber-900/40">
                             <span>Remaining Balance (Cash on Delivery):</span>
-                            <span>₹{codRemainingAmount.toFixed(2)} ({isPerPiece ? '80%' : 'Rest of payment'})</span>
+                            <span>₹{codRemainingAmount.toFixed(2)}</span>
                           </div>
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 block mb-2">
-                            Select Online Method for ₹{codPrepaidAmount.toFixed(2)} Slot Fee:
+                          <label className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400 block mb-1.5">
+                            Select Online Method for ₹{codPrepaidAmount.toFixed(2)} Fee:
                           </label>
                           <div className="grid grid-cols-2 gap-2">
                             <button
                               type="button"
                               onClick={() => setCodPrepaidSource('card')}
-                              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                              className={`p-2 sm:p-2.5 rounded-lg sm:rounded-xl border text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition-all ${
                                 codPrepaidSource === 'card'
-                                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
                                   : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-300'
                               }`}
                             >
-                              <CreditCard className="w-3.5 h-3.5" />
+                              <CreditCard className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                               <span>UPI & Cards</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => setCodPrepaidSource('wallet')}
-                              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                              className={`p-2 sm:p-2.5 rounded-lg sm:rounded-xl border text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition-all ${
                                 codPrepaidSource === 'wallet'
-                                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
                                   : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-300'
                               }`}
                             >
-                              <Wallet className="w-3.5 h-3.5" />
+                              <Wallet className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                               <span>Wallet (₹{(user?.walletBalance || 0).toFixed(0)})</span>
                             </button>
                           </div>
@@ -984,27 +985,27 @@ const Billing: React.FC = () => {
                 )}
               </div>
 
-              <div className="mt-8 pt-8 border-t border-gray-100 dark:border-gray-800">
-                <div className="flex items-center text-gray-500 dark:text-gray-400 text-sm mb-4">
-                  <ShieldCheck className="w-4 h-4 mr-2 text-green-500" />
+              <div className="mt-4 sm:mt-8 pt-4 sm:pt-8 border-t border-gray-100 dark:border-gray-800">
+                <div className="flex items-center text-gray-500 dark:text-gray-400 text-xs sm:text-sm mb-3 sm:mb-4">
+                  <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 text-green-500" />
                   Secure 256-bit SSL encrypted payment
                 </div>
                 
-                {error && <p className="text-red-500 text-sm mb-4 font-medium bg-red-50 dark:bg-red-900/20 p-3 rounded-xl">{error}</p>}
+                {error && <p className="text-red-500 text-xs sm:text-sm mb-3 sm:mb-4 font-medium bg-red-50 dark:bg-red-900/20 p-2.5 sm:p-3 rounded-xl">{error}</p>}
 
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={handlePayment}
                   disabled={loading}
-                  className="w-full py-3 sm:py-4 bg-blue-600 text-white font-bold rounded-xl sm:rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 dark:shadow-none flex items-center justify-center haptic-feedback glow-blue"
+                  className="w-full py-3 sm:py-4 bg-blue-600 text-white text-xs sm:text-sm font-bold rounded-xl sm:rounded-2xl hover:bg-blue-700 transition-all shadow-md shadow-blue-200 dark:shadow-none flex items-center justify-center haptic-feedback glow-blue"
                 >
                   {loading ? (
-                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     paymentMethod === 'wallet' ? `Pay ₹${finalPrice.toFixed(2)} with Wallet (₹0 Fee)` :
                     paymentMethod === 'card' ? `Pay ₹${finalPrice.toFixed(2)} Online (₹0 Fee)` :
-                    `Pay ₹${codPrepaidAmount.toFixed(2)} Online to Confirm Slot (Rest ₹${codRemainingAmount.toFixed(2)} on Delivery)`
+                    `Pay ₹${codPrepaidAmount.toFixed(2)} Online (Rest ₹${codRemainingAmount.toFixed(2)} COD)`
                   )}
                 </motion.button>
               </div>
@@ -1016,49 +1017,49 @@ const Billing: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
-              className="bg-gray-50 dark:bg-gray-900 p-5 rounded-[2rem] border border-gray-100 dark:border-gray-800 md:sticky md:top-8 w-full shadow-sm space-y-6"
+              className="bg-gray-50 dark:bg-gray-900 p-3.5 sm:p-5 rounded-xl sm:rounded-[2rem] border border-gray-100 dark:border-gray-800 md:sticky md:top-8 w-full shadow-xs sm:shadow-sm space-y-3 sm:space-y-6"
             >
-              <h3 className="text-lg font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight border-b border-gray-200 dark:border-gray-700 pb-3">Summary</h3>
-              <div className="space-y-3 pb-6 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm sm:text-lg font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight border-b border-gray-200 dark:border-gray-700 pb-2 sm:pb-3">Summary</h3>
+              <div className="space-y-2 sm:space-y-3 pb-3 sm:pb-6 border-b border-gray-200 dark:border-gray-700">
                 {isSubscription ? (
                   <>
-                    <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-xs sm:text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Package</span>
                       <span className="font-medium text-gray-800 dark:text-gray-200">{selectedPackage?.name}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-xs sm:text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Benefits</span>
                       <span className="font-medium text-gray-800 dark:text-gray-200">{selectedPackage?.description}</span>
                     </div>
                   </>
                 ) : (
                   <>
-                    <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-xs sm:text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Date</span>
                       <span className="font-medium text-gray-800 dark:text-gray-200">{bookingInfo.date}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-xs sm:text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Time Slot</span>
                       <span className="font-medium text-gray-800 dark:text-gray-200">{bookingInfo.slot}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-xs sm:text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Service</span>
                       <span className="font-medium text-gray-800 dark:text-gray-200">{bookingInfo.serviceType}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-xs sm:text-sm">
                       <span className="text-gray-500 dark:text-gray-400">{bookingInfo.serviceType === 'Wash & Fold (Per Piece)' ? 'Total Items' : 'Load'}</span>
                       <span className="font-medium text-gray-800 dark:text-gray-200">{bookingInfo.approxLoad}</span>
                     </div>
                     {bookingInfo.serviceType === 'Wash & Fold (Per Piece)' && bookingInfo.pieceBreakdown && bookingInfo.pieceBreakdown.length > 0 && (
-                      <div className="pt-2 pb-1">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Selected Garments</p>
-                        <div className="p-3 bg-gray-50 dark:bg-gray-800/80 rounded-xl space-y-1.5 border border-gray-100 dark:border-gray-700/60">
+                      <div className="pt-1.5 pb-0.5">
+                        <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Selected Garments</p>
+                        <div className="p-2 sm:p-3 bg-white dark:bg-gray-800/80 rounded-lg sm:rounded-xl space-y-1 border border-gray-100 dark:border-gray-700/60">
                           {bookingInfo.pieceBreakdown.map((item: any, idx: number) => (
-                            <div key={idx} className="flex justify-between text-xs text-gray-600 dark:text-gray-300">
+                            <div key={idx} className="flex justify-between text-[11px] sm:text-xs text-gray-600 dark:text-gray-300">
                               <span>{item.count}x {item.name}</span>
                               {isPayingWithCredits ? (
                                 <span className="font-semibold text-green-600 dark:text-green-400">
-                                  {item.totalCredits || (item.subscriberCredits ? item.subscriberCredits * item.count : (item.unitCredits ? item.unitCredits * item.count : item.count * 3))} Credits <span className="text-gray-500 dark:text-gray-400">(₹{item.totalPrice})</span>
+                                  {item.totalCredits || (item.subscriberCredits ? item.subscriberCredits * item.count : (item.unitCredits ? item.unitCredits * item.count : item.count * 3))} Cr <span className="text-gray-500 dark:text-gray-400">(₹{item.totalPrice})</span>
                                 </span>
                               ) : (
                                 <span className="font-semibold text-gray-800 dark:text-gray-200">₹{item.totalPrice}</span>
@@ -1068,51 +1069,48 @@ const Billing: React.FC = () => {
                         </div>
                       </div>
                     )}
-                    <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-xs sm:text-sm">
                       <span className="text-gray-500 dark:text-gray-400">Pickup/Drop</span>
                       <span className="font-medium text-gray-800 dark:text-gray-200">
                         {bookingInfo.pickupDrop ? (isSubscriber || isPayingWithCredits ? 'Yes (Free)' : 'Yes') : 'No'}
                       </span>
                     </div>
                     {bookingInfo.pickupDrop && bookingInfo.address && (
-                      <div className="pt-2">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Address</p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">{bookingInfo.address}</p>
+                      <div className="pt-1">
+                        <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Address</p>
+                        <p className="text-[11px] sm:text-xs text-gray-600 dark:text-gray-400 line-clamp-2">{bookingInfo.address}</p>
                       </div>
                     )}
                     {bookingInfo.garmentInstructions && (
-                      <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-100 dark:border-amber-800/30">
-                        <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest mb-1">Garment Instructions & Care</p>
-                        <p className="text-xs text-amber-800 dark:text-amber-200 font-medium italic">"{bookingInfo.garmentInstructions}"</p>
-                        <p className="text-[10px] text-amber-700/80 dark:text-amber-300/80 font-medium mt-1.5 pt-1.5 border-t border-amber-200/50 dark:border-amber-800/40">
-                          *Color bleeding, white item segregation & special care details noted for store staff.
-                        </p>
+                      <div className="mt-2 p-2 sm:p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg sm:rounded-xl border border-amber-100 dark:border-amber-800/30">
+                        <p className="text-[9px] sm:text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-0.5">Garment Instructions</p>
+                        <p className="text-[11px] sm:text-xs text-amber-800 dark:text-amber-200 font-medium italic">"{bookingInfo.garmentInstructions}"</p>
                       </div>
                     )}
                   </>
                 )}
               </div>
               
-              <div className="pt-4 space-y-4">
+              <div className="pt-2 sm:pt-4 space-y-2.5 sm:space-y-4">
                 {/* Special Limited Offers (Direct payment only) */}
                 {!isSubscription && !isPayingWithCredits && limitedOffers.length > 0 && !appliedLimitedOffer && (
-                   <div className="space-y-3 pb-4 border-b border-gray-100 dark:border-gray-800">
-                     <label className="text-[10px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest flex items-center gap-2">
-                       <Zap className="w-3 h-3 fill-current" /> Special Offers Only For Today
+                   <div className="space-y-2 pb-3 border-b border-gray-100 dark:border-gray-800">
+                     <label className="text-[9px] sm:text-[10px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                       <Zap className="w-3 h-3 fill-current" /> Special Offers Today
                      </label>
-                     <div className="space-y-2">
+                     <div className="space-y-1.5">
                        {limitedOffers.map(offer => (
                          <button
                            key={offer.offerId}
                            onClick={() => applyLimitedOffer(offer.offerId)}
                            disabled={isApplyingOffer || offer.remainingSlots === 0}
-                           className="w-full p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/20 rounded-xl text-left hover:border-amber-300 transition-all group disabled:opacity-50"
+                           className="w-full p-2 sm:p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/20 rounded-lg sm:rounded-xl text-left hover:border-amber-300 transition-all group disabled:opacity-50"
                          >
                            <div className="flex justify-between items-center">
-                             <p className="text-xs font-black text-amber-900 dark:text-amber-100 uppercase">{offer.name}</p>
-                             <span className="text-[10px] font-black text-amber-600 bg-amber-200/50 px-2 py-0.5 rounded-full">{offer.remainingSlots} LEFT</span>
+                             <p className="text-[11px] sm:text-xs font-black text-amber-900 dark:text-amber-100 uppercase">{offer.name}</p>
+                             <span className="text-[9px] sm:text-[10px] font-black text-amber-600 bg-amber-200/50 px-1.5 py-0.2 rounded-full">{offer.remainingSlots} LEFT</span>
                            </div>
-                           <p className="text-[10px] text-amber-700 dark:text-amber-400 font-medium mt-1">{offer.description}</p>
+                           <p className="text-[9px] sm:text-[10px] text-amber-700 dark:text-amber-400 font-medium mt-0.5">{offer.description}</p>
                          </button>
                        ))}
                      </div>
@@ -1120,63 +1118,63 @@ const Billing: React.FC = () => {
                 )}
 
                 {appliedLimitedOffer && !isPayingWithCredits && (
-                   <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl flex items-center justify-between">
+                   <div className="p-2 sm:p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg sm:rounded-xl flex items-center justify-between">
                      <div>
-                       <p className="text-[10px] font-black text-green-600 uppercase tracking-widest">Special Offer Applied</p>
-                       <p className="text-sm font-bold text-green-800 dark:text-green-200">{appliedLimitedOffer.offerApplied}</p>
+                       <p className="text-[9px] sm:text-[10px] font-black text-green-600 uppercase tracking-wider">Special Offer Applied</p>
+                       <p className="text-xs sm:text-sm font-bold text-green-800 dark:text-green-200">{appliedLimitedOffer.offerApplied}</p>
                      </div>
-                     <CheckCircle2 className="w-5 h-5 text-green-600" />
+                     <CheckCircle2 className="w-4 h-4 text-green-600" />
                    </div>
                 )}
 
                 {/* Promo Code Input (Direct payment only) */}
                 {!isSubscription && !isPayingWithCredits && (
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Promo Code</label>
-                    <div className="flex gap-2">
+                  <div className="space-y-1.5 sm:space-y-3">
+                    <label className="text-[9px] sm:text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-wider">Promo Code</label>
+                    <div className="flex gap-1.5 sm:gap-2">
                       <input
                         type="text"
                         value={promoCode}
                         onChange={(e) => setPromoCode(e.target.value)}
                         placeholder="ENTER CODE"
-                        className="flex-1 min-w-0 px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-xs font-bold uppercase tracking-wider focus:ring-2 focus:ring-blue-500 outline-none dark:text-gray-100"
+                        className="flex-1 min-w-0 px-2.5 sm:px-3 py-1.5 sm:py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold uppercase tracking-wider focus:ring-2 focus:ring-blue-500 outline-none dark:text-gray-100"
                       />
                       <button 
                         onClick={applyPromoCode}
-                        className="px-4 py-2.5 bg-blue-600 dark:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-blue-700 transition-all flex-shrink-0"
+                        className="px-3 sm:px-4 py-1.5 sm:py-2.5 bg-blue-600 dark:bg-blue-600 text-white text-[9px] sm:text-[10px] font-black uppercase tracking-wider rounded-lg sm:rounded-xl hover:bg-blue-700 transition-all flex-shrink-0"
                       >
                         Apply
                       </button>
                     </div>
-                    {promoError && <p className="text-red-500 text-[10px] font-bold uppercase tracking-wide px-1">{promoError}</p>}
-                    {promoApplied && <p className="text-green-600 text-[10px] font-bold uppercase tracking-wide px-1">Promo applied!</p>}
+                    {promoError && <p className="text-red-500 text-[9px] sm:text-[10px] font-bold uppercase tracking-wide px-0.5">{promoError}</p>}
+                    {promoApplied && <p className="text-green-600 text-[9px] sm:text-[10px] font-bold uppercase tracking-wide px-0.5">Promo applied!</p>}
                   </div>
                 )}
 
-                <div className="space-y-2 pt-2">
+                <div className="space-y-1.5 sm:space-y-2 pt-1 sm:pt-2">
                   {isPayingWithCredits ? (
                     <>
-                      <div className="flex justify-between text-sm">
+                      <div className="flex justify-between text-xs sm:text-sm">
                         <span className="text-gray-500 dark:text-gray-400">
                           {isPerPiece ? `Wash & Fold (${bookingInfo.totalPieces} pcs)` : `Wash & Fold (${bookingInfo.approxLoad})`}
                         </span>
                         <span className="font-bold text-green-600 dark:text-green-400">
-                          {bookingCreditsNeeded} Credits <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">(₹{finalPrice.toFixed(2)})</span>
+                          {bookingCreditsNeeded} Cr <span className="text-[11px] sm:text-xs font-semibold text-gray-500 dark:text-gray-400">(₹{finalPrice.toFixed(0)})</span>
                         </span>
                       </div>
-                      <div className="flex justify-between text-sm">
+                      <div className="flex justify-between text-xs sm:text-sm">
                         <span className="text-gray-500 dark:text-gray-400">Coverage</span>
                         <span className="font-medium text-green-600 dark:text-green-400">
-                          {isSubscriber ? 'Subscriber Plan (100% Covered)' : 'Loyalty Credits (100% Covered)'}
+                          {isSubscriber ? 'Plan Covered (100%)' : 'Credits Covered (100%)'}
                         </span>
                       </div>
                     </>
                   ) : (
                     <>
-                      <div className="flex justify-between text-sm">
+                      <div className="flex justify-between text-xs sm:text-sm">
                         <span className="text-gray-500 dark:text-gray-400">
                           {bookingInfo.serviceType === 'Wash & Fold (Per Piece)'
-                            ? `Wash & Fold (Per Piece - ${bookingInfo.totalPieces} items)`
+                            ? `Wash & Fold (${bookingInfo.totalPieces} pcs)`
                             : bookingInfo.serviceType === 'Express Wash' 
                               ? `Express Wash (₹${expressActiveRate}/kg)` 
                               : `Wash & Fold (₹${normalActiveRate}/kg)`}
@@ -1187,50 +1185,50 @@ const Billing: React.FC = () => {
                       </div>
 
                       {!isSubscription && bookingInfo.pickupDrop && (
-                        <div className="flex justify-between text-sm">
+                        <div className="flex justify-between text-xs sm:text-sm">
                           <span className="text-gray-500 dark:text-gray-400">Delivery Fee</span>
                           <span className="font-medium text-gray-800 dark:text-gray-200">
-                            {isSubscriber ? 'FREE (Subscriber Perk)' : (directDeliveryFee > 0 ? `₹${directDeliveryFee.toFixed(2)}` : 'FREE')}
+                            {isSubscriber ? 'FREE (Perk)' : (directDeliveryFee > 0 ? `₹${directDeliveryFee.toFixed(2)}` : 'FREE')}
                           </span>
                         </div>
                       )}
 
                       {paymentMethod === 'pay_at_store' && !isSubscription && (
-                        <div className="pt-2 border-t border-amber-200/80 dark:border-amber-900/40 space-y-2">
-                          <div className="flex justify-between text-xs text-blue-600 dark:text-blue-400 font-bold">
-                            <span>Prepay Slot Fee Online Now:</span>
-                            <span>₹{codPrepaidAmount.toFixed(2)} ({isPerPiece ? '20%' : 'Flat ₹39'})</span>
+                        <div className="pt-1.5 border-t border-amber-200/80 dark:border-amber-900/40 space-y-1">
+                          <div className="flex justify-between text-[11px] sm:text-xs text-blue-600 dark:text-blue-400 font-bold">
+                            <span>Prepay Fee Online:</span>
+                            <span>₹{codPrepaidAmount.toFixed(2)}</span>
                           </div>
-                          <div className="flex justify-between text-xs text-amber-700 dark:text-amber-400 font-bold">
-                            <span>Remaining Balance (Cash on Delivery):</span>
-                            <span>₹{codRemainingAmount.toFixed(2)} ({isPerPiece ? '80%' : 'Rest of wash'})</span>
+                          <div className="flex justify-between text-[11px] sm:text-xs text-amber-700 dark:text-amber-400 font-bold">
+                            <span>COD Remaining:</span>
+                            <span>₹{codRemainingAmount.toFixed(2)}</span>
                           </div>
                         </div>
                       )}
 
                       {isSubscription && selectedPackage && (
-                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold">
+                        <div className="flex justify-between text-xs sm:text-sm text-green-600 dark:text-green-400 font-bold">
                           <span>Package Discount</span>
                           <span>-₹{(selectedPackage.originalPrice - selectedPackage.price).toFixed(2)}</span>
                         </div>
                       )}
                       
                       {autoDiscount > 0 && (
-                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold">
+                        <div className="flex justify-between text-xs sm:text-sm text-green-600 dark:text-green-400 font-bold">
                           <span>Automatic Discount</span>
                           <span>-₹{autoDiscount.toFixed(2)}</span>
                         </div>
                       )}
 
                       {appliedLimitedOffer && (
-                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold mb-2">
-                          <span>Limited Offer: {appliedLimitedOffer.offerApplied}</span>
+                        <div className="flex justify-between text-xs sm:text-sm text-green-600 dark:text-green-400 font-bold">
+                          <span>Offer: {appliedLimitedOffer.offerApplied}</span>
                           <span>-₹{(appliedLimitedOffer.originalPrice - appliedLimitedOffer.discountedPrice).toFixed(2)}</span>
                         </div>
                       )}
 
                       {discount > 0 && !appliedLimitedOffer && (
-                        <div className="flex justify-between text-sm text-green-600 dark:text-green-400 font-bold">
+                        <div className="flex justify-between text-xs sm:text-sm text-green-600 dark:text-green-400 font-bold">
                           <span>Promo Discount</span>
                           <span>-₹{((computedBasePrice - autoDiscount) * discount).toFixed(2)}</span>
                         </div>
@@ -1238,30 +1236,30 @@ const Billing: React.FC = () => {
                     </>
                   )}
                   
-                  <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
-                    <span className="text-gray-800 dark:text-gray-100">Total Order</span>
-                    <span className="text-blue-600 dark:text-blue-400 font-black text-2xl">
+                  <div className="flex justify-between text-base sm:text-lg font-bold pt-2.5 sm:pt-4 border-t border-gray-200 dark:border-gray-700 mt-2 sm:mt-4">
+                    <span className="text-gray-800 dark:text-gray-100">Total</span>
+                    <span className="text-blue-600 dark:text-blue-400 font-black text-xl sm:text-2xl">
                       {isPayingWithCredits ? '₹0.00' : `₹${finalPrice.toFixed(2)}`}
                     </span>
                   </div>
 
                   {paymentMethod === 'pay_at_store' && !isPayingWithCredits && !isSubscription && (
-                    <div className="mt-2 p-2.5 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-900/40 text-right">
-                      <p className="text-[11px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-tight">
-                        Pay Now Online: ₹{codPrepaidAmount.toFixed(2)}
+                    <div className="mt-1.5 p-2 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-900/40 text-right">
+                      <p className="text-[10px] sm:text-[11px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-tight">
+                        Pay Online: ₹{codPrepaidAmount.toFixed(2)}
                       </p>
-                      <p className="text-[11px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-tight mt-0.5">
+                      <p className="text-[10px] sm:text-[11px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-tight mt-0.5">
                         Pay on Delivery: ₹{codRemainingAmount.toFixed(2)}
                       </p>
                     </div>
                   )}
                   {isPayingWithCredits ? (
-                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest text-right mt-1">
-                      🧺 {bookingCreditsNeeded} Credits Deducted (₹{finalPrice.toFixed(2)} value • Free Wash)
+                    <p className="text-[9px] sm:text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider text-right mt-0.5">
+                      {bookingCreditsNeeded} Cr Deducted (₹{finalPrice.toFixed(0)} value • Free Wash)
                     </p>
                   ) : (
-                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest text-right mt-1">
-                      ✨ Earn +5 Loyalty Credits on Completion
+                    <p className="text-[9px] sm:text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider text-right mt-0.5">
+                      Earn +5 Loyalty Credits
                     </p>
                   )}
                 </div>
@@ -1270,6 +1268,51 @@ const Billing: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Mobile Sticky Floating Payment Action Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md p-3 px-4 border-t border-gray-200/80 dark:border-gray-800 shadow-2xl flex items-center justify-between gap-3 safe-area-pb">
+        <div className="min-w-0 flex-1">
+          <span className="text-[10px] uppercase font-black tracking-wider text-gray-400 block truncate">
+            {isPayingWithCredits ? 'Credits Order' : paymentMethod === 'pay_at_store' ? 'Pay Online Now' : 'Total Due'}
+          </span>
+          <div className="flex items-baseline gap-1.5">
+            <span className={`text-base font-display font-black leading-tight ${isPayingWithCredits ? 'text-emerald-600 dark:text-emerald-400' : 'text-blue-600 dark:text-blue-400'}`}>
+              {isPayingWithCredits 
+                ? `${bookingCreditsNeeded} Cr` 
+                : paymentMethod === 'pay_at_store'
+                  ? `₹${codPrepaidAmount.toFixed(2)}`
+                  : `₹${finalPrice.toFixed(2)}`}
+            </span>
+            {isPayingWithCredits && (
+              <span className="text-[10px] font-bold text-gray-500">(₹0 cash)</span>
+            )}
+            {paymentMethod === 'pay_at_store' && !isPayingWithCredits && (
+              <span className="text-[10px] font-bold text-gray-400 truncate">(₹{codRemainingAmount.toFixed(0)} COD)</span>
+            )}
+          </div>
+        </div>
+
+        <button
+          onClick={isPayingWithCredits ? handleSubscriberBook : handlePayment}
+          disabled={loading || (isPayingWithCredits && hasInsufficientCredits)}
+          className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all shadow-md haptic-feedback touch-manipulation ${
+            loading || (isPayingWithCredits && hasInsufficientCredits)
+              ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+              : isPayingWithCredits
+                ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-600/20'
+                : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/20'
+          }`}
+        >
+          {loading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <>
+              <span>{isPayingWithCredits ? 'Confirm Wash' : 'Pay Now'}</span>
+              <ArrowLeft className="w-3.5 h-3.5 rotate-180" />
+            </>
+          )}
+        </button>
+      </div>
   </div>
   );
 };

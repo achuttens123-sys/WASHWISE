@@ -54,17 +54,20 @@ import {
   Shirt,
   RotateCcw,
   Layers,
-  CalendarRange
+  CalendarRange,
+  Bell
 } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, updateDoc, doc, getDoc, runTransaction, where, limit, addDoc, deleteDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
-import { Booking, AdminRole, User as AppUser, Store, Package, Slot, TIME_SLOTS, Machine, KERALA_DISTRICTS, generateStoreId, GarmentPieceItem, isMachineAvailableOnDate } from '../../types';
+import { Booking, AdminRole, User as AppUser, Store, Package, Slot, TIME_SLOTS, Machine, KERALA_DISTRICTS, generateStoreId, GarmentPieceItem, isMachineAvailableOnDate, sortTimeSlots } from '../../types';
 import { GARMENT_CATALOG, normalizeGarmentItem } from '../../data/garmentCatalog';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { StoreService } from '../../services/StoreService';
 import LoadingScreen from '../../components/LoadingScreen';
 import ConfirmModal from '../../components/ConfirmModal';
+import FraudRiskCenter from '../../components/FraudRiskCenter';
+import ReminderManager from '../../components/admin/ReminderManager';
 import { authFetch } from '../../utils/api';
 import { 
   LineChart, 
@@ -92,7 +95,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
   const [replyingFeedbackId, setReplyingFeedbackId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'stores' | 'orders' | 'users' | 'pricing' | 'finance' | 'logistics' | 'maintenance' | 'availability' | 'machines' | 'feedback'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'stores' | 'orders' | 'users' | 'pricing' | 'finance' | 'logistics' | 'maintenance' | 'availability' | 'machines' | 'feedback' | 'fraud' | 'reminders'>('overview');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [globalSettings, setGlobalSettings] = useState<any>(null);
@@ -160,10 +163,26 @@ const SuperAdminDashboard: React.FC = () => {
     unavailableReason: ''
   });
 
+  // Time Slot Management State (Add & Remove Slots)
+  const [isAddSlotModalOpen, setIsAddSlotModalOpen] = useState(false);
+  const [slotStartHour, setSlotStartHour] = useState('08');
+  const [slotStartMin, setSlotStartMin] = useState('00');
+  const [slotEndHour, setSlotEndHour] = useState('09');
+  const [slotEndMin, setSlotEndMin] = useState('00');
+  const [slotPeriod, setSlotPeriod] = useState<'AM' | 'PM'>('PM');
+  const [isSavingSlots, setIsSavingSlots] = useState(false);
+  const [ordersStoreFilter, setOrdersStoreFilter] = useState<string>('all');
+
   useEffect(() => {
-    // Global data fetching for Super Admin
-    const unsubBookings = onSnapshot(query(collection(db, 'bookings'), orderBy('createdAt', 'desc')), (snapshot) => {
-      setBookings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Booking[]);
+    // Global data fetching for Super Admin: Listen to collection directly to guarantee 100% of orders are shown
+    const unsubBookings = onSnapshot(collection(db, 'bookings'), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Booking[];
+      data.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : (a.date ? new Date(a.date).getTime() : 0);
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : (b.date ? new Date(b.date).getTime() : 0);
+        return timeB - timeA;
+      });
+      setBookings(data);
       setLoading(false);
     }, (error) => {
       console.warn('Bookings snapshot error:', error);
@@ -217,7 +236,8 @@ const SuperAdminDashboard: React.FC = () => {
       ],
       discounts: [],
       promos: [],
-      garmentCatalog: GARMENT_CATALOG.map((item) => normalizeGarmentItem(item))
+      garmentCatalog: GARMENT_CATALOG.map((item) => normalizeGarmentItem(item)),
+      customSlots: TIME_SLOTS
     };
 
     const loadSettings = async () => {
@@ -227,9 +247,11 @@ const SuperAdminDashboard: React.FC = () => {
           const data = settingsDoc.data();
           const rawCatalog = data?.garmentCatalog || defaultSettings.garmentCatalog;
           const normalizedCatalog = Array.isArray(rawCatalog) ? rawCatalog.map((item: any) => normalizeGarmentItem(item)) : defaultSettings.garmentCatalog;
+          const loadedCustomSlots = Array.isArray(data?.customSlots) && data.customSlots.length > 0 ? sortTimeSlots(data.customSlots) : TIME_SLOTS;
           setGlobalSettings({
             ...defaultSettings,
             ...data,
+            customSlots: loadedCustomSlots,
             garmentCatalog: normalizedCatalog,
             pricing: {
               ...defaultSettings.pricing,
@@ -251,9 +273,11 @@ const SuperAdminDashboard: React.FC = () => {
         const data = snapshot.data();
         const rawCatalog = data?.garmentCatalog || defaultSettings.garmentCatalog;
         const normalizedCatalog = Array.isArray(rawCatalog) ? rawCatalog.map((item: any) => normalizeGarmentItem(item)) : defaultSettings.garmentCatalog;
+        const loadedCustomSlots = Array.isArray(data?.customSlots) && data.customSlots.length > 0 ? sortTimeSlots(data.customSlots) : TIME_SLOTS;
         setGlobalSettings({
           ...defaultSettings,
           ...data,
+          customSlots: loadedCustomSlots,
           garmentCatalog: normalizedCatalog,
           pricing: {
             ...defaultSettings.pricing,
@@ -399,6 +423,96 @@ const SuperAdminDashboard: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Handler to Add a new custom slot
+  const handleAddCustomSlot = async (slotString: string) => {
+    const formatted = slotString.trim();
+    if (!formatted) return;
+
+    const currentSlots: string[] = globalSettings?.customSlots && Array.isArray(globalSettings.customSlots) && globalSettings.customSlots.length > 0
+      ? globalSettings.customSlots
+      : TIME_SLOTS;
+
+    if (currentSlots.includes(formatted)) {
+      alert(`Time slot "${formatted}" already exists!`);
+      return;
+    }
+
+    const updated = sortTimeSlots([...currentSlots, formatted]);
+    setIsSavingSlots(true);
+    try {
+      await setDoc(doc(db, 'settings', 'global'), {
+        ...globalSettings,
+        customSlots: updated
+      }, { merge: true });
+      setIsAddSlotModalOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global/customSlots');
+    } finally {
+      setIsSavingSlots(false);
+    }
+  };
+
+  // Handler to Remove an existing slot
+  const handleRemoveCustomSlot = async (slotToRemove: string) => {
+    const currentSlots: string[] = globalSettings?.customSlots && Array.isArray(globalSettings.customSlots) && globalSettings.customSlots.length > 0
+      ? globalSettings.customSlots
+      : TIME_SLOTS;
+
+    if (currentSlots.length <= 1) {
+      alert('You must keep at least 1 time slot available for bookings.');
+      return;
+    }
+
+    setConfirmConfig({
+      title: 'Remove Time Slot',
+      message: `Are you sure you want to delete the slot "${slotToRemove}"? Customers will no longer be able to select this slot. Any existing completed/past bookings will retain their records.`,
+      onConfirm: async () => {
+        setIsSavingSlots(true);
+        try {
+          const updated = currentSlots.filter(s => s !== slotToRemove);
+          await setDoc(doc(db, 'settings', 'global'), {
+            ...globalSettings,
+            customSlots: updated
+          }, { merge: true });
+
+          // If the currently inspected slot was removed, update selectedTimeSlot
+          if (selectedTimeSlot === slotToRemove) {
+            setSelectedTimeSlot(updated[0] || TIME_SLOTS[0]);
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, 'settings/global/customSlots');
+        } finally {
+          setIsSavingSlots(false);
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
+  };
+
+  // Handler to Reset slots to standard 12 slots (8 AM to 8 PM)
+  const handleResetSlotsToDefault = async () => {
+    setConfirmConfig({
+      title: 'Reset Slots to Standard Default',
+      message: 'Reset all booking slots back to the standard 12 hourly slots (08:00 AM to 08:00 PM)?',
+      onConfirm: async () => {
+        setIsSavingSlots(true);
+        try {
+          await setDoc(doc(db, 'settings', 'global'), {
+            ...globalSettings,
+            customSlots: TIME_SLOTS
+          }, { merge: true });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, 'settings/global/customSlots');
+        } finally {
+          setIsSavingSlots(false);
+        }
+      },
+      variant: 'danger'
+    });
+    setIsConfirmModalOpen(true);
   };
 
   // Automatic migration check for store ID 'RIT' -> 'WW001KT'
@@ -741,11 +855,19 @@ const SuperAdminDashboard: React.FC = () => {
 
   const handleUpdateUserRole = async (userId: string, role: string, adminRole?: string, storeId?: string) => {
     try {
-      await updateDoc(doc(db, 'users', userId), {
+      const payload: any = {
         role,
-        adminRole: adminRole || null,
-        storeId: storeId || null
-      });
+        adminRole: adminRole || null
+      };
+      if (storeId !== undefined) {
+        payload.storeId = storeId || null;
+      } else if (adminRole === 'store_admin' || adminRole === 'store_manager') {
+        const existing = users.find(u => u.uid === userId);
+        if (!existing?.storeId && stores.length > 0) {
+          payload.storeId = stores[0].id;
+        }
+      }
+      await updateDoc(doc(db, 'users', userId), payload);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
     }
@@ -913,6 +1035,8 @@ const SuperAdminDashboard: React.FC = () => {
           { id: 'availability', label: 'Machine Slots', icon: Monitor },
           { id: 'machines', label: 'Machine Management', icon: Activity },
           { id: 'feedback', label: 'Queries & Feedback', icon: MessageSquare },
+          { id: 'fraud', label: 'Fraud & Risk Protection', icon: ShieldAlert },
+          { id: 'reminders', label: 'Wash Reminders', icon: Bell },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -1544,7 +1668,7 @@ const SuperAdminDashboard: React.FC = () => {
                               plan.mostPopular ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
                             }`}
                           >
-                            {plan.mostPopular ? '★ Popular' : 'Normal'}
+                            {plan.mostPopular ? 'Popular' : 'Normal'}
                           </button>
                           <button 
                             type="button"
@@ -2419,7 +2543,7 @@ const SuperAdminDashboard: React.FC = () => {
                     </p>
                   </div>
                   <div className="mt-3 text-[10px] font-black text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 p-2 rounded-lg border border-emerald-200 dark:border-emerald-800/40">
-                    ✓ Supported natively across web client & server
+                    Supported natively across web client & server
                   </div>
                 </div>
               </div>
@@ -2459,6 +2583,7 @@ const SuperAdminDashboard: React.FC = () => {
                       <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Location</th>
                       <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
                       <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Daily Orders</th>
+                      <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">All Orders</th>
                       <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Actions</th>
                     </tr>
                   </thead>
@@ -2505,6 +2630,23 @@ const SuperAdminDashboard: React.FC = () => {
                           <span className="text-sm font-black text-gray-800 dark:text-gray-100">
                             {bookings.filter(b => b.storeId === store.id && b.date === format(new Date(), 'yyyy-MM-dd')).length}
                           </span>
+                        </td>
+                        <td className="py-6">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-black">
+                              {bookings.filter(b => b.storeId === store.id || ((!b.storeId || b.storeId === 'default') && store.id === 'default')).length} orders
+                            </span>
+                            <button
+                              onClick={() => {
+                                setOrdersStoreFilter(store.id);
+                                setActiveTab('orders');
+                              }}
+                              className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline font-bold"
+                              title="View all orders for this store"
+                            >
+                              View &rarr;
+                            </button>
+                          </div>
                         </td>
                         <td className="py-6 text-right">
                           <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
@@ -2557,8 +2699,19 @@ const SuperAdminDashboard: React.FC = () => {
                   <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">Global Orders</h3>
                   <p className="text-sm text-gray-500 font-medium">Monitor and manage all laundry orders across all stores.</p>
                 </div>
-                <div className="flex items-center gap-4">
-                   <div className="relative">
+                <div className="flex flex-wrap items-center gap-3">
+                  <select
+                    value={ordersStoreFilter}
+                    onChange={(e) => setOrdersStoreFilter(e.target.value)}
+                    className="px-4 py-3 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl text-xs font-bold text-gray-700 dark:text-gray-300 outline-none"
+                  >
+                    <option value="all">All Stores ({stores.length})</option>
+                    {stores.map(s => (
+                      <option key={s.id} value={s.id}>{s.name} ({s.id})</option>
+                    ))}
+                    <option value="default">Default Hub (default)</option>
+                  </select>
+                  <div className="relative">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input 
                       type="text"
@@ -2586,6 +2739,13 @@ const SuperAdminDashboard: React.FC = () => {
                   <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
                     {bookings
                       .filter(b => {
+                        if (ordersStoreFilter !== 'all') {
+                          if (ordersStoreFilter === 'default') {
+                            if (b.storeId && b.storeId !== 'default') return false;
+                          } else if (b.storeId !== ordersStoreFilter) {
+                            return false;
+                          }
+                        }
                         const search = (searchTerm || '').toLowerCase();
                         return (b.id || '').toLowerCase().includes(search) || 
                                (b.bookingId || '').toLowerCase().includes(search) || 
@@ -2595,7 +2755,7 @@ const SuperAdminDashboard: React.FC = () => {
                       .map((order) => (
                       <tr key={order.id} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all">
                         <td className="py-6">
-                          <span className="text-sm font-black text-gray-800 dark:text-gray-100">#{order.id?.slice(-6).toUpperCase()}</span>
+                          <span className="text-sm font-black text-gray-800 dark:text-gray-100">{order.bookingId || `#${order.id?.slice(-6).toUpperCase()}`}</span>
                         </td>
                         <td className="py-6">
                           <div>
@@ -2657,7 +2817,7 @@ const SuperAdminDashboard: React.FC = () => {
                         <td className="py-6 text-right">
                           {order.paymentType === 'laundry_credits' || (order.creditsUsed !== undefined && order.creditsUsed > 0) ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-black bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
-                              🧺 {order.creditsUsed} Credits
+                              {order.creditsUsed} Credits
                             </span>
                           ) : (
                             <span className="text-sm font-black text-gray-800 dark:text-gray-100">₹{order.price}</span>
@@ -2771,6 +2931,26 @@ const SuperAdminDashboard: React.FC = () => {
                         </td>
                         <td className="py-6 text-right">
                           <div className="flex items-center justify-end gap-2">
+                            {(user.adminRole === 'store_admin' || user.adminRole === 'store_manager') && (
+                              <select
+                                value={user.storeId || ''}
+                                onChange={async (e) => {
+                                  const newStoreId = e.target.value;
+                                  try {
+                                    await updateDoc(doc(db, 'users', user.uid), { storeId: newStoreId || null });
+                                  } catch (err) {
+                                    console.error('Error updating user store:', err);
+                                  }
+                                }}
+                                className="text-xs font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-none rounded-lg px-2 py-1 outline-none max-w-[140px] truncate"
+                                title="Assigned Store Location"
+                              >
+                                <option value="">No Store Assigned</option>
+                                {stores.map(s => (
+                                  <option key={s.id} value={s.id}>{s.name} ({s.id})</option>
+                                ))}
+                              </select>
+                            )}
                             <select 
                               onChange={(e) => {
                                 const [role, adminRole] = e.target.value.split(':');
@@ -3154,6 +3334,108 @@ const SuperAdminDashboard: React.FC = () => {
                 )}
               </div>
 
+              {/* TIME SLOTS CONFIGURATION & MANAGEMENT (ADD & REMOVE SLOTS) */}
+              {(() => {
+                const currentConfiguredSlots: string[] = globalSettings?.customSlots && Array.isArray(globalSettings.customSlots) && globalSettings.customSlots.length > 0
+                  ? globalSettings.customSlots
+                  : TIME_SLOTS;
+
+                return (
+                  <div className="bg-white dark:bg-gray-900 p-6 sm:p-8 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl">
+                          <Clock className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">
+                              Booking Time Slots Manager
+                            </h3>
+                            <span className="px-3 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900/30 rounded-full text-[10px] font-black uppercase tracking-wider">
+                              {currentConfiguredSlots.length} Active Slots
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 font-medium mt-0.5">
+                            Add new operating hours (e.g. 8-9 PM, 9-10 PM) or remove unneeded slots (e.g. 2-3 PM). Changes apply instantly to customer booking and live store availability.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleResetSlotsToDefault}
+                          disabled={isSavingSlots}
+                          className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5"
+                          title="Reset to original 12 standard slots (8 AM - 8 PM)"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Reset Defaults</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddSlotModalOpen(true)}
+                          disabled={isSavingSlots}
+                          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-sm flex items-center gap-2 transition-all hover:scale-105 active:scale-95"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Add New Slot</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Slots List Badges / Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                      {currentConfiguredSlots.map((slot) => {
+                        const isSelectedInInspector = selectedTimeSlot === slot;
+                        return (
+                          <div
+                            key={slot}
+                            className={`p-3 rounded-2xl border transition-all flex flex-col justify-between group relative overflow-hidden ${
+                              isSelectedInInspector
+                                ? 'bg-blue-50/80 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700 ring-2 ring-blue-500/20'
+                                : 'bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700/80 hover:border-gray-300 dark:hover:border-gray-600'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1 mb-2">
+                              <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                                Hourly
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveCustomSlot(slot);
+                                }}
+                                disabled={isSavingSlots}
+                                className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-all"
+                                title={`Delete slot "${slot}"`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <div
+                              onClick={() => setSelectedTimeSlot(slot)}
+                              className="cursor-pointer"
+                              title="Click to inspect this slot below"
+                            >
+                              <p className="text-xs font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">
+                                {slot}
+                              </p>
+                              <div className="mt-1 flex items-center justify-between text-[10px] text-gray-500">
+                                <span>{isSelectedInInspector ? 'Inspecting' : 'Inspect'}</span>
+                                <ChevronRight className="w-3 h-3 text-gray-400 group-hover:translate-x-0.5 transition-transform" />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* TIME SLOT INSPECTOR */}
               <div className="pt-8 border-t border-gray-200 dark:border-gray-800 space-y-6">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -3180,7 +3462,7 @@ const SuperAdminDashboard: React.FC = () => {
                         onChange={(e) => setSelectedTimeSlot(e.target.value)}
                         className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
                       >
-                        {TIME_SLOTS.map(slot => (
+                        {(globalSettings?.customSlots && Array.isArray(globalSettings.customSlots) && globalSettings.customSlots.length > 0 ? globalSettings.customSlots : TIME_SLOTS).map(slot => (
                           <option key={slot} value={slot}>{slot}</option>
                         ))}
                       </select>
@@ -3608,17 +3890,46 @@ const SuperAdminDashboard: React.FC = () => {
             )}
           </motion.div>
         )}
+
+        {activeTab === 'fraud' && (
+          <motion.div
+            key="fraud"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="space-y-6"
+          >
+            <FraudRiskCenter />
+          </motion.div>
+        )}
+
+        {activeTab === 'reminders' && (
+          <motion.div
+            key="reminders"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="space-y-6"
+          >
+            <ReminderManager />
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Store Modal */}
       <AnimatePresence>
         {isStoreModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div 
+              onClick={() => setIsStoreModalOpen(false)}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm cursor-pointer"
+              aria-label="Close modal overlay"
+            />
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-[3rem] overflow-hidden shadow-2xl max-h-[90vh] flex flex-col"
+              className="relative z-10 bg-white dark:bg-gray-900 w-full max-w-2xl rounded-[3rem] overflow-hidden shadow-2xl max-h-[90vh] flex flex-col"
             >
               <div className="p-8 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0">
                 <h3 className="text-2xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">
@@ -3898,6 +4209,206 @@ const SuperAdminDashboard: React.FC = () => {
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* MODAL: ADD NEW TIME SLOT */}
+        {isAddSlotModalOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsAddSlotModalOpen(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-[2.5rem] shadow-2xl p-6 sm:p-8 border border-gray-100 dark:border-gray-800"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-xl">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-gray-800 dark:text-gray-100 uppercase tracking-tight">
+                      Add New Time Slot
+                    </h3>
+                    <p className="text-xs text-gray-400 font-bold mt-0.5">
+                      Configure operating slot hours
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsAddSlotModalOpen(false)}
+                  className="p-2 text-gray-400 hover:text-gray-600 rounded-xl"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Slot Quick Presets */}
+              <div className="mb-4">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">
+                  Popular Night / Extended Hour Presets
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: '08:00-09:00 PM', sH: '08', eH: '09', p: 'PM' as const },
+                    { label: '09:00-10:00 PM', sH: '09', eH: '10', p: 'PM' as const },
+                    { label: '10:00-11:00 PM', sH: '10', eH: '11', p: 'PM' as const },
+                    { label: '07:00-08:00 AM', sH: '07', eH: '08', p: 'AM' as const },
+                  ].map(preset => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => {
+                        setSlotStartHour(preset.sH);
+                        setSlotStartMin('00');
+                        setSlotEndHour(preset.eH);
+                        setSlotEndMin('00');
+                        setSlotPeriod(preset.p);
+                      }}
+                      className="px-2.5 py-1 text-[11px] font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const slotStr = `${slotStartHour.padStart(2, '0')}:${slotStartMin.padStart(2, '0')}-${slotEndHour.padStart(2, '0')}:${slotEndMin.padStart(2, '0')} ${slotPeriod}`;
+                  handleAddCustomSlot(slotStr);
+                }}
+                className="space-y-4"
+              >
+                {/* Time Pickers */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">
+                      Start Time (HH:MM)
+                    </label>
+                    <div className="flex gap-1.5 items-center">
+                      <select
+                        value={slotStartHour}
+                        onChange={(e) => setSlotStartHour(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-800 dark:text-gray-100 outline-none"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => {
+                          const val = (i + 1).toString().padStart(2, '0');
+                          return <option key={val} value={val}>{val}</option>;
+                        })}
+                      </select>
+                      <span className="font-bold text-gray-400">:</span>
+                      <select
+                        value={slotStartMin}
+                        onChange={(e) => setSlotStartMin(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-800 dark:text-gray-100 outline-none"
+                      >
+                        <option value="00">00</option>
+                        <option value="15">15</option>
+                        <option value="30">30</option>
+                        <option value="45">45</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">
+                      End Time (HH:MM)
+                    </label>
+                    <div className="flex gap-1.5 items-center">
+                      <select
+                        value={slotEndHour}
+                        onChange={(e) => setSlotEndHour(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-800 dark:text-gray-100 outline-none"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => {
+                          const val = (i + 1).toString().padStart(2, '0');
+                          return <option key={val} value={val}>{val}</option>;
+                        })}
+                      </select>
+                      <span className="font-bold text-gray-400">:</span>
+                      <select
+                        value={slotEndMin}
+                        onChange={(e) => setSlotEndMin(e.target.value)}
+                        className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-800 dark:text-gray-100 outline-none"
+                      >
+                        <option value="00">00</option>
+                        <option value="15">15</option>
+                        <option value="30">30</option>
+                        <option value="45">45</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* AM / PM selector */}
+                <div>
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">
+                    Period
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSlotPeriod('AM')}
+                      className={`py-2 text-xs font-black uppercase rounded-xl border transition-all ${
+                        slotPeriod === 'AM'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                          : 'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                      }`}
+                    >
+                      AM (Morning)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSlotPeriod('PM')}
+                      className={`py-2 text-xs font-black uppercase rounded-xl border transition-all ${
+                        slotPeriod === 'PM'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                          : 'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                      }`}
+                    >
+                      PM (Afternoon / Evening)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Formatted Preview */}
+                <div className="p-3 bg-blue-50/60 dark:bg-blue-950/30 rounded-2xl border border-blue-100 dark:border-blue-900/40 text-center">
+                  <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest block mb-0.5">
+                    Slot String Preview
+                  </span>
+                  <span className="text-sm font-mono font-black text-gray-800 dark:text-gray-100">
+                    {slotStartHour.padStart(2, '0')}:{slotStartMin.padStart(2, '0')}-{slotEndHour.padStart(2, '0')}:{slotEndMin.padStart(2, '0')} {slotPeriod}
+                  </span>
+                </div>
+
+                <div className="pt-2 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddSlotModalOpen(false)}
+                    className="flex-1 py-3 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-gray-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingSlots}
+                    className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-blue-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20"
+                  >
+                    {isSavingSlots ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    <span>Add Slot</span>
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

@@ -29,7 +29,7 @@ export function getReferralShareUrl(referralCode: string): string {
 export function getReferralShareText(referralCode: string, referrerName?: string): string {
   const shareUrl = getReferralShareUrl(referralCode);
   const nameStr = referrerName ? `${referrerName} has invited you to` : 'Join';
-  return `🧺 ${nameStr} WashWise Laundry!\n\nSign up with referral code *${referralCode}* to get 10 Free Laundry Credits & ₹50 OFF your first wash order.\n\nClaim your reward here:\n${shareUrl}`;
+  return `${nameStr} WashWise Laundry!\n\nSign up with referral code *${referralCode}* to get 10 Free Laundry Credits & ₹50 OFF your first wash order.\n\nClaim your reward here:\n${shareUrl}`;
 }
 
 /**

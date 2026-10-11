@@ -1,17 +1,19 @@
 import React from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { LogOut, User, Bell, Menu, X, ShieldCheck, Sun, Moon, FileText, Gift, Mail, RefreshCw } from 'lucide-react';
+import { LogOut, User, Bell, Menu, X, ShieldCheck, Sun, Moon, FileText, Gift, Mail, RefreshCw, LayoutDashboard, Clock, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isSuperAdminEmail } from '../constants';
 import TermsModal from './TermsModal';
 import ReferralModal from './ReferralModal';
+import { PWAInstallButton } from './PWAInstallButton';
+import { OfflineIndicator } from './OfflineIndicator';
 
 import NotificationCenter from './NotificationCenter';
 
 const Layout: React.FC = () => {
-  const { user, firebaseUser, reloadUser, resendEmailVerification, logout } = useAuth();
+  const { user, firebaseUser, reloadUser, resendEmailVerification, logout, isAdmin } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -56,9 +58,13 @@ const Layout: React.FC = () => {
   };
 
   const isAuthPage = ['/', '/login'].includes(location.pathname);
+  const isBookingFlow = ['/booking-details', '/billing'].some(p => location.pathname.startsWith(p));
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 transition-colors duration-300 flex flex-col overflow-x-clip w-full max-w-full">
+      {/* Offline Status Connectivity Banner */}
+      <OfflineIndicator />
+
       {/* Sticky Navigation Bar & System Banners */}
       <div className="sticky top-0 z-50 w-full shadow-sm">
         <header className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-b border-gray-100 dark:border-gray-800 w-full transition-colors">
@@ -68,7 +74,7 @@ const Layout: React.FC = () => {
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className="flex items-center cursor-pointer shrink-0" 
-              onClick={() => navigate(user ? '/dashboard' : '/')}
+              onClick={() => navigate(user ? (isAdmin || user.adminRole || user.role === 'admin' ? '/admin' : '/dashboard') : '/')}
             >
               <div className="mr-2 sm:mr-3 shrink-0">
                 <img 
@@ -95,6 +101,9 @@ const Layout: React.FC = () => {
 
             {/* Desktop Nav */}
             <div className="hidden md:flex items-center space-x-6">
+              {/* PWA Install Button (Desktop) */}
+              <PWAInstallButton />
+
               {/* Theme Toggle Switch */}
               <div className="flex items-center space-x-3 bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl border border-gray-200 dark:border-gray-700">
                 <button
@@ -114,6 +123,30 @@ const Layout: React.FC = () => {
               {!isAuthPage && user && (
                 <>
                   <button
+                    onClick={() => navigate('/dashboard')}
+                    className={`flex items-center px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                      location.pathname === '/dashboard'
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-blue-900/30'
+                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    <LayoutDashboard className="w-4 h-4 mr-1.5" />
+                    Slots
+                  </button>
+
+                  <button
+                    onClick={() => navigate('/orders')}
+                    className={`flex items-center px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                      location.pathname === '/orders'
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-blue-900/30'
+                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    <Clock className="w-4 h-4 mr-1.5" />
+                    Orders
+                  </button>
+
+                  <button
                     onClick={() => setShowReferralModal(true)}
                     className="flex items-center px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-gradient-to-r from-amber-500/10 to-primary-electric/10 text-primary-electric dark:text-primary-electric-light border border-primary-electric/20 hover:border-primary-electric hover:shadow-md transition-all gap-1.5"
                   >
@@ -127,7 +160,7 @@ const Layout: React.FC = () => {
                     className="hidden md:flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200/60 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-blue-700 transition-all text-xs font-bold"
                   >
                     <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                      <span>🧺</span>
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
                       <span>{user?.laundryCredits ?? (user?.kilosLeft ? user.kilosLeft * 10 : 0)} Cr</span>
                     </span>
                     <span className="text-gray-300 dark:text-gray-600">•</span>
@@ -179,7 +212,8 @@ const Layout: React.FC = () => {
             </div>
 
             {/* Mobile Menu Button */}
-            <div className="md:hidden flex items-center space-x-4">
+            <div className="md:hidden flex items-center space-x-2.5">
+              <PWAInstallButton />
               {!isAuthPage && user && <NotificationCenter />}
               <button 
                 onClick={toggleTheme}
@@ -216,6 +250,22 @@ const Layout: React.FC = () => {
               </button>
             ) : null}
             <button 
+              onClick={() => { navigate('/orders'); setIsMenuOpen(false); }}
+              className={`w-full flex items-center space-x-3 p-4 rounded-2xl border transition-all ${
+                location.pathname === '/orders'
+                  ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800'
+                  : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-100 dark:border-gray-700'
+              }`}
+            >
+              <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-xl text-blue-600 dark:text-blue-400">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">My Orders</p>
+                <p className="text-xs font-bold text-gray-700 dark:text-gray-200">Active Washes & Order History</p>
+              </div>
+            </button>
+            <button 
               onClick={() => { setShowReferralModal(true); setIsMenuOpen(false); }}
               className="w-full flex items-center space-x-3 p-4 bg-gradient-to-r from-amber-500/15 via-primary-electric/10 to-indigo-500/10 text-primary-electric dark:text-primary-electric-light font-bold rounded-2xl border border-primary-electric/20"
             >
@@ -238,8 +288,9 @@ const Layout: React.FC = () => {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">My Account</p>
                 <p className="font-bold text-gray-800 dark:text-gray-200">{user?.name}</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-[10px] font-black rounded-md">
-                    🧺 {user?.laundryCredits ?? (user?.kilosLeft ? user.kilosLeft * 10 : 0)} Credits
+                  <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-[10px] font-black rounded-md flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-emerald-500" />
+                    <span>{user?.laundryCredits ?? (user?.kilosLeft ? user.kilosLeft * 10 : 0)} Credits</span>
                   </span>
                   <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 text-[10px] font-black rounded-md">
                     ₹{(user?.walletBalance || 0).toFixed(0)} Wallet
@@ -308,13 +359,21 @@ const Layout: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <main className={`w-full flex-grow flex flex-col ${location.pathname === '/' ? 'p-0 max-w-full overflow-hidden justify-center' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8'}`}>
+      <main className={`w-full flex-grow flex flex-col ${
+        location.pathname === '/' 
+          ? 'p-0 max-w-full overflow-hidden' 
+          : location.pathname === '/login'
+            ? 'w-full max-w-full p-2 sm:p-4 flex-1 justify-center items-center'
+            : !isAuthPage && user && !isBookingFlow
+              ? 'max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-2 sm:py-8 pb-18 md:pb-8'
+              : 'max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 py-2.5 sm:py-8'
+      }`}>
         <Outlet />
       </main>
 
       {/* Footer (Hidden on landing and auth pages to ensure single-screen preview without scroll) */}
       {!isAuthPage && (
-        <footer className="py-8 sm:py-12 border-t border-gray-100 dark:border-gray-800 mt-auto">
+        <footer className="py-6 sm:py-12 border-t border-gray-100 dark:border-gray-800 mt-auto hidden md:block">
           <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-sm text-gray-400 dark:text-gray-500 font-medium order-2 md:order-1">© 2026 WASHWISE. Built for students, by students.</p>
             <div className="flex items-center gap-6 order-1 md:order-2">
@@ -328,6 +387,51 @@ const Layout: React.FC = () => {
             </div>
           </div>
         </footer>
+      )}
+
+      {/* Mobile Native-Style Bottom Navigation Bar (Hidden during active booking flow where sticky action bar is active) */}
+      {!isAuthPage && user && !isBookingFlow && (
+        <nav aria-label="Mobile Navigation" className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-200/80 dark:border-gray-800 shadow-2xl safe-area-pb">
+          <div className="grid grid-cols-4 h-14 items-center px-1">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className={`flex flex-col items-center justify-center py-1 transition-colors haptic-feedback ${
+                location.pathname === '/dashboard' ? 'text-primary-electric dark:text-primary-electric-light font-bold' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4 mb-0.5" />
+              <span className="text-[9.5px] tracking-tight">Slots</span>
+            </button>
+
+            <button
+              onClick={() => navigate('/orders')}
+              className={`flex flex-col items-center justify-center py-1 transition-colors haptic-feedback ${
+                location.pathname === '/orders' ? 'text-primary-electric dark:text-primary-electric-light font-bold' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+              }`}
+            >
+              <Clock className="w-4 h-4 mb-0.5" />
+              <span className="text-[9.5px] tracking-tight">Orders</span>
+            </button>
+
+            <button
+              onClick={() => setShowReferralModal(true)}
+              className="flex flex-col items-center justify-center py-1 text-amber-500 hover:text-amber-600 transition-colors haptic-feedback"
+            >
+              <Gift className="w-4 h-4 mb-0.5" />
+              <span className="text-[9.5px] tracking-tight font-black uppercase text-amber-600 dark:text-amber-400">Refer</span>
+            </button>
+
+            <button
+              onClick={() => navigate('/profile')}
+              className={`flex flex-col items-center justify-center py-1 transition-colors haptic-feedback ${
+                location.pathname === '/profile' ? 'text-primary-electric dark:text-primary-electric-light font-bold' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+              }`}
+            >
+              <User className="w-4 h-4 mb-0.5" />
+              <span className="text-[9.5px] tracking-tight">Account</span>
+            </button>
+          </div>
+        </nav>
       )}
 
       <TermsModal 

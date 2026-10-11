@@ -1,5 +1,10 @@
 import { initializeApp, FirebaseError } from 'firebase/app';
-import { initializeAuth, browserLocalPersistence, browserPopupRedirectResolver } from 'firebase/auth';
+import { 
+  initializeAuth, 
+  browserLocalPersistence, 
+  indexedDBLocalPersistence,
+  browserPopupRedirectResolver 
+} from 'firebase/auth';
 import { 
   initializeFirestore, 
   persistentLocalCache, 
@@ -12,16 +17,16 @@ import firebaseConfig from '../firebase-applet-config.json';
 export { firebaseConfig };
 const app = initializeApp(firebaseConfig);
 
-// Use initializeAuth for more control and to help with iframe issues
+// Use initializeAuth with robust IndexedDB + LocalStorage persistence to keep the user permanently logged in on this device
 export const auth = initializeAuth(app, {
-  persistence: browserLocalPersistence,
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence],
   popupRedirectResolver: browserPopupRedirectResolver,
 });
 
-// Suppress internal 1-attempt connection retry noise from Firestore
+// Suppress internal connection retry noise from Firestore
 setLogLevel('error');
 
-// Initialize Firestore with robust caching and auto-detected transport
+// Initialize Firestore with robust caching and forced long-polling to prevent GrpcConnection RST_STREAM errors in iframe/proxy environments
 let dbInstance;
 try {
   const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
@@ -29,19 +34,19 @@ try {
     localCache: persistentLocalCache({
       tabManager: persistentMultipleTabManager()
     }),
-    experimentalAutoDetectLongPolling: true,
+    experimentalForceLongPolling: true,
     experimentalLongPollingOptions: {
       timeoutSeconds: 30
     },
     ignoreUndefinedProperties: true,
   }, dbId);
-  console.log(`Firestore initialized with database ${dbId} and persistent multi-tab cache`);
+  console.log(`Firestore initialized with database ${dbId} and forced long-polling transport`);
 } catch (error) {
   console.warn("Persistent cache not available in this context, falling back to memory cache:", error);
   try {
     const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
     dbInstance = initializeFirestore(app, {
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true,
       experimentalLongPollingOptions: {
         timeoutSeconds: 30
       },
@@ -49,6 +54,7 @@ try {
     }, dbId);
   } catch (fallbackErr) {
     dbInstance = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
       ignoreUndefinedProperties: true,
     });
   }

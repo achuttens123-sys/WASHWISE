@@ -117,12 +117,17 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+          onClick={onClose}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm cursor-pointer"
+          aria-label="Close modal overlay"
+        />
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          className="bg-white dark:bg-surface-container w-full max-w-xl max-h-[90vh] rounded-3xl border border-gray-100 dark:border-gray-800 shadow-2xl overflow-hidden flex flex-col relative"
+          className="bg-white dark:bg-surface-container w-full max-w-xl max-h-[90vh] rounded-3xl border border-gray-100 dark:border-gray-800 shadow-2xl overflow-hidden flex flex-col relative z-10"
         >
           {/* Header Banner */}
           <div className="relative bg-gradient-to-br from-primary-electric via-[#3323cc] to-indigo-900 text-white p-6 sm:p-8 shrink-0 overflow-hidden">
@@ -195,7 +200,7 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
 
               {copied && (
                 <p className="text-center text-xs font-bold text-emerald-600 dark:text-emerald-400 animate-fadeIn">
-                  ✓ Copied to clipboard! Ready to share.
+                  Copied to clipboard! Ready to share.
                 </p>
               )}
             </div>

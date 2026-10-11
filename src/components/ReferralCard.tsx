@@ -93,7 +93,7 @@ export const ReferralCard: React.FC<ReferralCardProps> = ({ variant = 'banner' }
 
   return (
     <>
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-indigo-900 via-primary-electric to-[#3323cc] text-white p-4 sm:p-8 shadow-md sm:shadow-xl shadow-primary-electric/15">
+      <div className="relative overflow-hidden rounded-xl sm:rounded-3xl bg-gradient-to-br from-indigo-900 via-primary-electric to-[#3323cc] text-white p-3.5 sm:p-8 shadow-sm sm:shadow-xl shadow-primary-electric/15">
         {/* Glow Decos */}
         <div className="absolute -right-10 -bottom-10 w-44 h-44 bg-white/10 rounded-full blur-2xl pointer-events-none" />
         <div className="absolute right-10 top-0 w-32 h-32 bg-amber-400/15 rounded-full blur-2xl pointer-events-none" />
@@ -154,7 +154,7 @@ export const ReferralCard: React.FC<ReferralCardProps> = ({ variant = 'banner' }
 
         {copied && (
           <p className="mt-3 text-xs font-bold text-emerald-300 animate-fadeIn">
-            ✓ Code {referralCode} copied to clipboard!
+            Code {referralCode} copied to clipboard!
           </p>
         )}
       </div>

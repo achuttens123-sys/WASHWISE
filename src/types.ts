@@ -45,6 +45,8 @@ export interface User {
   createdAt?: any;
   termsAccepted?: boolean;
   emailVerified?: boolean;
+  phoneVerified?: boolean;
+  phoneOtpVerifiedAt?: string;
   deviceIds?: string[];
   deviceId?: string;
   ipAddress?: string;
@@ -105,10 +107,10 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
 export interface ReferralSettings {
   enabled: boolean;
   referrerCredits: number;
-  referrerWalletCash: number;
-  maxWalletCashReferrals?: number; // Only first N referrals give wallet money (default: 3). Remaining referrals are credit-only.
+  referrerWalletCash?: number; // Deprecated: No wallet cash given on referral
+  maxWalletCashReferrals?: number;
   refereeBonusCredits: number;
-  refereeDiscountRupees: number;
+  refereeDiscountRupees?: number; // Deprecated: Only credits given
   minBookingAmountToReward?: number;
   rewardTrigger?: 'first_order' | 'subscription_purchase' | 'immediate';
 }
@@ -124,10 +126,10 @@ export interface ReferralRecord {
   referredUserEmail?: string;
   status: 'pending' | 'completed' | 'expired';
   rewardCredits: number;
-  rewardWalletCash: number;
+  rewardWalletCash?: number;
   isCashRewarded?: boolean;
   refereeBonusCredits: number;
-  refereeDiscountRupees: number;
+  refereeDiscountRupees?: number;
   orderId?: string;
   createdAt: string;
   completedAt?: string;
@@ -389,7 +391,13 @@ export interface Booking {
   offer_active?: boolean;
   creditsUsed?: number;
   paymentType?: 'direct_inr' | 'laundry_credits' | 'wallet' | 'card' | 'netbanking' | 'pay_at_store';
-  status: 'pending' | 'paid' | 'completed' | 'rejected' | 'rescheduled' | 'In Wash' | 'In Dryer' | 'Ready to collect' | 'Ready to deliver' | 'Ready for pick up' | 'Washing completed' | 'Out for delivery';
+  paymentId?: string;
+  status: 'pending' | 'paid' | 'completed' | 'rejected' | 'cancelled' | 'payment_failed' | 'rescheduled' | 'In Wash' | 'In Dryer' | 'Ready to collect' | 'Ready to deliver' | 'Ready for pick up' | 'Washing completed' | 'Out for delivery';
+  refundId?: string;
+  refundMethod?: 'wallet' | 'original_source' | 'credits' | string;
+  refundAmount?: number;
+  cancellationReason?: string;
+  cancelledAt?: string;
   loyaltyRewarded?: boolean;
   loyaltyCreditsAwarded?: number;
   loyaltyRewardedAt?: string;
@@ -496,3 +504,114 @@ export interface RiskSettings {
   autoBlockHighRisk: boolean;
 }
 
+export interface IdempotencyRecord {
+  id?: string;
+  idempotencyKey: string;
+  userId: string;
+  resourceType: 'booking' | 'wallet_topup' | 'subscription';
+  status: 'in_progress' | 'completed' | 'failed';
+  responseData?: any;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface DatabaseBackup {
+  id: string;
+  timestamp: string;
+  environment: 'development' | 'staging' | 'production';
+  collections: Record<string, number>;
+  totalDocuments: number;
+  checksumSha256: string;
+  status: 'completed' | 'failed';
+  restorationTestedAt?: string;
+  restorationStatus?: 'verified' | 'failed';
+  restorationNotes?: string;
+}
+
+export interface SchemaMigration {
+  version: number;
+  name: string;
+  appliedAt: string;
+  status: 'applied' | 'rolled_back' | 'failed' | 'pending';
+  checksum: string;
+  executionTimeMs: number;
+  rollbackSupported: boolean;
+  description: string;
+}
+
+export type PaymentStatus = 'pending' | 'successful' | 'failed' | 'refunded';
+
+export interface PaymentRecord {
+  id?: string;
+  paymentId: string;
+  bookingId: string;
+  userId: string;
+  amount: number;
+  currency: string;
+  status: PaymentStatus;
+  paymentMethod: 'wallet' | 'card' | 'netbanking' | 'pay_at_store' | 'subscription_credits';
+  providerTxnId?: string;
+  idempotencyKey?: string;
+  cardLast4?: string;
+  cardBrand?: string;
+  failureReason?: string;
+  reconciled?: boolean;
+  reconciledAt?: string;
+  metadata?: Record<string, any>;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface RefundRecord {
+  id?: string;
+  refundId: string;
+  paymentId: string;
+  bookingId: string;
+  userId: string;
+  amount: number;
+  reason: string;
+  status: 'processed' | 'failed';
+  refundMethod: 'wallet' | 'original_source' | 'credits';
+  providerRefundId?: string;
+  createdAt: string;
+}
+
+export interface PaymentWebhookEvent {
+  eventId: string;
+  eventType: 'payment.successful' | 'payment.failed' | 'payment.refunded';
+  provider: 'razorpay' | 'stripe' | 'internal';
+  paymentId: string;
+  bookingId?: string;
+  amount: number;
+  currency: string;
+  signature: string;
+  timestamp: number;
+  status: 'processed' | 'rejected' | 'replay_blocked';
+  payload?: any;
+  receivedAt: string;
+}
+
+export interface PaymentDiscrepancy {
+  paymentId: string;
+  bookingId?: string;
+  internalAmount: number;
+  providerAmount: number;
+  internalStatus: PaymentStatus;
+  providerStatus: string;
+  type: 'AMOUNT_MISMATCH' | 'ORPHAN_PROVIDER_PAYMENT' | 'STATUS_MISMATCH' | 'MISSING_CAPTURE';
+  resolutionAdvice: string;
+  detectedAt: string;
+}
+
+export interface ReconciliationReport {
+  id?: string;
+  reportId: string;
+  periodStart: string;
+  periodEnd: string;
+  totalTransactions: number;
+  matchedCount: number;
+  mismatchCount: number;
+  totalVolume: number;
+  discrepancies: PaymentDiscrepancy[];
+  generatedAt: string;
+}

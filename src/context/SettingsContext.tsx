@@ -15,10 +15,10 @@ export const DEFAULT_LOYALTY_SETTINGS: LoyaltySettings = {
 export const DEFAULT_REFERRAL_SETTINGS: ReferralSettings = {
   enabled: true,
   referrerCredits: 20,
-  referrerWalletCash: 50,
-  maxWalletCashReferrals: 3, // Only first 3 referrals grant wallet cash (₹50 each, max ₹150). Remaining referrals grant laundry credits only.
+  referrerWalletCash: 0,
+  maxWalletCashReferrals: 0,
   refereeBonusCredits: 10,
-  refereeDiscountRupees: 50,
+  refereeDiscountRupees: 0,
   minBookingAmountToReward: 40,
   rewardTrigger: 'first_order'
 };

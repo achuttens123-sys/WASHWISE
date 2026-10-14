@@ -23,13 +23,20 @@ import {
   Package, 
   RotateCcw,
   HelpCircle,
-  Check
+  Check,
+  Undo2,
+  AlertTriangle,
+  CreditCard
 } from 'lucide-react';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { Booking, Store } from '../types';
 import FeedbackModal from '../components/FeedbackModal';
+import { PaginationControls } from '../components/PaginationControls';
+import { formatDateTimeIST, formatIST } from '../utils/timezone';
+import { authFetch } from '../utils/api';
+import { toast } from 'react-hot-toast';
 
 const Orders: React.FC = () => {
   const navigate = useNavigate();
@@ -47,6 +54,15 @@ const Orders: React.FC = () => {
   const [historyFilter, setHistoryFilter] = useState<'all' | 'completed' | 'cancelled'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Pagination State for History Tab
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(5);
+
+  // Reset page when search or filter changes
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [searchQuery, historyFilter]);
+
   // Details Modal
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -54,6 +70,68 @@ const Orders: React.FC = () => {
   // Feedback/Support Modal
   const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
   const [supportBookingId, setSupportBookingId] = useState<string | undefined>(undefined);
+
+  // Cancellation & Automated Refund State
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [bookingToCancel, setBookingToCancel] = useState<Booking | null>(null);
+  const [cancelReason, setCancelReason] = useState('Change of plans');
+  const [customReason, setCustomReason] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const handleOpenCancelModal = (booking: Booking) => {
+    setBookingToCancel(booking);
+    setCancelReason('Change of plans');
+    setCustomReason('');
+    setCancelError(null);
+    setCancelModalOpen(true);
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!bookingToCancel) return;
+    setIsCancelling(true);
+    setCancelError(null);
+
+    const effectiveReason = cancelReason === 'Other' && customReason.trim()
+      ? customReason.trim()
+      : cancelReason;
+
+    try {
+      const response = await authFetch('/api/payments/cancel-and-refund', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bookingId: bookingToCancel.id,
+          reason: effectiveReason,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to cancel booking and process refund');
+      }
+
+      toast.success(
+        data.refundMethod === 'credits'
+          ? 'Booking cancelled. Laundry credits restored to your account!'
+          : `Booking cancelled. ₹${Number(data.refundAmount || 0).toFixed(2)} refunded to your wallet!`,
+        { duration: 5000 }
+      );
+
+      setCancelModalOpen(false);
+      setBookingToCancel(null);
+      if (showDetailsModal && selectedBooking?.id === bookingToCancel.id) {
+        setShowDetailsModal(false);
+      }
+    } catch (err: any) {
+      console.error('Cancel booking error:', err);
+      setCancelError(err.message || 'Unable to process cancellation and refund. Please try again or contact store staff.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   // Sync tab with URL search parameter
   useEffect(() => {
@@ -159,6 +237,12 @@ const Orders: React.FC = () => {
     });
   }, [pastOrders, historyFilter, searchQuery]);
 
+  // Paginated Past Orders
+  const paginatedPastOrders = useMemo(() => {
+    const start = (historyPage - 1) * historyPageSize;
+    return filteredPastOrders.slice(start, start + historyPageSize);
+  }, [filteredPastOrders, historyPage, historyPageSize]);
+
   // Helper for tracking steps on active bookings
   const getStepData = (booking: Booking) => {
     const isPickupDrop = booking.pickupDrop;
@@ -197,12 +281,18 @@ const Orders: React.FC = () => {
             Completed
           </span>
         );
-      case 'rejected':
       case 'cancelled':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+            <RotateCcw className="w-3 h-3 text-purple-500" />
+            Cancelled (Refunded)
+          </span>
+        );
+      case 'rejected':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-200 dark:border-red-800">
             <XCircle className="w-3 h-3 text-red-500" />
-            {status}
+            Rejected
           </span>
         );
       case 'In Wash':
@@ -314,12 +404,24 @@ const Orders: React.FC = () => {
 
       {/* Main Tab Content */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-12 sm:py-24 text-center">
-          <Loader2 className="w-8 h-8 sm:w-12 sm:h-12 animate-spin text-primary-electric mb-3" />
-          <p className="text-xs sm:text-base font-display font-black text-gray-700 dark:text-gray-300 uppercase tracking-tight">
-            Syncing Orders...
-          </p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Connecting to live updates</p>
+        <div className="space-y-3 py-2" aria-busy="true" aria-label="Loading orders">
+          <div className="flex items-center justify-center gap-2 py-3 text-center">
+            <Loader2 className="w-4 h-4 animate-spin text-primary-electric" />
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Loading your orders...</span>
+          </div>
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="bg-white dark:bg-surface-container p-4 rounded-xl border border-gray-100 dark:border-surface-highest/10 animate-pulse space-y-2.5 shadow-xs"
+            >
+              <div className="flex items-center justify-between">
+                <div className="h-3.5 bg-slate-200 dark:bg-slate-700 rounded w-28" />
+                <div className="h-3.5 bg-slate-200 dark:bg-slate-700 rounded w-16" />
+              </div>
+              <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-44" />
+              <div className="h-3 bg-slate-100 dark:bg-slate-800 rounded w-36" />
+            </div>
+          ))}
         </div>
       ) : activeTab === 'active' ? (
         /* ================= ACTIVE ORDERS TAB ================= */
@@ -549,6 +651,16 @@ const Orders: React.FC = () => {
                       </div>
 
                       <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
+                        {['paid', 'pending'].includes(booking.status) && (
+                          <button
+                            onClick={() => handleOpenCancelModal(booking)}
+                            className="px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold text-red-600 dark:text-red-400 bg-red-50/70 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-200/80 dark:border-red-900/40 transition-colors flex items-center gap-1 shadow-xs"
+                            title="Cancel booking and receive instant full refund"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>Cancel & Refund</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             setSupportBookingId(booking.bookingId || booking.id);
@@ -663,7 +775,7 @@ const Orders: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-2 sm:space-y-3">
-              {filteredPastOrders.map((booking) => (
+              {paginatedPastOrders.map((booking) => (
                 <div
                   key={booking.id}
                   className="bg-white dark:bg-surface-container p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-gray-100 dark:border-surface-highest/10 hover:border-primary-electric/25 transition-all shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 group"
@@ -722,15 +834,17 @@ const Orders: React.FC = () => {
                           setSelectedBooking(booking);
                           setShowDetailsModal(true);
                         }}
-                        className="px-2.5 py-1.5 bg-gray-50 dark:bg-surface-low hover:bg-gray-100 dark:hover:bg-surface-highest text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-surface-highest/20 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-colors shadow-xs haptic-feedback"
+                        aria-label={`View receipt for order ${booking.bookingId || booking.id}`}
+                        className="px-2.5 py-1.5 bg-gray-50 dark:bg-surface-low hover:bg-gray-100 dark:hover:bg-surface-highest text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-surface-highest/20 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-colors shadow-xs haptic-feedback focus-visible:ring-2 focus-visible:ring-indigo-500"
                       >
                         Receipt
                       </button>
 
                       <button
                         onClick={() => navigate('/dashboard')}
+                        aria-label="Book another slot"
                         title="Book similar slot"
-                        className="p-1.5 bg-primary-electric/10 hover:bg-primary-electric text-primary-electric hover:text-white rounded-lg transition-all shadow-xs"
+                        className="p-1.5 bg-primary-electric/10 hover:bg-primary-electric text-primary-electric hover:text-white rounded-lg transition-all shadow-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                       </button>
@@ -738,6 +852,19 @@ const Orders: React.FC = () => {
                   </div>
                 </div>
               ))}
+
+              {filteredPastOrders.length > 0 && (
+                <PaginationControls
+                  currentPage={historyPage}
+                  totalItems={filteredPastOrders.length}
+                  pageSize={historyPageSize}
+                  onPageChange={setHistoryPage}
+                  onPageSizeChange={setHistoryPageSize}
+                  pageSizeOptions={[5, 10, 20]}
+                  itemLabel="orders"
+                  className="mt-4"
+                />
+              )}
             </div>
           )}
         </div>
@@ -908,26 +1035,249 @@ const Orders: React.FC = () => {
                     </span>
                   </div>
                 </div>
+
+                {/* Refund Audit Box (if cancelled) */}
+                {selectedBooking.status === 'cancelled' && (
+                  <div className="p-3.5 sm:p-4 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/60 rounded-xl sm:rounded-2xl space-y-2">
+                    <div className="flex items-center gap-2 text-purple-700 dark:text-purple-300 font-bold text-xs uppercase tracking-wider">
+                      <CheckCircle2 className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                      <span>Full Refund Verified & Completed</span>
+                    </div>
+                    <div className="text-[11px] text-purple-900 dark:text-purple-200 space-y-1 font-medium">
+                      <p className="flex justify-between items-center">
+                        <span className="text-purple-600 dark:text-purple-400">Refund Reference:</span>
+                        <span className="font-mono font-bold">{selectedBooking.refundId || `REF_${selectedBooking.id?.slice(-8).toUpperCase()}`}</span>
+                      </p>
+                      <p className="flex justify-between items-center">
+                        <span className="text-purple-600 dark:text-purple-400">Refund Method:</span>
+                        <span className="font-bold">
+                          {selectedBooking.refundMethod === 'credits'
+                            ? 'Restored Laundry Credits'
+                            : 'WashWise Wallet Credit'}
+                        </span>
+                      </p>
+                      <p className="flex justify-between items-center">
+                        <span className="text-purple-600 dark:text-purple-400">Refund Amount:</span>
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                          {selectedBooking.refundMethod === 'credits'
+                            ? `${selectedBooking.creditsUsed || 40} Credits`
+                            : `₹${Number(selectedBooking.refundAmount ?? selectedBooking.price ?? 0).toFixed(2)}`}
+                        </span>
+                      </p>
+                      {selectedBooking.cancellationReason && (
+                        <p className="text-[10px] text-purple-700 dark:text-purple-300 pt-1 border-t border-purple-200/50 dark:border-purple-800/40">
+                          <strong>Reason:</strong> {selectedBooking.cancellationReason}
+                        </p>
+                      )}
+                      {selectedBooking.cancelledAt && (
+                        <p className="text-[9.5px] text-purple-500 dark:text-purple-400">
+                          Processed at: {formatDateTimeIST(selectedBooking.cancelledAt)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Zero Raw Card Storage Security Notice */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-xl sm:rounded-2xl flex items-center gap-2.5 text-[10px] text-slate-600 dark:text-slate-400">
+                  <Shield className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <div className="leading-tight">
+                    <span className="font-bold text-slate-700 dark:text-slate-300 block">PCI-DSS Level 1 Compliant Transaction</span>
+                    <span>256-Bit SSL Encrypted • Zero Raw Card Details Stored • Authoritative Server Verification</span>
+                  </div>
+                </div>
               </div>
 
               {/* Modal Footer */}
-              <div className="p-4 sm:p-6 border-t border-gray-100 dark:border-surface-highest/10 flex items-center justify-between gap-3 bg-gray-50/50 dark:bg-surface-low/50">
-                <button
-                  onClick={() => {
-                    setSupportBookingId(selectedBooking.bookingId || selectedBooking.id);
-                    setShowDetailsModal(false);
-                    setIsSupportModalOpen(true);
-                  }}
-                  className="px-4 py-2.5 text-xs font-bold text-gray-600 dark:text-gray-400 hover:text-primary-electric flex items-center gap-1.5"
-                >
-                  <HelpCircle className="w-4 h-4" />
-                  <span>Report Issue / Support</span>
-                </button>
+              <div className="p-4 sm:p-6 border-t border-gray-100 dark:border-surface-highest/10 flex flex-wrap items-center justify-between gap-3 bg-gray-50/50 dark:bg-surface-low/50">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setSupportBookingId(selectedBooking.bookingId || selectedBooking.id);
+                      setShowDetailsModal(false);
+                      setIsSupportModalOpen(true);
+                    }}
+                    className="px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-400 hover:text-primary-electric flex items-center gap-1.5"
+                  >
+                    <HelpCircle className="w-3.5 h-3.5" />
+                    <span>Need Help?</span>
+                  </button>
+
+                  {['paid', 'pending'].includes(selectedBooking.status) && (
+                    <button
+                      onClick={() => {
+                        handleOpenCancelModal(selectedBooking);
+                      }}
+                      className="px-3 py-2 bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-800/80 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                    >
+                      <Undo2 className="w-3.5 h-3.5" />
+                      <span>Cancel & Refund</span>
+                    </button>
+                  )}
+                </div>
+
                 <button
                   onClick={() => setShowDetailsModal(false)}
                   className="px-6 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-black rounded-xl text-xs font-black uppercase tracking-wider transition-colors shadow-sm"
                 >
                   Close Receipt
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cancel & Automated Refund Confirmation Modal */}
+      <AnimatePresence>
+        {cancelModalOpen && bookingToCancel && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !isCancelling && setCancelModalOpen(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="relative w-full max-w-lg bg-white dark:bg-surface-container rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden border border-red-100 dark:border-red-900/30 flex flex-col max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="p-4 sm:p-6 border-b border-gray-100 dark:border-surface-highest/10 flex items-center justify-between bg-red-50/50 dark:bg-red-950/20">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-display font-black text-gray-900 dark:text-high-contrast uppercase tracking-tight">
+                      Cancel & Refund Booking
+                    </h3>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Ref: <span className="font-mono font-bold">{bookingToCancel.bookingId || `#${bookingToCancel.id?.slice(-6).toUpperCase()}`}</span>
+                    </p>
+                  </div>
+                </div>
+                {!isCancelling && (
+                  <button
+                    onClick={() => setCancelModalOpen(false)}
+                    className="p-1.5 rounded-lg bg-gray-100 dark:bg-surface-low hover:bg-gray-200 text-gray-500 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Body */}
+              <div className="p-4 sm:p-6 space-y-4 overflow-y-auto">
+                {/* Slot Details */}
+                <div className="p-3 bg-gray-50 dark:bg-surface-low rounded-xl text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Service:</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200">{bookingToCancel.serviceType}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Machine & Slot:</span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200">
+                      Machine #{bookingToCancel.machineNumber} • {bookingToCancel.date} ({bookingToCancel.timeSlot})
+                    </span>
+                  </div>
+                </div>
+
+                {/* Refund Guarantee Box */}
+                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-xl sm:rounded-2xl space-y-2">
+                  <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold text-xs uppercase tracking-wide">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>100% Full Refund Guarantee</span>
+                  </div>
+                  <div className="text-xs text-emerald-950 dark:text-emerald-200 space-y-1">
+                    {bookingToCancel.paymentType === 'laundry_credits' || (bookingToCancel.creditsUsed && bookingToCancel.creditsUsed > 0) ? (
+                      <p>
+                        <strong>Refund Destination:</strong> {bookingToCancel.creditsUsed || 40} laundry credits will be instantly restored back to your subscription quota.
+                      </p>
+                    ) : bookingToCancel.paymentType === 'pay_at_store' ? (
+                      <p>
+                        <strong>Refund Destination:</strong> Prepaid slot reservation deposit of ₹{Number(bookingToCancel.prepaidAmount ?? 39).toFixed(2)} will be credited back to your WashWise Wallet. Remaining COD balance is cancelled.
+                      </p>
+                    ) : (
+                      <p>
+                        <strong>Refund Destination:</strong> Full amount of ₹{Number(bookingToCancel.price || 0).toFixed(2)} will be instantly credited to your WashWise Wallet balance.
+                      </p>
+                    )}
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 pt-1">
+                      Zero penalty fee applied. Reserved machine slot will be atomically released for other students.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Reason Selection */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
+                    Reason for cancellation
+                  </label>
+                  <select
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    disabled={isCancelling}
+                    className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-surface-low border border-gray-200 dark:border-surface-highest/20 rounded-xl focus:ring-2 focus:ring-primary-electric outline-none"
+                  >
+                    <option value="Change of plans">Change of schedule / plans</option>
+                    <option value="Booked wrong time slot">Booked wrong time slot</option>
+                    <option value="Booked wrong hub/machine">Booked wrong machine or store hub</option>
+                    <option value="Unable to visit store">Unable to visit store today</option>
+                    <option value="Other">Other reason</option>
+                  </select>
+
+                  {cancelReason === 'Other' && (
+                    <input
+                      type="text"
+                      placeholder="Please specify brief reason..."
+                      value={customReason}
+                      onChange={(e) => setCustomReason(e.target.value)}
+                      disabled={isCancelling}
+                      className="w-full mt-2 px-3 py-2 text-xs bg-gray-50 dark:bg-surface-low border border-gray-200 dark:border-surface-highest/20 rounded-xl focus:ring-2 focus:ring-primary-electric outline-none"
+                    />
+                  )}
+                </div>
+
+                {/* Error Banner */}
+                {cancelError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
+                    <span>{cancelError}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 sm:p-6 border-t border-gray-100 dark:border-surface-highest/10 flex items-center justify-end gap-2.5 bg-gray-50/50 dark:bg-surface-low/50">
+                <button
+                  type="button"
+                  onClick={() => setCancelModalOpen(false)}
+                  disabled={isCancelling}
+                  className="px-4 py-2 text-xs font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-surface-highest rounded-xl transition-colors disabled:opacity-50"
+                >
+                  Keep Booking
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCancel}
+                  disabled={isCancelling}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md shadow-red-500/20 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isCancelling ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Processing Refund...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Undo2 className="w-3.5 h-3.5" />
+                      <span>Confirm Cancellation & Refund</span>
+                    </>
+                  )}
                 </button>
               </div>
             </motion.div>

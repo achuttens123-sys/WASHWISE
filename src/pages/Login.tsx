@@ -99,8 +99,44 @@ const Login: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [honeypotTrap, setHoneypotTrap] = useState('');
   const [showTerms, setShowTerms] = useState(false);
   const [pendingUserData, setPendingUserData] = useState<any>(null);
+
+  // Progressive Lockout State
+  const [failedAttempts, setFailedAttempts] = useState<number>(() => {
+    try {
+      return Number(localStorage.getItem('washwise_failed_login_attempts')) || 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  const [lockoutRemaining, setLockoutRemaining] = useState<number>(() => {
+    try {
+      const until = Number(localStorage.getItem('washwise_auth_lockout_until')) || 0;
+      const rem = Math.ceil((until - Date.now()) / 1000);
+      return rem > 0 ? rem : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  useEffect(() => {
+    if (lockoutRemaining <= 0) return;
+    const timer = setInterval(() => {
+      setLockoutRemaining((prev) => {
+        if (prev <= 1) {
+          try {
+            localStorage.removeItem('washwise_auth_lockout_until');
+          } catch {}
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutRemaining]);
 
   // Forgot Password State
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -109,8 +145,9 @@ const Login: React.FC = () => {
   const [resetSuccess, setResetSuccess] = useState(false);
   const [resetError, setResetError] = useState('');
 
-  // Email Verification State
+  // Dual Email & Phone Verification State
   const [showVerificationScreen, setShowVerificationScreen] = useState(false);
+  const [verificationChannel, setVerificationChannel] = useState<'email' | 'phone'>('email');
   const [verificationEmail, setVerificationEmail] = useState('');
   const [verificationPendingInfo, setVerificationPendingInfo] = useState<{
     phone: string;
@@ -123,6 +160,33 @@ const Login: React.FC = () => {
     message: string;
   } | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Phone OTP Verification specific state
+  const [otpPhone, setOtpPhone] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpDevHint, setOtpDevHint] = useState('');
+  const [otpCooldown, setOtpCooldown] = useState(0);
+
+  // Phone OTP cooldown timer
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+    const timer = setTimeout(() => {
+      setOtpCooldown((prev) => prev - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [otpCooldown]);
+
+  // Password requirements calculation
+  const passwordCriteria = {
+    minLength: formData.password.length >= 8,
+    hasUpper: /[A-Z]/.test(formData.password),
+    hasLower: /[a-z]/.test(formData.password),
+    hasNumber: /[0-9]/.test(formData.password)
+  };
+  const isPasswordValid = passwordCriteria.minLength && passwordCriteria.hasUpper && passwordCriteria.hasLower && passwordCriteria.hasNumber;
 
   // Resend cooldown timer
   useEffect(() => {
@@ -470,9 +534,128 @@ const Login: React.FC = () => {
     }
   };
 
-  // Email Login & Signup
+  // Send Phone OTP for Student Verification
+  const handleSendPhoneOtp = async () => {
+    if (otpCooldown > 0 || otpSending) return;
+    const phoneToVerify = (otpPhone || formData.phone || verificationPendingInfo?.phone || '').trim();
+    const digitsOnly = phoneToVerify.replace(/[^0-9]/g, '');
+    if (!phoneToVerify || digitsOnly.length < 10) {
+      setVerificationStatus({
+        type: 'error',
+        message: 'Please provide a valid 10-digit mobile phone number.'
+      });
+      return;
+    }
+
+    setOtpSending(true);
+    setVerificationStatus(null);
+    try {
+      const res = await fetch('/api/auth/send-phone-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: phoneToVerify,
+          _hp_trap: honeypotTrap
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setOtpSent(true);
+        setOtpCooldown(60);
+        if (data.devOtp) {
+          setOtpDevHint(data.devOtp);
+        }
+        setVerificationStatus({
+          type: 'info',
+          message: `Verification code sent to ${phoneToVerify}.`
+        });
+      } else {
+        setVerificationStatus({
+          type: 'error',
+          message: data.error || 'Failed to dispatch verification code. Please try again.'
+        });
+      }
+    } catch (e: any) {
+      setVerificationStatus({
+        type: 'error',
+        message: 'Network error while requesting verification code. Please try again.'
+      });
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  // Verify Phone OTP
+  const handleVerifyPhoneOtp = async () => {
+    const phoneToVerify = (otpPhone || formData.phone || verificationPendingInfo?.phone || '').trim();
+    const cleanOtp = otpCode.trim();
+    if (!cleanOtp || cleanOtp.length !== 6) {
+      setVerificationStatus({
+        type: 'error',
+        message: 'Please enter the complete 6-digit verification code.'
+      });
+      return;
+    }
+
+    setOtpVerifying(true);
+    setVerificationStatus(null);
+    try {
+      const res = await fetch('/api/auth/verify-phone-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: phoneToVerify,
+          otp: cleanOtp,
+          uid: auth.currentUser?.uid,
+          _hp_trap: honeypotTrap
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setVerificationStatus({
+          type: 'success',
+          message: 'Phone verified successfully! Finalizing your account...'
+        });
+        setTimeout(async () => {
+          const userToProcess = auth.currentUser;
+          setShowVerificationScreen(false);
+          if (userToProcess) {
+            await handleAuthSuccess(
+              userToProcess,
+              phoneToVerify,
+              verificationPendingInfo?.fullName
+            );
+          }
+        }, 800);
+      } else {
+        setVerificationStatus({
+          type: 'error',
+          message: data.error || 'Invalid verification code. Please check and try again.'
+        });
+      }
+    } catch (e) {
+      setVerificationStatus({
+        type: 'error',
+        message: 'Network error validating code. Please try again.'
+      });
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  // Email Login & Signup with Anti-Enumeration & Progressive Lockout
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (honeypotTrap) {
+      setError('Suspicious automated activity detected.');
+      return;
+    }
+
+    if (lockoutRemaining > 0) {
+      setError(`Login is temporarily locked for security. Please wait ${lockoutRemaining} seconds.`);
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -483,79 +666,129 @@ const Login: React.FC = () => {
           setLoading(false);
           return;
         }
-        if (!formData.phone.trim()) {
-          setError('Please enter your phone number.');
+        if (!formData.phone.trim() || formData.phone.replace(/[^0-9]/g, '').length < 10) {
+          setError('Please enter a valid 10-digit phone number.');
           setLoading(false);
           return;
         }
+
+        // Strict Password Requirements Check
+        if (!isPasswordValid) {
+          setError('Password does not meet security requirements: Minimum 8 characters, with uppercase, lowercase, and a number.');
+          setLoading(false);
+          return;
+        }
+
         const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
         
-        // Send email verification link
+        // Dispatch email verification link
         try {
           await sendEmailVerification(userCredential.user);
         } catch (sendErr) {
           console.error('Initial sendEmailVerification error:', sendErr);
         }
 
-        // Present email verification screen to user
+        // Present email & phone verification screen to user
         setVerificationEmail(formData.email);
         setVerificationPendingInfo({ phone: formData.phone, fullName: formData.fullName });
+        setOtpPhone(formData.phone);
         setShowVerificationScreen(true);
         setResendCooldown(60);
         setVerificationStatus({
           type: 'info',
-          message: `A verification link has been sent to ${formData.email}. Please verify your email to complete registration.`
+          message: `A verification link has been sent to ${formData.email}. You can also verify via phone OTP below.`
         });
         setLoading(false);
         return;
       } else {
         const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
         
-        // Enforce email verification on email/password sign-in
+        // Reset failed attempt counters upon successful sign-in
+        try {
+          localStorage.removeItem('washwise_failed_login_attempts');
+          localStorage.removeItem('washwise_auth_lockout_until');
+        } catch {}
+        setFailedAttempts(0);
+        setLockoutRemaining(0);
+
+        // Enforce verification on email/password sign-in
         if (!userCredential.user.emailVerified) {
-          setVerificationEmail(formData.email);
-          setVerificationPendingInfo({ phone: '', fullName: '' });
-          setShowVerificationScreen(true);
-          setResendCooldown(30);
-          setVerificationStatus({
-            type: 'info',
-            message: 'Your email address is not verified yet. Please check your inbox or resend the verification link below.'
-          });
+          // Check if user has phoneVerified recorded in Firestore
+          let isPhoneVerifiedInDb = false;
           try {
-            await sendEmailVerification(userCredential.user);
-          } catch (sendErr) {
-            // Already sent or rate limited, ignore
+            const userSnap = await getDoc(doc(db, 'users', userCredential.user.uid));
+            if (userSnap.exists() && userSnap.data()?.phoneVerified) {
+              isPhoneVerifiedInDb = true;
+            }
+          } catch (e) {}
+
+          if (!isPhoneVerifiedInDb) {
+            setVerificationEmail(formData.email);
+            setVerificationPendingInfo({ phone: formData.phone || '', fullName: '' });
+            setOtpPhone(formData.phone || '');
+            setShowVerificationScreen(true);
+            setResendCooldown(30);
+            setVerificationStatus({
+              type: 'info',
+              message: 'Your account is not verified yet. Confirm via email link or phone OTP below.'
+            });
+            try {
+              await sendEmailVerification(userCredential.user);
+            } catch (sendErr) {}
+            setLoading(false);
+            return;
           }
-          setLoading(false);
-          return;
         }
 
         await handleAuthSuccess(userCredential.user);
       }
     } catch (err: any) {
-      if (err.code === 'auth/user-not-found') {
-        setError('No account found with this email.');
-      } else if (err.code === 'auth/wrong-password') {
-        setError('Incorrect password.');
-      } else if (err.code === 'auth/email-already-in-use') {
-        setError('An account with this email already exists. Please log in.');
-      } else if (err.code === 'auth/invalid-credential') {
-        setError('Invalid email or password.');
+      console.warn('Auth Error:', err.code);
+
+      if (mode === 'signup') {
+        if (err.code === 'auth/email-already-in-use') {
+          setError('An account with this email already exists. Please log in.');
+        } else if (err.code === 'auth/weak-password') {
+          setError('Password is too weak. Please choose a stronger password.');
+        } else {
+          setError('Failed to create account. Please verify your details and try again.');
+        }
       } else {
-        setError(err.message || 'Authentication failed. Please check your credentials.');
+        // Increment failed attempt counter and evaluate progressive lockout
+        const nextFailed = failedAttempts + 1;
+        setFailedAttempts(nextFailed);
+        try {
+          localStorage.setItem('washwise_failed_login_attempts', nextFailed.toString());
+        } catch {}
+
+        if (nextFailed >= 5) {
+          const lockUntil = Date.now() + 60 * 1000;
+          try {
+            localStorage.setItem('washwise_auth_lockout_until', lockUntil.toString());
+          } catch {}
+          setLockoutRemaining(60);
+          setError('Too many failed attempts. Login is locked for 60 seconds for security.');
+        } else {
+          // Anti-enumeration: Generic response for credential or user errors
+          const remaining = 5 - nextFailed;
+          setError(`Invalid email or password. Please verify your credentials and try again. (${remaining} attempt${remaining === 1 ? '' : 's'} remaining before lockout)`);
+        }
       }
-      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Password Reset Handler
+  // Secure Password Reset Handler with Anti-Enumeration & Bot Defense
   const handleSendPasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (honeypotTrap) {
+      setResetSuccess(true);
+      return;
+    }
     const emailToReset = resetEmail.trim();
-    if (!emailToReset) {
-      setResetError('Please enter your email address.');
+    if (!emailToReset || !emailToReset.includes('@')) {
+      setResetError('Please enter a valid email address.');
       return;
     }
     setResetLoading(true);
@@ -563,21 +796,34 @@ const Login: React.FC = () => {
     setResetSuccess(false);
 
     try {
-      await sendPasswordResetEmail(auth, emailToReset);
+      // Dispatch via server API with honeypot and rate limiting
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: emailToReset,
+          _hp_trap: honeypotTrap
+        })
+      });
+
+      if (!res.ok) {
+        // Fallback to client SDK
+        try {
+          await sendPasswordResetEmail(auth, emailToReset);
+        } catch (clientErr: any) {
+          // Anti-enumeration: Never disclose auth/user-not-found
+          if (clientErr.code !== 'auth/user-not-found' && clientErr.code !== 'auth/invalid-email') {
+            console.warn('Password reset client notice:', clientErr.message);
+          }
+        }
+      }
+      
+      // Anti-enumeration guarantee: ALWAYS show standard generic success confirmation
       setResetSuccess(true);
     } catch (err: any) {
-      console.error('Password reset error:', err);
-      if (err.code === 'auth/user-not-found') {
-        setResetError('No account found with this email address.');
-      } else if (err.code === 'auth/invalid-email') {
-        setResetError('Please enter a valid email address.');
-      } else if (err.code === 'auth/too-many-requests') {
-        setResetError('Too many requests. Please wait a moment and try again.');
-      } else if (err.code === 'auth/network-request-failed') {
-        setResetError('Network connection error. Please try again.');
-      } else {
-        setResetError(err.message || 'Failed to send password reset email. Please try again.');
-      }
+      console.warn('Password reset process notice:', err);
+      // Still display generic success
+      setResetSuccess(true);
     } finally {
       setResetLoading(false);
     }
@@ -605,127 +851,280 @@ const Login: React.FC = () => {
           </div>
         )}
 
-        {/* Email Verification Screen */}
+        {/* Dual Email & Phone OTP Verification Screen */}
         {showVerificationScreen ? (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="space-y-6"
+            className="space-y-5"
           >
-            <div className="text-center">
-              <div className="w-16 h-16 mx-auto rounded-3xl bg-primary-electric/10 dark:bg-primary-electric/20 text-primary-electric flex items-center justify-center mb-4 relative">
-                <Mail className="w-8 h-8" />
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full border-2 border-white dark:border-surface-container animate-pulse" />
-              </div>
-              <h2 className="text-2xl font-display font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">
-                Verify Your Email
-              </h2>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 font-bold uppercase tracking-widest">
-                We sent a confirmation link to
-              </p>
-              <div className="mt-3 p-3 bg-gray-50 dark:bg-surface-low rounded-2xl border border-gray-200 dark:border-gray-800 text-center font-mono font-bold text-sm text-primary-electric dark:text-primary-electric-light break-all select-all">
-                {verificationEmail}
-              </div>
-            </div>
-
-            {/* Instruction card */}
-            <div className="bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 rounded-2xl p-4 text-xs space-y-2.5 text-gray-600 dark:text-gray-300">
-              <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-primary-electric/10 text-primary-electric font-black flex items-center justify-center shrink-0 text-[10px]">
-                  1
-                </span>
-                <span>Open the verification email sent to your inbox.</span>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-primary-electric/10 text-primary-electric font-black flex items-center justify-center shrink-0 text-[10px]">
-                  2
-                </span>
-                <span>Click the confirmation link to verify your email.</span>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-primary-electric/10 text-primary-electric font-black flex items-center justify-center shrink-0 text-[10px]">
-                  3
-                </span>
-                <span>Return here and click <strong>"I've Verified My Email"</strong> (or wait for auto-detection).</span>
-              </div>
-            </div>
-
-            {/* Status Feedback Message */}
-            {verificationStatus && (
-              <motion.div
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2.5 border ${
-                  verificationStatus.type === 'success'
-                    ? 'bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-900/40'
-                    : verificationStatus.type === 'error'
-                    ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-900/40'
-                    : 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-900/40'
+            {/* Channel Switcher Tabs */}
+            <div className="flex bg-gray-100 dark:bg-surface-low p-1.5 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => { setVerificationChannel('email'); setVerificationStatus(null); }}
+                className={`flex-1 py-2 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                  verificationChannel === 'email'
+                    ? 'bg-white dark:bg-surface-highest text-primary-electric shadow-sm'
+                    : 'text-gray-400 dark:text-gray-500 hover:text-gray-700'
                 }`}
               >
-                {verificationStatus.type === 'success' ? (
-                  <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-                ) : verificationStatus.type === 'error' ? (
-                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                ) : (
-                  <Mail className="w-4 h-4 text-amber-600 shrink-0" />
+                <Mail className="w-3.5 h-3.5" />
+                <span>Email Link</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setVerificationChannel('phone'); setVerificationStatus(null); }}
+                className={`flex-1 py-2 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                  verificationChannel === 'phone'
+                    ? 'bg-white dark:bg-surface-highest text-primary-electric shadow-sm'
+                    : 'text-gray-400 dark:text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Phone className="w-3.5 h-3.5" />
+                <span>Phone OTP</span>
+              </button>
+            </div>
+
+            {verificationChannel === 'email' ? (
+              <div className="space-y-5">
+                <div className="text-center">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-primary-electric/10 dark:bg-primary-electric/20 text-primary-electric flex items-center justify-center mb-3 relative">
+                    <Mail className="w-7 h-7" />
+                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-amber-500 rounded-full border-2 border-white dark:border-surface-container animate-pulse" />
+                  </div>
+                  <h2 className="text-xl font-display font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">
+                    Verify Your Email
+                  </h2>
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1 font-bold uppercase tracking-widest">
+                    Confirmation link sent to
+                  </p>
+                  <div className="mt-2.5 p-2.5 bg-gray-50 dark:bg-surface-low rounded-xl border border-gray-200 dark:border-gray-800 text-center font-mono font-bold text-xs text-primary-electric dark:text-primary-electric-light break-all select-all">
+                    {verificationEmail}
+                  </div>
+                </div>
+
+                {/* Instruction card */}
+                <div className="bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 rounded-2xl p-3.5 text-xs space-y-2 text-gray-600 dark:text-gray-300">
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-primary-electric/10 text-primary-electric font-black flex items-center justify-center shrink-0 text-[10px]">
+                      1
+                    </span>
+                    <span>Open the confirmation email in your inbox or spam folder.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-primary-electric/10 text-primary-electric font-black flex items-center justify-center shrink-0 text-[10px]">
+                      2
+                    </span>
+                    <span>Click the link inside to verify your student email.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-primary-electric/10 text-primary-electric font-black flex items-center justify-center shrink-0 text-[10px]">
+                      3
+                    </span>
+                    <span>Return and click below (or wait for auto-detection).</span>
+                  </div>
+                </div>
+
+                {/* Status Feedback Message */}
+                {verificationStatus && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
+                      verificationStatus.type === 'success'
+                        ? 'bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-900/40'
+                        : verificationStatus.type === 'error'
+                        ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-900/40'
+                        : 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-900/40'
+                    }`}
+                  >
+                    {verificationStatus.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                    ) : verificationStatus.type === 'error' ? (
+                      <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                    ) : (
+                      <Mail className="w-4 h-4 text-amber-600 shrink-0" />
+                    )}
+                    <span>{verificationStatus.message}</span>
+                  </motion.div>
                 )}
-                <span>{verificationStatus.message}</span>
-              </motion.div>
+
+                {/* Action Buttons */}
+                <div className="space-y-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleCheckVerification}
+                    disabled={verificationChecking}
+                    className="w-full py-3.5 bg-primary-electric hover:bg-primary-electric/90 text-white font-black uppercase tracking-wider text-xs rounded-2xl shadow-xl shadow-primary-electric/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {verificationChecking ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Checking Status...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>I've Verified My Email</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={resendCooldown > 0 || verificationResending}
+                    className={`w-full py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 border ${
+                      resendCooldown > 0 || verificationResending
+                        ? 'bg-gray-50 dark:bg-surface-low border-gray-200 dark:border-gray-800 text-gray-400 cursor-not-allowed'
+                        : 'bg-white dark:bg-surface-highest border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {verificationResending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Resending...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className={`w-3.5 h-3.5 ${resendCooldown > 0 ? '' : 'text-primary-electric'}`} />
+                        <span>{resendCooldown > 0 ? `Resend Link in ${resendCooldown}s` : 'Resend Verification Link'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Phone OTP Channel */
+              <div className="space-y-5">
+                <div className="text-center">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-primary-electric/10 dark:bg-primary-electric/20 text-primary-electric flex items-center justify-center mb-3">
+                    <Phone className="w-7 h-7" />
+                  </div>
+                  <h2 className="text-xl font-display font-black text-gray-800 dark:text-high-contrast uppercase tracking-tight">
+                    Verify via Phone OTP
+                  </h2>
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1 font-bold uppercase tracking-widest">
+                    Quick mobile confirmation for students
+                  </p>
+                </div>
+
+                <div className="space-y-3.5">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">
+                      Mobile Number
+                    </label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="tel"
+                          value={otpPhone}
+                          onChange={(e) => setOtpPhone(e.target.value)}
+                          placeholder="+91 98765 43210"
+                          className="w-full pl-11 pr-3 py-3 bg-gray-50 dark:bg-surface-low rounded-xl border border-gray-200 dark:border-gray-800 outline-none font-bold text-xs sm:text-sm text-gray-800 dark:text-white"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleSendPhoneOtp}
+                        disabled={otpCooldown > 0 || otpSending}
+                        className="px-4 py-3 bg-primary-electric hover:bg-primary-electric/90 text-white rounded-xl text-xs font-black uppercase tracking-wider disabled:opacity-50 transition-all flex items-center gap-1.5 shrink-0"
+                      >
+                        {otpSending ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : otpCooldown > 0 ? (
+                          `${otpCooldown}s`
+                        ) : otpSent ? (
+                          'Resend'
+                        ) : (
+                          'Send Code'
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {otpDevHint && (
+                    <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-700 dark:text-emerald-300 text-xs flex items-center justify-between font-mono">
+                      <span>SMS Demo Code: <strong>{otpDevHint}</strong></span>
+                      <button
+                        type="button"
+                        onClick={() => setOtpCode(otpDevHint)}
+                        className="text-[10px] uppercase font-bold underline ml-2"
+                      >
+                        Auto-fill
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">
+                      6-Digit SMS Verification Code
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ''))}
+                      placeholder="• • • • • •"
+                      className="w-full text-center tracking-[0.4em] font-mono font-black text-xl py-3.5 bg-gray-50 dark:bg-surface-low rounded-xl border border-gray-200 dark:border-gray-800 outline-none focus:bg-white dark:focus:bg-surface-highest transition-all text-gray-800 dark:text-white"
+                    />
+                  </div>
+
+                  {/* Status Feedback Message */}
+                  {verificationStatus && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
+                        verificationStatus.type === 'success'
+                          ? 'bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-900/40'
+                          : verificationStatus.type === 'error'
+                          ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border-red-200 dark:border-red-900/40'
+                          : 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-900/40'
+                      }`}
+                    >
+                      {verificationStatus.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                      ) : verificationStatus.type === 'error' ? (
+                        <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                      ) : (
+                        <Phone className="w-4 h-4 text-amber-600 shrink-0" />
+                      )}
+                      <span>{verificationStatus.message}</span>
+                    </motion.div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleVerifyPhoneOtp}
+                    disabled={otpVerifying || otpCode.length !== 6}
+                    className="w-full py-4 bg-primary-electric hover:bg-primary-electric/90 text-white font-black uppercase tracking-wider text-xs rounded-2xl shadow-xl shadow-primary-electric/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {otpVerifying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Validating Code...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Verify Phone & Complete</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             )}
 
-            {/* Action Buttons */}
-            <div className="space-y-3 pt-2">
-              <button
-                type="button"
-                onClick={handleCheckVerification}
-                disabled={verificationChecking}
-                className="w-full py-4 bg-primary-electric hover:bg-primary-electric/90 text-white font-black uppercase tracking-wider text-xs rounded-2xl shadow-xl shadow-primary-electric/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {verificationChecking ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Verifying...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>I've Verified My Email</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleResendVerification}
-                disabled={resendCooldown > 0 || verificationResending}
-                className={`w-full py-3.5 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 border ${
-                  resendCooldown > 0 || verificationResending
-                    ? 'bg-gray-50 dark:bg-surface-low border-gray-200 dark:border-gray-800 text-gray-400 cursor-not-allowed'
-                    : 'bg-white dark:bg-surface-highest border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-opacity-80'
-                }`}
-              >
-                {verificationResending ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Resending Email...</span>
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className={`w-3.5 h-3.5 ${resendCooldown > 0 ? '' : 'text-primary-electric'}`} />
-                    <span>{resendCooldown > 0 ? `Resend Link in ${resendCooldown}s` : 'Resend Verification Link'}</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCancelVerification}
-                className="w-full text-center py-2.5 text-xs font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 uppercase tracking-widest transition-colors"
-              >
-                ← Back to Login / Edit Email
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleCancelVerification}
+              className="w-full text-center py-2 text-xs font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 uppercase tracking-widest transition-colors"
+            >
+              ← Back to Login / Edit Email
+            </button>
           </motion.div>
         ) : (
           <>
@@ -811,6 +1210,18 @@ const Login: React.FC = () => {
               onSubmit={handleEmailAuth} 
               className="space-y-5"
             >
+              {/* Bot trap honeypot field */}
+              <input
+                type="text"
+                name="_hp_trap"
+                value={honeypotTrap}
+                onChange={(e) => setHoneypotTrap(e.target.value)}
+                tabIndex={-1}
+                autoComplete="off"
+                aria-hidden="true"
+                className="opacity-0 absolute pointer-events-none -z-50 h-0 w-0 p-0 m-0 border-0"
+              />
+
               {mode === 'signup' && (
                 <div className="space-y-2">
                   <label className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Full Name</label>
@@ -883,13 +1294,70 @@ const Login: React.FC = () => {
                   <input
                     type="password"
                     required
+                    disabled={mode === 'login' && lockoutRemaining > 0}
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     placeholder="••••••••"
-                    className="w-full pl-13 pr-5 py-4 bg-gray-50 dark:bg-surface-low rounded-2xl focus:bg-white dark:focus:bg-surface-highest border border-gray-200 dark:border-gray-800 outline-none transition-all dark:text-high-contrast font-bold text-sm"
+                    className="w-full pl-13 pr-5 py-4 bg-gray-50 dark:bg-surface-low rounded-2xl focus:bg-white dark:focus:bg-surface-highest border border-gray-200 dark:border-gray-800 outline-none transition-all dark:text-high-contrast font-bold text-sm disabled:opacity-50"
                   />
                 </div>
+
+                {/* Password Criteria Checklist during signup */}
+                {mode === 'signup' && formData.password.length > 0 && (
+                  <div className="p-3 bg-gray-50 dark:bg-surface-low rounded-2xl border border-gray-200 dark:border-gray-800 space-y-1.5 text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      {passwordCriteria.minLength ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      ) : (
+                        <span className="w-3.5 h-3.5 rounded-full border border-gray-300 dark:border-gray-600 shrink-0 inline-block" />
+                      )}
+                      <span className={passwordCriteria.minLength ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-gray-400'}>
+                        At least 8 characters
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {passwordCriteria.hasUpper ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      ) : (
+                        <span className="w-3.5 h-3.5 rounded-full border border-gray-300 dark:border-gray-600 shrink-0 inline-block" />
+                      )}
+                      <span className={passwordCriteria.hasUpper ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-gray-400'}>
+                        At least 1 uppercase letter (A-Z)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {passwordCriteria.hasLower ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      ) : (
+                        <span className="w-3.5 h-3.5 rounded-full border border-gray-300 dark:border-gray-600 shrink-0 inline-block" />
+                      )}
+                      <span className={passwordCriteria.hasLower ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-gray-400'}>
+                        At least 1 lowercase letter (a-z)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {passwordCriteria.hasNumber ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      ) : (
+                        <span className="w-3.5 h-3.5 rounded-full border border-gray-300 dark:border-gray-600 shrink-0 inline-block" />
+                      )}
+                      <span className={passwordCriteria.hasNumber ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-gray-400'}>
+                        At least 1 number (0-9)
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {/* Progressive Lockout Banner */}
+              {lockoutRemaining > 0 && mode === 'login' && (
+                <div className="p-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 rounded-2xl flex items-center gap-2.5 text-red-700 dark:text-red-300 text-xs font-bold">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 animate-pulse" />
+                  <span>
+                    Login locked due to repeated failed attempts. Please wait <strong className="font-mono tabular-nums">{lockoutRemaining}s</strong> before trying again.
+                  </span>
+                </div>
+              )}
 
               {/* Referral Code (Optional for Signup) */}
               {mode === 'signup' && (
@@ -969,10 +1437,18 @@ const Login: React.FC = () => {
 
               <button
                 type="submit"
-                disabled={loading}
-                className="w-full py-4.5 bg-gradient-to-br from-primary-electric to-[#3323cc] text-white font-black uppercase tracking-widest text-xs rounded-2xl transition-all shadow-xl shadow-primary-electric/20 dark:shadow-none haptic-feedback flex items-center justify-center"
+                disabled={loading || (mode === 'login' && lockoutRemaining > 0)}
+                className="w-full py-4.5 bg-gradient-to-br from-primary-electric to-[#3323cc] text-white font-black uppercase tracking-widest text-xs rounded-2xl transition-all shadow-xl shadow-primary-electric/20 dark:shadow-none haptic-feedback flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (mode === 'signup' ? 'Create Account' : 'Sign In')}
+                {loading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : mode === 'login' && lockoutRemaining > 0 ? (
+                  `Locked (${lockoutRemaining}s)`
+                ) : mode === 'signup' ? (
+                  'Create Account'
+                ) : (
+                  'Sign In'
+                )}
               </button>
             </motion.form>
           )}
@@ -1141,6 +1617,17 @@ const Login: React.FC = () => {
               </div>
             ) : (
               <form onSubmit={handleSendPasswordReset} className="space-y-4 pt-2">
+                {/* Bot trap honeypot field */}
+                <input
+                  type="text"
+                  name="_hp_trap"
+                  value={honeypotTrap}
+                  onChange={(e) => setHoneypotTrap(e.target.value)}
+                  tabIndex={-1}
+                  autoComplete="off"
+                  aria-hidden="true"
+                  className="opacity-0 absolute pointer-events-none -z-50 h-0 w-0 p-0 m-0 border-0"
+                />
                 {resetError && (
                   <p className="text-red-500 text-xs font-bold uppercase tracking-widest bg-red-50 dark:bg-red-900/10 p-3.5 rounded-xl border border-red-100 dark:border-red-900/30">
                     {resetError}

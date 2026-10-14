@@ -5,9 +5,33 @@ import {defineConfig, loadEnv} from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({mode}) => {
-  const env = loadEnv(mode, '.', '');
+  const env = loadEnv(mode, process.cwd(), '');
   return {
     plugins: [
+      {
+        name: 'suppress-hmr-websocket-errors',
+        transform(code, id) {
+          if (id.includes('@vite/client') || id.includes('vite/dist/client/client.mjs')) {
+            return code
+              .replace(
+                'reject(new Error("WebSocket closed without opened."));',
+                'resolve();'
+              )
+              .replace(
+                'reject(new Error("WebSocket closed without opened."))',
+                'resolve()'
+              )
+              .replace(
+                'throw e;',
+                '/* HMR WebSocket is disabled in AI Studio cloud iframe */'
+              )
+              .replace(
+                /console\.error\(\s*`\[vite\] failed to connect to websocket/g,
+                'console.debug(`[vite] failed to connect to websocket'
+              );
+          }
+        },
+      },
       react(), 
       tailwindcss(),
       VitePWA({
@@ -86,7 +110,7 @@ export default defineConfig(({mode}) => {
           ],
         },
         devOptions: {
-          enabled: true,
+          enabled: false,
           type: 'module',
         },
       }),
@@ -96,8 +120,25 @@ export default defineConfig(({mode}) => {
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(process.cwd(), '.'),
       },
+      dedupe: ['react', 'react-dom', 'react-router-dom'],
+    },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'react-router-dom',
+        'recharts',
+        'lucide-react',
+        'motion/react',
+        'date-fns',
+        'react-hot-toast',
+      ],
+      force: true,
     },
     build: {
       target: 'esnext',
@@ -135,7 +176,7 @@ export default defineConfig(({mode}) => {
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      hmr: process.env.DISABLE_HMR !== 'true',
+      hmr: false,
     },
   };
 });

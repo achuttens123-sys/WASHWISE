@@ -12,11 +12,12 @@ import { Store, checkIsSubscriber } from '../types';
 import TermsModal from '../components/TermsModal';
 import { GarmentPieceSelector } from '../components/GarmentPieceSelector';
 import { calculateGarmentTotal, GARMENT_CATALOG } from '../data/garmentCatalog';
+import { toast } from 'react-hot-toast';
 
 const BookingDetails: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, isAdmin, firebaseUser } = useAuth();
   const { settings } = useSettings();
   
   const [acceptedTerms, setAcceptedTerms] = useState(true);
@@ -182,6 +183,15 @@ const BookingDetails: React.FC = () => {
 
   const handleNext = () => {
     if (!canProceed) return;
+
+    // Student account verification guard
+    const isVerified = Boolean(user?.emailVerified || user?.phoneVerified || firebaseUser?.emailVerified);
+    if (user && !isAdmin && !isVerified) {
+      toast.error('Please verify your student email or phone number before confirming your booking.', {
+        id: 'booking-verification-guard'
+      });
+      return;
+    }
 
     const isSubscriber = checkIsSubscriber(user);
     const deliveryFee = (bookingData.pickupDrop && !isSubscriber) ? (settings?.pricing?.deliveryFee ?? 30) : 0;

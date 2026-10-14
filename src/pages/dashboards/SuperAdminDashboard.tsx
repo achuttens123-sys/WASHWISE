@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
@@ -55,7 +55,8 @@ import {
   RotateCcw,
   Layers,
   CalendarRange,
-  Bell
+  Bell,
+  HardDrive
 } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, updateDoc, doc, getDoc, runTransaction, where, limit, addDoc, deleteDoc, setDoc, getDocs } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
@@ -68,6 +69,10 @@ import LoadingScreen from '../../components/LoadingScreen';
 import ConfirmModal from '../../components/ConfirmModal';
 import FraudRiskCenter from '../../components/FraudRiskCenter';
 import ReminderManager from '../../components/admin/ReminderManager';
+import { DatabaseResilienceCenter } from '../../components/admin/DatabaseResilienceCenter';
+import { PaymentReconciliationCenter } from '../../components/admin/PaymentReconciliationCenter';
+import { PaginationControls } from '../../components/PaginationControls';
+import { formatDateTimeIST, formatIST } from '../../utils/timezone';
 import { authFetch } from '../../utils/api';
 import { 
   LineChart, 
@@ -95,7 +100,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
   const [replyingFeedbackId, setReplyingFeedbackId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'stores' | 'orders' | 'users' | 'pricing' | 'finance' | 'logistics' | 'maintenance' | 'availability' | 'machines' | 'feedback' | 'fraud' | 'reminders'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'stores' | 'orders' | 'users' | 'pricing' | 'finance' | 'logistics' | 'maintenance' | 'availability' | 'machines' | 'feedback' | 'fraud' | 'reminders' | 'resilience' | 'reconciliation'>('overview');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [globalSettings, setGlobalSettings] = useState<any>(null);
@@ -104,6 +109,12 @@ const SuperAdminDashboard: React.FC = () => {
   const [garmentCategoryFilter, setGarmentCategoryFilter] = useState<string>('all');
   const [garmentSearchTerm, setGarmentSearchTerm] = useState<string>('');
   
+  // Pagination States for Dense Tables
+  const [ordersPage, setOrdersPage] = useState<number>(1);
+  const [ordersPageSize, setOrdersPageSize] = useState<number>(10);
+  const [usersPage, setUsersPage] = useState<number>(1);
+  const [usersPageSize, setUsersPageSize] = useState<number>(10);
+
   // Store Management State
   const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
   const [editingStore, setEditingStore] = useState<Store | null>(null);
@@ -172,6 +183,15 @@ const SuperAdminDashboard: React.FC = () => {
   const [slotPeriod, setSlotPeriod] = useState<'AM' | 'PM'>('PM');
   const [isSavingSlots, setIsSavingSlots] = useState(false);
   const [ordersStoreFilter, setOrdersStoreFilter] = useState<string>('all');
+
+  // Auto-reset page numbers on search or filter updates
+  useEffect(() => {
+    setOrdersPage(1);
+  }, [ordersStoreFilter, searchTerm]);
+
+  useEffect(() => {
+    setUsersPage(1);
+  }, [userFilterRole, userFilterStore, searchTerm]);
 
   useEffect(() => {
     // Global data fetching for Super Admin: Listen to collection directly to guarantee 100% of orders are shown
@@ -968,6 +988,33 @@ const SuperAdminDashboard: React.FC = () => {
     return matchesSearch && matchesRole && matchesStore;
   });
 
+  const paginatedUsers = useMemo(() => {
+    const start = (usersPage - 1) * usersPageSize;
+    return filteredUsers.slice(start, start + usersPageSize);
+  }, [filteredUsers, usersPage, usersPageSize]);
+
+  const filteredGlobalOrders = useMemo(() => {
+    return bookings.filter(b => {
+      if (ordersStoreFilter !== 'all') {
+        if (ordersStoreFilter === 'default') {
+          if (b.storeId && b.storeId !== 'default') return false;
+        } else if (b.storeId !== ordersStoreFilter) {
+          return false;
+        }
+      }
+      const search = (searchTerm || '').toLowerCase();
+      return (b.id || '').toLowerCase().includes(search) || 
+             (b.bookingId || '').toLowerCase().includes(search) || 
+             (b.userName || '').toLowerCase().includes(search) ||
+             (b.userId || '').toLowerCase().includes(search);
+    });
+  }, [bookings, ordersStoreFilter, searchTerm]);
+
+  const paginatedGlobalOrders = useMemo(() => {
+    const start = (ordersPage - 1) * ordersPageSize;
+    return filteredGlobalOrders.slice(start, start + ordersPageSize);
+  }, [filteredGlobalOrders, ordersPage, ordersPageSize]);
+
   const COLORS = ['#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e'];
 
   return (
@@ -1037,6 +1084,8 @@ const SuperAdminDashboard: React.FC = () => {
           { id: 'feedback', label: 'Queries & Feedback', icon: MessageSquare },
           { id: 'fraud', label: 'Fraud & Risk Protection', icon: ShieldAlert },
           { id: 'reminders', label: 'Wash Reminders', icon: Bell },
+          { id: 'resilience', label: 'Database & Resilience', icon: HardDrive },
+          { id: 'reconciliation', label: 'Payment & Reconciliation', icon: ShieldCheck },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -2737,22 +2786,15 @@ const SuperAdminDashboard: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                    {bookings
-                      .filter(b => {
-                        if (ordersStoreFilter !== 'all') {
-                          if (ordersStoreFilter === 'default') {
-                            if (b.storeId && b.storeId !== 'default') return false;
-                          } else if (b.storeId !== ordersStoreFilter) {
-                            return false;
-                          }
-                        }
-                        const search = (searchTerm || '').toLowerCase();
-                        return (b.id || '').toLowerCase().includes(search) || 
-                               (b.bookingId || '').toLowerCase().includes(search) || 
-                               (b.userName || '').toLowerCase().includes(search) ||
-                               (b.userId || '').toLowerCase().includes(search);
-                      })
-                      .map((order) => (
+                    {filteredGlobalOrders.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-slate-500">
+                          <p className="text-sm font-semibold">No orders found matching the filter criteria.</p>
+                          <span className="text-xs text-slate-400">Try adjusting your search or store filter.</span>
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedGlobalOrders.map((order) => (
                       <tr key={order.id} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all">
                         <td className="py-6">
                           <span className="text-sm font-black text-gray-800 dark:text-gray-100">{order.bookingId || `#${order.id?.slice(-6).toUpperCase()}`}</span>
@@ -2779,6 +2821,7 @@ const SuperAdminDashboard: React.FC = () => {
                         <td className="py-6">
                           <select
                             value={order.status}
+                            aria-label={`Update status for order ${order.bookingId || order.id}`}
                             onChange={async (e) => {
                               const newStatus = e.target.value as any;
                               try {
@@ -2794,7 +2837,7 @@ const SuperAdminDashboard: React.FC = () => {
                                 console.error('Error updating order status:', err);
                               }
                             }}
-                            className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest outline-none border cursor-pointer ${
+                            className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest outline-none border cursor-pointer focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                               order.status === 'completed' ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' :
                               order.status === 'Washing completed' ? 'bg-teal-100 text-teal-700 border-teal-200 dark:bg-teal-900/30 dark:text-teal-400 dark:border-teal-800' :
                               order.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800' :
@@ -2824,10 +2867,23 @@ const SuperAdminDashboard: React.FC = () => {
                           )}
                         </td>
                       </tr>
-                    ))}
+                    )))}
                   </tbody>
                 </table>
               </div>
+
+              {filteredGlobalOrders.length > 0 && (
+                <PaginationControls
+                  currentPage={ordersPage}
+                  totalItems={filteredGlobalOrders.length}
+                  pageSize={ordersPageSize}
+                  onPageChange={setOrdersPage}
+                  onPageSizeChange={setOrdersPageSize}
+                  pageSizeOptions={[10, 25, 50]}
+                  itemLabel="orders"
+                  className="mt-6"
+                />
+              )}
             </div>
           </motion.div>
         )}
@@ -2883,7 +2939,7 @@ const SuperAdminDashboard: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                    {filteredUsers.map((user) => (
+                    {paginatedUsers.map((user) => (
                       <tr key={user.uid} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all">
                         <td className="py-6">
                           <div className="flex items-center gap-4">
@@ -2982,6 +3038,18 @@ const SuperAdminDashboard: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+
+              {filteredUsers.length > 0 && (
+                <PaginationControls
+                  currentPage={usersPage}
+                  totalItems={filteredUsers.length}
+                  pageSize={usersPageSize}
+                  onPageChange={setUsersPage}
+                  onPageSizeChange={setUsersPageSize}
+                  pageSizeOptions={[5, 10, 25, 50]}
+                  itemLabel="users"
+                />
+              )}
             </div>
           </motion.div>
         )}
@@ -3912,6 +3980,30 @@ const SuperAdminDashboard: React.FC = () => {
             className="space-y-6"
           >
             <ReminderManager />
+          </motion.div>
+        )}
+
+        {activeTab === 'resilience' && (
+          <motion.div
+            key="resilience"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="space-y-6"
+          >
+            <DatabaseResilienceCenter />
+          </motion.div>
+        )}
+
+        {activeTab === 'reconciliation' && (
+          <motion.div
+            key="reconciliation"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="space-y-6"
+          >
+            <PaymentReconciliationCenter />
           </motion.div>
         )}
       </AnimatePresence>

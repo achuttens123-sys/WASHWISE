@@ -3,24 +3,84 @@
   <head>
     <meta charset="UTF-8" />
     <script>
-      // Gracefully prevent benign Vite dev server WebSocket disconnect warnings from surfacing in AI Studio iframe
+      // 1. Immediately unregister any stale service workers or dev module caches that may cause chunk hash mismatch
       (function() {
+        if ('serviceWorker' in navigator && (
+          window.location.hostname.includes('ais-dev') || 
+          window.location.hostname.includes('run.app') || 
+          window.location.hostname === 'localhost'
+        )) {
+          try {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+              for (var i = 0; i < registrations.length; i++) {
+                registrations[i].unregister();
+              }
+            }).catch(function() {});
+            if ('caches' in window) {
+              caches.keys().then(function(keys) {
+                for (var j = 0; j < keys.length; j++) {
+                  if (keys[j].indexOf('workbox') !== -1 || keys[j].indexOf('vite') !== -1) {
+                    caches.delete(keys[j]);
+                  }
+                }
+              }).catch(function() {});
+            }
+          } catch (e) {}
+        }
+      })();
+
+      // 2. Gracefully prevent benign Vite dev server WebSocket disconnect warnings from surfacing in AI Studio iframe
+      (function() {
+        var isViteWsError = function(val) {
+          if (!val) return false;
+          var str = '';
+          if (typeof val === 'string') {
+            str = val;
+          } else if (val instanceof Error) {
+            str = (val.message || '') + ' ' + (val.stack || '');
+          } else if (typeof val === 'object') {
+            try {
+              str = (val.message || '') + ' ' + (val.stack || '') + ' ' + JSON.stringify(val);
+            } catch (e) {
+              str = String(val);
+            }
+          } else {
+            str = String(val);
+          }
+          return str.indexOf('WebSocket') !== -1 || 
+                 str.indexOf('closed without opened') !== -1 || 
+                 str.indexOf('@vite/client') !== -1 ||
+                 str.indexOf('vite:ws') !== -1 ||
+                 str.indexOf('vite-hmr') !== -1 ||
+                 str.indexOf('[vite]') !== -1;
+        };
+
         var origConsoleError = console.error;
         console.error = function() {
           var args = Array.prototype.slice.call(arguments);
-          var text = args.map(function(a) { 
-            return (a && a.stack) ? a.stack : (typeof a === 'object' ? (a.message || JSON.stringify(a)) : String(a)); 
-          }).join(' ');
-          if (text.indexOf('WebSocket') !== -1 || text.indexOf('closed without opened') !== -1 || text.indexOf('@vite/client') !== -1) {
-            return; // Gracefully filter benign Vite dev server WebSocket disconnect error
+          for (var i = 0; i < args.length; i++) {
+            if (isViteWsError(args[i])) {
+              return; // Gracefully filter benign Vite dev server WebSocket disconnect error
+            }
           }
           origConsoleError.apply(console, arguments);
         };
 
+        var origConsoleWarn = console.warn;
+        console.warn = function() {
+          var args = Array.prototype.slice.call(arguments);
+          for (var i = 0; i < args.length; i++) {
+            if (isViteWsError(args[i])) {
+              return;
+            }
+          }
+          origConsoleWarn.apply(console, arguments);
+        };
+
         window.addEventListener('error', function(e) {
           if (e && (
-            (e.message && (e.message.indexOf('WebSocket') !== -1 || e.message.indexOf('closed without opened') !== -1)) ||
-            (e.error && e.error.message && (e.error.message.indexOf('WebSocket') !== -1 || e.error.message.indexOf('closed without opened') !== -1)) ||
+            isViteWsError(e.message) ||
+            isViteWsError(e.error) ||
             (e.filename && e.filename.indexOf('@vite/client') !== -1)
           )) {
             if (e.stopImmediatePropagation) e.stopImmediatePropagation();
@@ -30,12 +90,10 @@
         }, true);
 
         window.addEventListener('unhandledrejection', function(e) {
-          if (e && e.reason) {
-            var msg = (typeof e.reason === 'string') ? e.reason : (e.reason.message || '');
-            if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('closed without opened') !== -1) {
-              if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-              if (e.preventDefault) e.preventDefault();
-            }
+          if (e && isViteWsError(e.reason)) {
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            if (e.preventDefault) e.preventDefault();
+            return true;
           }
         }, true);
       })();

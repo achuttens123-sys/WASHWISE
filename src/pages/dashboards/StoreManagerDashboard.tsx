@@ -52,6 +52,8 @@ import { format } from 'date-fns';
 import { WashingTagModal } from '../../components/WashingTagModal';
 import { InvoiceModal } from '../../components/InvoiceModal';
 import { TagScannerModal } from '../../components/TagScannerModal';
+import { PaginationControls } from '../../components/PaginationControls';
+import { getTodayIST, formatIST, formatDateTimeIST } from '../../utils/timezone';
 import { authFetch } from '../../utils/api';
 
 const StoreManagerDashboard: React.FC = () => {
@@ -80,15 +82,22 @@ const StoreManagerDashboard: React.FC = () => {
   const [storeDetails, setStoreDetails] = useState<{ name: string; phone: string; address: string } | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
-  // All Orders dedicated filter state
+  // All Orders dedicated filter and pagination state
   const [allOrdersSearchTerm, setAllOrdersSearchTerm] = useState('');
   const [allOrdersStatusFilter, setAllOrdersStatusFilter] = useState('all');
   const [allOrdersDateFilter, setAllOrdersDateFilter] = useState<'all' | 'today' | 'upcoming' | 'past'>('all');
   const [allOrdersServiceFilter, setAllOrdersServiceFilter] = useState('all');
   const [sideColumnStatusFilter, setSideColumnStatusFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [allOrdersPage, setAllOrdersPage] = useState<number>(1);
+  const [allOrdersPageSize, setAllOrdersPageSize] = useState<number>(10);
+
+  // Reset page when any all_orders filter changes
+  useEffect(() => {
+    setAllOrdersPage(1);
+  }, [allOrdersSearchTerm, allOrdersStatusFilter, allOrdersDateFilter, allOrdersServiceFilter]);
 
   // Machine Availability & Fleet Management State
-  const [availabilityDate, setAvailabilityDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [availabilityDate, setAvailabilityDate] = useState(() => getTodayIST());
   const [selectedTimeSlot, setSelectedTimeSlot] = useState(TIME_SLOTS[0]);
   const [currentSlotData, setCurrentSlotData] = useState<Slot | null>(null);
   const [isClearingSlot, setIsClearingSlot] = useState(false);
@@ -1258,7 +1267,7 @@ const StoreManagerDashboard: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50 dark:divide-gray-800/80 text-xs">
-                        {filteredOrders.map((order) => (
+                        {filteredOrders.slice((allOrdersPage - 1) * allOrdersPageSize, allOrdersPage * allOrdersPageSize).map((order) => (
                           <tr key={order.id} className="hover:bg-gray-50/60 dark:hover:bg-gray-800/40 transition-all">
                             {/* Order ID & Time */}
                             <td className="px-5 py-4">
@@ -1409,6 +1418,17 @@ const StoreManagerDashboard: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
+                  {filteredOrders.length > 0 && (
+                    <PaginationControls
+                      currentPage={allOrdersPage}
+                      totalItems={filteredOrders.length}
+                      pageSize={allOrdersPageSize}
+                      onPageChange={setAllOrdersPage}
+                      onPageSizeChange={setAllOrdersPageSize}
+                      pageSizeOptions={[5, 10, 25, 50]}
+                      itemLabel="orders"
+                    />
+                  )}
                 </div>
               );
             })()}

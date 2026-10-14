@@ -273,9 +273,121 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when incident was detected" }
       },
       "required": ["riskType", "severity", "actionTaken", "details", "createdAt"]
+    },
+    "IdempotencyRecord": {
+      "title": "IdempotencyRecord",
+      "description": "Deduplication record ensuring critical operations are executed exactly once.",
+      "type": "object",
+      "properties": {
+        "idempotencyKey": { "type": "string", "description": "Unique client token" },
+        "userId": { "type": "string", "description": "UID of user who initiated request" },
+        "resourceType": { "type": "string", "description": "Operation type (booking, wallet_topup, etc.)" },
+        "status": { "type": "string", "enum": ["in_progress", "completed", "failed"], "description": "Processing status" },
+        "responseData": { "type": "object", "description": "Cached response payload for instant replay" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "expiresAt": { "type": "string", "format": "date-time", "description": "TTL expiration timestamp" }
+      },
+      "required": ["idempotencyKey", "userId", "resourceType", "status", "createdAt"]
+    },
+    "DatabaseBackup": {
+      "title": "DatabaseBackup",
+      "description": "Automated snapshot metadata for database backups and disaster recovery.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Backup ID" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Snapshot timestamp" },
+        "environment": { "type": "string", "enum": ["development", "staging", "production"], "description": "Origin environment" },
+        "collections": { "type": "object", "description": "Item counts per collection" },
+        "totalDocuments": { "type": "number", "description": "Total documents backed up" },
+        "checksumSha256": { "type": "string", "description": "SHA256 checksum of payload" },
+        "status": { "type": "string", "enum": ["completed", "failed"], "description": "Backup status" },
+        "restorationTestedAt": { "type": "string", "format": "date-time", "description": "Timestamp of last automated restoration test" },
+        "restorationStatus": { "type": "string", "enum": ["verified", "failed"], "description": "Result of verification test" }
+      },
+      "required": ["id", "timestamp", "environment", "collections", "checksumSha256", "status"]
+    },
+    "SchemaMigration": {
+      "title": "SchemaMigration",
+      "description": "Safe database schema migration ledger entry.",
+      "type": "object",
+      "properties": {
+        "version": { "type": "number", "description": "Sequential migration version" },
+        "name": { "type": "string", "description": "Human-readable migration title" },
+        "appliedAt": { "type": "string", "format": "date-time", "description": "Execution timestamp" },
+        "status": { "type": "string", "enum": ["applied", "rolled_back", "failed"], "description": "Migration status" },
+        "checksum": { "type": "string", "description": "Migration script checksum" },
+        "executionTimeMs": { "type": "number", "description": "Execution duration in milliseconds" },
+        "rollbackSupported": { "type": "boolean", "description": "Whether reversible rollback script exists" }
+      },
+      "required": ["version", "name", "appliedAt", "status", "checksum", "rollbackSupported"]
+    },
+    "PaymentRecord": {
+      "title": "PaymentRecord",
+      "description": "Server-authoritative payment record with provider references and zero raw card data.",
+      "type": "object",
+      "properties": {
+        "paymentId": { "type": "string", "description": "Internal transaction ID" },
+        "bookingId": { "type": "string", "description": "Linked booking document ID" },
+        "userId": { "type": "string", "description": "Customer UID" },
+        "amount": { "type": "number", "description": "Amount in INR" },
+        "currency": { "type": "string", "description": "Currency code (INR)" },
+        "status": { "type": "string", "enum": ["pending", "successful", "failed", "refunded"], "description": "Payment state" },
+        "paymentMethod": { "type": "string", "description": "Payment method used" },
+        "providerTxnId": { "type": "string", "description": "Payment gateway reference ID" },
+        "idempotencyKey": { "type": "string", "description": "Deduplication key" },
+        "reconciled": { "type": "boolean", "description": "Reconciliation match status" },
+        "reconciledAt": { "type": "string", "format": "date-time", "description": "Timestamp of reconciliation" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["paymentId", "bookingId", "userId", "amount", "status", "paymentMethod", "createdAt"]
+    },
+    "RefundRecord": {
+      "title": "RefundRecord",
+      "description": "Payment cancellation refund record.",
+      "type": "object",
+      "properties": {
+        "refundId": { "type": "string", "description": "Unique refund record ID" },
+        "paymentId": { "type": "string", "description": "Original payment transaction ID" },
+        "bookingId": { "type": "string", "description": "Linked booking ID" },
+        "userId": { "type": "string", "description": "Customer UID" },
+        "amount": { "type": "number", "description": "Amount refunded" },
+        "reason": { "type": "string", "description": "Reason for cancellation" },
+        "status": { "type": "string", "enum": ["processed", "failed"], "description": "Refund execution status" },
+        "refundMethod": { "type": "string", "description": "Target refund method (wallet or original_source)" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of refund" }
+      },
+      "required": ["refundId", "paymentId", "bookingId", "userId", "amount", "status", "refundMethod", "createdAt"]
+    },
+    "ReconciliationReport": {
+      "title": "ReconciliationReport",
+      "description": "Financial ledger reconciliation audit report.",
+      "type": "object",
+      "properties": {
+        "reportId": { "type": "string", "description": "Unique reconciliation report ID" },
+        "periodStart": { "type": "string", "format": "date-time", "description": "Period start date" },
+        "periodEnd": { "type": "string", "format": "date-time", "description": "Period end date" },
+        "totalTransactions": { "type": "number", "description": "Total payment records checked" },
+        "matchedCount": { "type": "number", "description": "Count of matched records" },
+        "mismatchCount": { "type": "number", "description": "Count of discrepancies detected" },
+        "totalVolume": { "type": "number", "description": "Total processed volume" },
+        "generatedAt": { "type": "string", "format": "date-time", "description": "Timestamp generated" }
+      },
+      "required": ["reportId", "totalTransactions", "matchedCount", "mismatchCount", "totalVolume", "generatedAt"]
     }
   },
   "firestore": {
+    "/payments/{paymentId}": {
+      "schema": "PaymentRecord",
+      "description": "Authoritative payment audit ledger with zero raw card data"
+    },
+    "/refunds/{refundId}": {
+      "schema": "RefundRecord",
+      "description": "Cancellation and refund audit records"
+    },
+    "/reconciliation_reports/{reportId}": {
+      "schema": "ReconciliationReport",
+      "description": "Automated payment reconciliation reports"
+    },
     "/risk_logs/{logId}": {
       "schema": "RiskLog",
       "description": "Fraud and risk protection incident logs"
@@ -323,6 +435,18 @@
     "/role_permissions/{roleId}": {
       "schema": "RolePermissions",
       "description": "Permissions assigned to each administrative role"
+    },
+    "/idempotency_keys/{keyId}": {
+      "schema": "IdempotencyRecord",
+      "description": "Deduplication ledger for transactional mutations"
+    },
+    "/database_backups/{backupId}": {
+      "schema": "DatabaseBackup",
+      "description": "Automated snapshot metadata and verification status"
+    },
+    "/schema_migrations/{migrationId}": {
+      "schema": "SchemaMigration",
+      "description": "Database schema migration records"
     }
   }
 }

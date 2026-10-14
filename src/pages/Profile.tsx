@@ -1273,10 +1273,10 @@ const Profile: React.FC = () => {
                         <Gift className="w-3.5 h-3.5" /> WashWise Referral Network
                       </div>
                       <h2 className="text-2xl sm:text-4xl font-display font-black tracking-tight leading-tight">
-                        Give ₹{settings?.referral?.refereeDiscountRupees ?? 50}, Earn {settings?.referral?.referrerCredits ?? 20} Credits (+ ₹{settings?.referral?.referrerWalletCash ?? 50} Wallet Cash on first 3 referrals)
+                        Give {settings?.referral?.refereeBonusCredits ?? 10} Credits, Earn {settings?.referral?.referrerCredits ?? 20} Credits
                       </h2>
                       <p className="text-xs sm:text-sm text-indigo-100 font-medium leading-relaxed">
-                        Share your referral code with college friends and hostel mates. When they complete their first wash, you automatically earn laundry credits for every referral, plus ₹{settings?.referral?.referrerWalletCash ?? 50} wallet cash on your first 3 referrals (up to ₹150 max)!
+                        Share your referral code with college friends and hostel mates. When they complete their first wash, you automatically earn laundry credits for every referral!
                       </p>
                     </div>
                   </div>
@@ -1289,7 +1289,7 @@ const Profile: React.FC = () => {
                           Your Exclusive Referral Code
                         </h3>
                         <p className="text-xs text-gray-400">
-                          Friends enter this code during signup to get ₹{settings?.referral?.refereeDiscountRupees ?? 50} OFF instantly.
+                          Friends enter this code during signup to get {settings?.referral?.refereeBonusCredits ?? 10} Free Credits instantly.
                         </p>
                       </div>
                       <span className="text-xs font-black text-primary-electric flex items-center gap-1">
@@ -1376,6 +1376,18 @@ const Profile: React.FC = () => {
                       </div>
                     </div>
 
+                    <div className="p-6 rounded-3xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 text-center">
+                      <div className="w-10 h-10 mx-auto mb-2 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                        <CheckCircle className="w-5 h-5" />
+                      </div>
+                      <div className="text-3xl font-display font-black text-gray-900 dark:text-high-contrast">
+                        {userReferrals.filter(r => r.status === 'completed').length}
+                      </div>
+                      <div className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">
+                        Completed Washes
+                      </div>
+                    </div>
+
                     <div className="p-6 rounded-3xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 text-center">
                       <div className="w-10 h-10 mx-auto mb-2 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
                         <Zap className="w-5 h-5" />
@@ -1385,18 +1397,6 @@ const Profile: React.FC = () => {
                       </div>
                       <div className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">
                         Laundry Credits Earned
-                      </div>
-                    </div>
-
-                    <div className="p-6 rounded-3xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 text-center">
-                      <div className="w-10 h-10 mx-auto mb-2 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                        <Wallet className="w-5 h-5" />
-                      </div>
-                      <div className="text-3xl font-display font-black text-gray-900 dark:text-high-contrast">
-                        ₹{user.totalReferralCashEarned ?? (Math.min(userReferrals.filter(r => r.status === 'completed').length, 3) * (settings?.referral?.referrerWalletCash ?? 50))}
-                      </div>
-                      <div className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-1">
-                        Wallet Cash ({Math.min(userReferrals.filter(r => r.status === 'completed').length, 3)}/3 Won)
                       </div>
                     </div>
                   </div>
@@ -1459,7 +1459,7 @@ const Profile: React.FC = () => {
                             <div className="flex items-center justify-between sm:justify-end gap-3">
                               {item.status === 'completed' ? (
                                 <span className="inline-flex items-center gap-1.5 font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100/80 dark:bg-emerald-950/40 px-3 py-1.5 rounded-xl text-xs uppercase tracking-wider">
-                                  +{item.rewardCredits || 20} Credits {item.rewardWalletCash > 0 ? `& +₹${item.rewardWalletCash} Cash` : '(Credits Only)'}
+                                  +{item.rewardCredits || 20} Credits
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-950/40 px-3 py-1.5 rounded-xl text-xs uppercase tracking-wider">

@@ -119,9 +119,14 @@ service cloud.firestore {
       // User profile update: Regular users can update personal info (name, phone, address, savedAddresses, referralCode)
       // but are strictly blocked from self-modifying wallet balance, credits, subscriber status, or role
       allow update: if isAuthenticated() && (
-        isAdmin() || 
         isSuperAdmin() || 
-        (isStoreManager() && resource.data.get('storeId', '') == getStoreId()) ||
+        (isStoreManager() && resource.data.get('storeId', '') == getStoreId() &&
+          // Store managers cannot modify user roles or financial balances
+          (request.resource.data.get('role', 'user') == resource.data.get('role', 'user')) &&
+          (request.resource.data.get('adminRole', '') == resource.data.get('adminRole', '')) &&
+          (request.resource.data.get('walletBalance', 0) == resource.data.get('walletBalance', 0)) &&
+          (request.resource.data.get('laundryCredits', 0) == resource.data.get('laundryCredits', 0))
+        ) ||
         (isOwner(userId) && (
           // Role immutability
           (request.resource.data.get('role', 'user') == resource.data.get('role', 'user')) &&
@@ -137,7 +142,7 @@ service cloud.firestore {
         ))
       );
 
-      allow delete: if isAuthenticated() && (isOwner(userId) || isAdmin() || isSuperAdmin());
+      allow delete: if isAuthenticated() && (isOwner(userId) || isSuperAdmin());
     }
 
     // Slots Collection: Regular users can read; store managers / admins manage availability
@@ -197,12 +202,12 @@ service cloud.firestore {
 
     match /admin_roles/{email} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isSuperAdmin();
+      allow write: if isSuperAdmin();
     }
 
     match /role_permissions/{roleId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isSuperAdmin();
+      allow write: if isSuperAdmin();
     }
 
     match /limited_offers/{offerId} {
@@ -248,6 +253,54 @@ service cloud.firestore {
 
     // Fraud and Risk Protection Incident Logs
     match /risk_logs/{logId} {
+      allow read: if isAdmin() || isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    // Idempotency Keys: Protected deduplication ledger
+    match /idempotency_keys/{keyId} {
+      allow read: if isAuthenticated() && (resource == null || request.auth.uid == resource.data.userId || isAdmin() || isSuperAdmin());
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    // Database Backups & Snapshots: SuperAdmin only
+    match /database_backups/{backupId} {
+      allow read: if isSuperAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // Schema Migrations Ledger: SuperAdmin only
+    match /schema_migrations/{migrationId} {
+      allow read: if isSuperAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // Non-destructive Backup Verification Sandbox: SuperAdmin only
+    match /_backup_verification_test/{docId} {
+      allow read: if isSuperAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // Payment Audit Ledger: Users read their own payments, Admins read all
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() && (resource == null || request.auth.uid == resource.data.userId || isAdmin() || isSuperAdmin());
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    // Refund Records: Users read their own refunds, Admins read all
+    match /refunds/{refundId} {
+      allow read: if isAuthenticated() && (resource == null || request.auth.uid == resource.data.userId || isAdmin() || isSuperAdmin());
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    // Webhook Events Ledger & Idempotency: Protected Admin/Server log
+    match /payment_webhooks/{webhookId} {
+      allow read: if isAdmin() || isSuperAdmin();
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    // Financial Reconciliation Reports: Admins and SuperAdmins only
+    match /reconciliation_reports/{reportId} {
       allow read: if isAdmin() || isSuperAdmin();
       allow write: if isAdmin() || isSuperAdmin();
     }

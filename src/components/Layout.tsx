@@ -320,8 +320,8 @@ const Layout: React.FC = () => {
         )}
       </header>
 
-      {/* Email Verification Reminder Banner */}
-      {!isAuthPage && user && firebaseUser && !firebaseUser.emailVerified && firebaseUser.providerData.some(p => p.providerId === 'password') && (
+      {/* Email / Phone Verification Reminder Banner */}
+      {!isAuthPage && user && firebaseUser && !firebaseUser.emailVerified && !user.emailVerified && !user.phoneVerified && firebaseUser.providerData.some(p => p.providerId === 'password') && (
         <div className="bg-amber-500/10 dark:bg-amber-500/15 border-b border-amber-500/30 px-4 py-3">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2.5 text-amber-900 dark:text-amber-200">
@@ -395,7 +395,8 @@ const Layout: React.FC = () => {
           <div className="grid grid-cols-4 h-14 items-center px-1">
             <button
               onClick={() => navigate('/dashboard')}
-              className={`flex flex-col items-center justify-center py-1 transition-colors haptic-feedback ${
+              aria-label="View machine slots dashboard"
+              className={`min-h-[44px] flex flex-col items-center justify-center py-1 transition-colors haptic-feedback outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-lg ${
                 location.pathname === '/dashboard' ? 'text-primary-electric dark:text-primary-electric-light font-bold' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
               }`}
             >
@@ -405,7 +406,8 @@ const Layout: React.FC = () => {
 
             <button
               onClick={() => navigate('/orders')}
-              className={`flex flex-col items-center justify-center py-1 transition-colors haptic-feedback ${
+              aria-label="View orders and booking history"
+              className={`min-h-[44px] flex flex-col items-center justify-center py-1 transition-colors haptic-feedback outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-lg ${
                 location.pathname === '/orders' ? 'text-primary-electric dark:text-primary-electric-light font-bold' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
               }`}
             >
@@ -415,7 +417,8 @@ const Layout: React.FC = () => {
 
             <button
               onClick={() => setShowReferralModal(true)}
-              className="flex flex-col items-center justify-center py-1 text-amber-500 hover:text-amber-600 transition-colors haptic-feedback"
+              aria-label="Open referral program and earn credits"
+              className="min-h-[44px] flex flex-col items-center justify-center py-1 text-amber-500 hover:text-amber-600 transition-colors haptic-feedback outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-lg"
             >
               <Gift className="w-4 h-4 mb-0.5" />
               <span className="text-[9.5px] tracking-tight font-black uppercase text-amber-600 dark:text-amber-400">Refer</span>
@@ -423,7 +426,8 @@ const Layout: React.FC = () => {
 
             <button
               onClick={() => navigate('/profile')}
-              className={`flex flex-col items-center justify-center py-1 transition-colors haptic-feedback ${
+              aria-label="View user profile and wallet account"
+              className={`min-h-[44px] flex flex-col items-center justify-center py-1 transition-colors haptic-feedback outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-lg ${
                 location.pathname === '/profile' ? 'text-primary-electric dark:text-primary-electric-light font-bold' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
               }`}
             >

@@ -264,6 +264,21 @@ export const TagScannerModal: React.FC<TagScannerModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Security & file validation: Check MIME type and file size (max 10MB)
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/bmp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      setCameraError('Invalid file type. Please upload a standard image file (JPEG, PNG, WEBP).');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    if (file.size > MAX_FILE_SIZE) {
+      setCameraError('File is too large. Image file must be under 10MB.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     try {
       setIsSearching(true);
       const html5QrCode = new Html5Qrcode('qr-file-hidden-mount');

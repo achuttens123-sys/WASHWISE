@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User as FirebaseUser, sendEmailVerification } from 'firebase/auth';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import { onAuthStateChanged, onIdTokenChanged, User as FirebaseUser, sendEmailVerification } from 'firebase/auth';
 import { doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { User } from '../types';
@@ -18,6 +18,8 @@ interface AuthContextType {
   isStoreStaff: boolean;
   isDeliveryStaff: boolean;
   isEmailVerified: boolean;
+  isPhoneVerified: boolean;
+  isAccountVerified: boolean;
   reloadUser: () => Promise<FirebaseUser | null>;
   resendEmailVerification: () => Promise<void>;
   login: (userData: User) => Promise<void>;
@@ -29,6 +31,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const DEVICE_SESSION_KEY = 'washwise_device_auth_session';
 export const DEVICE_REMEMBER_FLAG = 'washwise_remember_device';
+export const LAST_ACTIVITY_KEY = 'washwise_last_activity';
+export const INACTIVITY_TIMEOUT_MS = 14 * 24 * 60 * 60 * 1000; // 14-day inactivity window
 
 const cleanData = (data: any) => {
   const cleaned = { ...data };
@@ -41,10 +45,21 @@ const cleanData = (data: any) => {
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const activeSnapshotUnsubRef = useRef<(() => void) | null>(null);
+
   // Restore user instantly from device memory to eliminate flash of logged-out state
   const [user, setUser] = useState<User | null>(() => {
     if (typeof window !== 'undefined') {
       try {
+        const lastActive = localStorage.getItem(LAST_ACTIVITY_KEY);
+        if (lastActive && Date.now() - Number(lastActive) > INACTIVITY_TIMEOUT_MS) {
+          // Session expired due to inactivity
+          localStorage.removeItem(DEVICE_SESSION_KEY);
+          localStorage.removeItem(DEVICE_REMEMBER_FLAG);
+          localStorage.removeItem(LAST_ACTIVITY_KEY);
+          return null;
+        }
+
         const saved = localStorage.getItem(DEVICE_SESSION_KEY);
         if (saved) {
           const parsed = JSON.parse(saved);
@@ -77,6 +92,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [isAuthReady, setIsAuthReady] = useState(false);
 
+  // Inactivity tracking: record user activity across common interaction events
+  useEffect(() => {
+    let lastRecorded = 0;
+    const recordActivity = () => {
+      const now = Date.now();
+      if (now - lastRecorded > 30000) { // Throttle writes to once every 30 seconds
+        lastRecorded = now;
+        try {
+          localStorage.setItem(LAST_ACTIVITY_KEY, now.toString());
+        } catch (e) {}
+      }
+    };
+
+    recordActivity();
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    events.forEach(evt => window.addEventListener(evt, recordActivity, { passive: true }));
+
+    // Periodic inactivity checker (runs every 10 minutes)
+    const inactivityInterval = setInterval(() => {
+      try {
+        const stored = localStorage.getItem(LAST_ACTIVITY_KEY);
+        if (stored && Date.now() - Number(stored) > INACTIVITY_TIMEOUT_MS && auth.currentUser) {
+          console.warn('[AuthContext] Session expired due to inactivity. Logging out.');
+          logout();
+        }
+      } catch (e) {}
+    }, 10 * 60 * 1000);
+
+    return () => {
+      events.forEach(evt => window.removeEventListener(evt, recordActivity));
+      clearInterval(inactivityInterval);
+    };
+  }, []);
+
+  // Background proactive token refresh (every 20 minutes)
+  useEffect(() => {
+    const tokenRefreshInterval = setInterval(async () => {
+      if (auth.currentUser) {
+        try {
+          await auth.currentUser.getIdToken(false);
+          console.log('[AuthContext] Background ID token refreshed smoothly');
+        } catch (err) {
+          console.warn('[AuthContext] Token refresh notice:', err);
+        }
+      }
+    }, 20 * 60 * 1000);
+
+    return () => clearInterval(tokenRefreshInterval);
+  }, []);
+
   const isSuperAdmin = user?.adminRole === 'super_admin' || isSuperAdminEmail(user?.email);
   const isStoreAdmin = user?.adminRole === 'store_admin';
   const isStoreManager = user?.adminRole === 'store_manager' || isStoreAdmin;
@@ -85,28 +150,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isAdmin = isSuperAdmin || isStoreAdmin || isStoreManager || isStoreStaff || isDeliveryStaff || user?.role === 'admin' || !!user?.adminRole;
 
   useEffect(() => {
-    let userUnsubscribe: (() => void) | null = null;
-
-    const authUnsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+    // Listen for both auth state and ID token refresh changes
+    const idTokenUnsubscribe = onIdTokenChanged(auth, async (fbUser) => {
       setFirebaseUser(fbUser);
-      
-      if (userUnsubscribe) {
-        userUnsubscribe();
-        userUnsubscribe = null;
+
+      // Clean up previous user snapshot listener
+      if (activeSnapshotUnsubRef.current) {
+        activeSnapshotUnsubRef.current();
+        activeSnapshotUnsubRef.current = null;
       }
 
       if (fbUser) {
-        userUnsubscribe = onSnapshot(doc(db, 'users', fbUser.uid), async (docSnap) => {
+        activeSnapshotUnsubRef.current = onSnapshot(doc(db, 'users', fbUser.uid), async (docSnap) => {
           if (docSnap.exists()) {
             const userData = docSnap.data() as User;
             if (userData.isSuspended) {
-              setUser(null);
-              localStorage.removeItem(DEVICE_SESSION_KEY);
-              localStorage.removeItem(DEVICE_REMEMBER_FLAG);
-              auth.signOut();
+              await logout();
               alert('Your account has been suspended. Please contact support.');
+              return;
             } else {
-              // If adminRole is not in user doc, check admin_roles (legacy/email-based)
+              // If adminRole is not in user doc, check admin_roles (email-based)
               if (!userData.adminRole && fbUser.email) {
                 try {
                   const adminRoleSnap = await getDoc(doc(db, 'admin_roles', fbUser.email));
@@ -158,6 +221,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               try {
                 localStorage.setItem(DEVICE_SESSION_KEY, JSON.stringify(userData));
                 localStorage.setItem(DEVICE_REMEMBER_FLAG, 'true');
+                localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
               } catch (e) {
                 console.warn('Could not save device session:', e);
               }
@@ -166,7 +230,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           } else {
             // User record does not exist yet in Firestore
-            // Keep user from device memory if available during signup/registration transition
             const saved = localStorage.getItem(DEVICE_SESSION_KEY);
             if (!saved) {
               setUser(null);
@@ -182,7 +245,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       } else {
         // Firebase Auth reported no active user
-        // Clear cached device memory only if there is genuinely no user
         localStorage.removeItem(DEVICE_SESSION_KEY);
         localStorage.removeItem(DEVICE_REMEMBER_FLAG);
         setUser(null);
@@ -192,8 +254,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => {
-      authUnsubscribe();
-      if (userUnsubscribe) userUnsubscribe();
+      idTokenUnsubscribe();
+      if (activeSnapshotUnsubRef.current) {
+        activeSnapshotUnsubRef.current();
+        activeSnapshotUnsubRef.current = null;
+      }
     };
   }, []);
 
@@ -203,6 +268,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       localStorage.setItem(DEVICE_SESSION_KEY, JSON.stringify(cleanedUserData));
       localStorage.setItem(DEVICE_REMEMBER_FLAG, 'true');
+      localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
       await setDoc(doc(db, 'users', userData.uid), cleanedUserData, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${userData.uid}`);
@@ -216,13 +282,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(updatedUser);
     try {
       localStorage.setItem(DEVICE_SESSION_KEY, JSON.stringify(updatedUser));
+      localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
       await updateDoc(doc(db, 'users', user.uid), cleanedUpdate);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
     }
   };
 
-  const isEmailVerified = Boolean(firebaseUser?.emailVerified);
+  const isEmailVerified = Boolean(firebaseUser?.emailVerified || user?.emailVerified);
+  const isPhoneVerified = Boolean(user?.phoneVerified);
+  const isAccountVerified = isEmailVerified || isPhoneVerified;
 
   const reloadUser = async (): Promise<FirebaseUser | null> => {
     if (auth.currentUser) {
@@ -245,8 +314,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
+      // Unsubscribe active snapshot listener immediately to prevent any post-logout permission errors
+      if (activeSnapshotUnsubRef.current) {
+        activeSnapshotUnsubRef.current();
+        activeSnapshotUnsubRef.current = null;
+      }
       localStorage.removeItem(DEVICE_SESSION_KEY);
       localStorage.removeItem(DEVICE_REMEMBER_FLAG);
+      localStorage.removeItem('washwise_remembered_email');
+      localStorage.removeItem(LAST_ACTIVITY_KEY);
+      localStorage.removeItem('washwise_auth_lockout_until');
+      localStorage.removeItem('washwise_failed_login_attempts');
+      sessionStorage.clear();
       await auth.signOut();
     } catch (err) {
       console.error('Logout error:', err);
@@ -265,13 +344,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isAuthReady, 
       isAdmin, 
       isSuperAdmin, 
-      isStoreAdmin,
+      isStoreAdmin, 
       isStoreManager, 
-      isStoreStaff,
-      isDeliveryStaff,
+      isStoreStaff, 
+      isDeliveryStaff, 
       isEmailVerified,
-      reloadUser,
-      resendEmailVerification,
+      isPhoneVerified,
+      isAccountVerified,
+      reloadUser, 
+      resendEmailVerification, 
       login, 
       updateUser, 
       logout 
@@ -279,7 +360,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
 export const useAuth = () => {
   const context = useContext(AuthContext);

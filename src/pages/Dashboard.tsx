@@ -11,6 +11,9 @@ import { format, addDays, isSameDay } from 'date-fns';
 import TermsModal from '../components/TermsModal';
 import { OfferBanner } from '../components/OfferBanner';
 import { ReferralCard } from '../components/ReferralCard';
+import { isSlotInPastIST } from '../utils/timezone';
+
+import { toast } from 'react-hot-toast';
 
 const LAUNDRY_TIPS = [
   "Separate whites from colors to prevent bleeding.",
@@ -28,7 +31,7 @@ const slotsMemoryCache = new Map<string, { data: Record<string, Slot>; timestamp
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAdmin, firebaseUser } = useAuth();
   const { settings } = useSettings();
   
   const isSubscriber = checkIsSubscriber(user);
@@ -213,33 +216,20 @@ const Dashboard: React.FC = () => {
   };
 
   const isSlotInPast = (slot: string) => {
-    if (!isSameDay(selectedDate, new Date())) return false;
-    
-    try {
-      const parts = slot.trim().split(' ');
-      const timeRange = parts[0] || '';
-      const period = (parts[1] || '').toUpperCase();
-      const endTime = timeRange.split('-')[1] || timeRange.split('-')[0] || '';
-      let [hours, minutes] = endTime.split(':').map(Number);
-      if (isNaN(hours)) hours = 0;
-      if (isNaN(minutes)) minutes = 0;
-      
-      if (period === 'PM') {
-        if (hours < 12) hours += 12; // 12 PM stays 12, 1-11 PM becomes 13-23
-      } else if (period === 'AM') {
-        if (hours === 12) hours = 0;
-      }
-      
-      const slotEndTime = new Date();
-      slotEndTime.setHours(hours, minutes, 0, 0);
-      
-      return slotEndTime <= new Date();
-    } catch (e) {
-      return false;
-    }
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    return isSlotInPastIST(dateStr, slot);
   };
 
   const handleSlotSelect = (timeSlot: string) => {
+    // Require email or phone verification for student accounts
+    const isVerified = Boolean(user?.emailVerified || user?.phoneVerified || firebaseUser?.emailVerified);
+    if (user && !isAdmin && !isVerified) {
+      toast.error('Please verify your student email or phone number to book slots.', {
+        id: 'verify-prompt'
+      });
+      return;
+    }
+
     if (user?.userType === 'subscriber' && !user?.subscriptionPaid) {
       navigate(`/billing?type=subscription&packageId=${user.package}`);
       return;

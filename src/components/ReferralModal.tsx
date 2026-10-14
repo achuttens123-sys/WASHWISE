@@ -39,9 +39,9 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
   const referralConfig = settings?.referral || {
     enabled: true,
     referrerCredits: 20,
-    referrerWalletCash: 50,
+    referrerWalletCash: 0,
     refereeBonusCredits: 10,
-    refereeDiscountRupees: 50
+    refereeDiscountRupees: 0
   };
 
   const referralCode = user?.referralCode || 'WASHWISE';
@@ -108,10 +108,7 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
   const completedReferrals = referrals.filter(r => r.status === 'completed');
   const pendingReferrals = referrals.filter(r => r.status === 'pending');
 
-  const maxCashCount = referralConfig.maxWalletCashReferrals ?? 3;
-  const cashRewardedCount = Math.min(completedReferrals.length, maxCashCount);
   const totalCreditsEarned = user?.totalReferralCreditsEarned || (completedReferrals.length * referralConfig.referrerCredits);
-  const totalCashEarned = user?.totalReferralCashEarned ?? (cashRewardedCount * referralConfig.referrerWalletCash);
 
   if (!isOpen) return null;
 
@@ -140,13 +137,13 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
 
             <div className="relative z-10">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-black uppercase tracking-wider mb-3">
-                <Gift className="w-3.5 h-3.5" /> Refer & Earn Rewards
+                <Gift className="w-3.5 h-3.5" /> Refer & Earn Credits
               </div>
               <h2 className="text-2xl sm:text-3xl font-display font-black tracking-tight leading-tight">
-                Give ₹{referralConfig.refereeDiscountRupees}, Get {referralConfig.referrerCredits} Credits (+ ₹{referralConfig.referrerWalletCash} Cash on first 3 referrals)
+                Give {referralConfig.refereeBonusCredits} Credits, Get {referralConfig.referrerCredits} Credits
               </h2>
               <p className="text-xs sm:text-sm text-indigo-100 mt-2 font-medium leading-relaxed max-w-md">
-                Invite fellow students & friends. Earn ₹{referralConfig.referrerWalletCash} wallet cash on your first 3 referrals (up to ₹{referralConfig.referrerWalletCash * maxCashCount}), plus {referralConfig.referrerCredits} laundry credits on every referral!
+                Invite fellow students & friends. You earn {referralConfig.referrerCredits} laundry credits on every referral, and your friends get {referralConfig.refereeBonusCredits} free credits on signup!
               </p>
             </div>
 
@@ -219,6 +216,18 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
                 </div>
               </div>
 
+              <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 text-center">
+                <div className="w-8 h-8 mx-auto mb-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+                <div className="text-xl sm:text-2xl font-display font-black text-gray-900 dark:text-high-contrast">
+                  {completedReferrals.length}
+                </div>
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mt-0.5">
+                  Completed
+                </div>
+              </div>
+
               <div className="p-4 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 text-center">
                 <div className="w-8 h-8 mx-auto mb-1.5 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
                   <Coins className="w-4 h-4" />
@@ -228,18 +237,6 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
                 </div>
                 <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mt-0.5">
                   Credits Earned
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 text-center">
-                <div className="w-8 h-8 mx-auto mb-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
-                  <Wallet className="w-4 h-4" />
-                </div>
-                <div className="text-xl sm:text-2xl font-display font-black text-gray-900 dark:text-high-contrast">
-                  ₹{totalCashEarned}
-                </div>
-                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mt-0.5">
-                  Wallet Cash ({cashRewardedCount}/3 Won)
                 </div>
               </div>
             </div>
@@ -271,7 +268,7 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
                     Friend Signs Up
                   </h4>
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    They instantly get {referralConfig.refereeBonusCredits} Credits + ₹{referralConfig.refereeDiscountRupees} OFF on their first wash.
+                    They instantly get {referralConfig.refereeBonusCredits} Free Laundry Credits on signup.
                   </p>
                 </div>
 
@@ -283,7 +280,7 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
                     You Get Rewarded
                   </h4>
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    You get {referralConfig.referrerCredits} Credits on every referral + ₹{referralConfig.referrerWalletCash} wallet cash on your first 3 referrals!
+                    You get {referralConfig.referrerCredits} Laundry Credits when they complete their first wash!
                   </p>
                 </div>
               </div>
@@ -342,7 +339,7 @@ export const ReferralModal: React.FC<ReferralModalProps> = ({ isOpen, onClose })
                       <div className="text-right">
                         {item.status === 'completed' ? (
                           <span className="inline-flex items-center gap-1 font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2 py-1 rounded-lg text-[10px] uppercase">
-                            +{item.rewardCredits || 20} Credits {item.rewardWalletCash > 0 ? `& +₹${item.rewardWalletCash}` : '(Credits Only)'}
+                            +{item.rewardCredits || 20} Credits
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-2 py-1 rounded-lg text-[10px] uppercase">

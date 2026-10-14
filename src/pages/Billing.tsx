@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, CreditCard, Loader2, CheckCircle2, ShieldCheck, Wallet, Store, Zap, Check, Sparkles, Coins } from 'lucide-react';
@@ -15,6 +15,13 @@ const Billing: React.FC = () => {
   const { user, updateUser } = useAuth();
   const { settings } = useSettings();
   
+  // Client-side unique idempotency key for this checkout session to eliminate double-submissions
+  const idempotencyKeyRef = useRef<string>(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? (crypto as any).randomUUID()
+      : `idemp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+  );
+
   const [loading, setLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'card' | 'pay_at_store' | 'subscription_credits'>('wallet');
   const [error, setError] = useState('');
@@ -357,10 +364,14 @@ const Billing: React.FC = () => {
     try {
       const response = await authFetch('/api/payments/process-booking', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-idempotency-key': idempotencyKeyRef.current
+        },
         body: JSON.stringify({
           userId: user.uid,
           paymentMethod: 'subscription_credits',
+          idempotencyKey: idempotencyKeyRef.current,
           bookingDetails: {
             ...bookingInfo,
             price: 0,
@@ -467,10 +478,14 @@ const Billing: React.FC = () => {
 
       const response = await authFetch('/api/payments/process-booking', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-idempotency-key': idempotencyKeyRef.current
+        },
         body: JSON.stringify({
           userId: user.uid,
           paymentMethod,
+          idempotencyKey: idempotencyKeyRef.current,
           bookingDetails: {
             ...bookingInfo,
             codPrepaidSource,
@@ -994,15 +1009,23 @@ const Billing: React.FC = () => {
                 {error && <p className="text-red-500 text-xs sm:text-sm mb-3 sm:mb-4 font-medium bg-red-50 dark:bg-red-900/20 p-2.5 sm:p-3 rounded-xl">{error}</p>}
 
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileHover={{ scale: loading || (isPayingWithCredits && hasInsufficientCredits) ? 1 : 1.02 }}
+                  whileTap={{ scale: loading || (isPayingWithCredits && hasInsufficientCredits) ? 1 : 0.98 }}
                   onClick={handlePayment}
-                  disabled={loading}
-                  className="w-full py-3 sm:py-4 bg-blue-600 text-white text-xs sm:text-sm font-bold rounded-xl sm:rounded-2xl hover:bg-blue-700 transition-all shadow-md shadow-blue-200 dark:shadow-none flex items-center justify-center haptic-feedback glow-blue"
+                  disabled={loading || (isPayingWithCredits && hasInsufficientCredits)}
+                  aria-label={isPayingWithCredits ? "Confirm wash booking using plan credits" : "Complete laundry booking payment"}
+                  className={`w-full min-h-[48px] py-3 sm:py-4 text-xs sm:text-sm font-bold rounded-xl sm:rounded-2xl transition-all shadow-md flex items-center justify-center haptic-feedback outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                    loading || (isPayingWithCredits && hasInsufficientCredits)
+                      ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed shadow-none'
+                      : isPayingWithCredits
+                        ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-600/20'
+                        : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200 dark:shadow-none glow-blue'
+                  }`}
                 >
                   {loading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
+                    isPayingWithCredits ? `Confirm Wash (${bookingCreditsNeeded} Cr • Free Wash)` :
                     paymentMethod === 'wallet' ? `Pay ₹${finalPrice.toFixed(2)} with Wallet (₹0 Fee)` :
                     paymentMethod === 'card' ? `Pay ₹${finalPrice.toFixed(2)} Online (₹0 Fee)` :
                     `Pay ₹${codPrepaidAmount.toFixed(2)} Online (Rest ₹${codRemainingAmount.toFixed(2)} COD)`
@@ -1295,9 +1318,10 @@ const Billing: React.FC = () => {
         <button
           onClick={isPayingWithCredits ? handleSubscriberBook : handlePayment}
           disabled={loading || (isPayingWithCredits && hasInsufficientCredits)}
-          className={`px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all shadow-md haptic-feedback touch-manipulation ${
+          aria-label={isPayingWithCredits ? "Confirm wash booking using plan credits" : "Submit laundry payment"}
+          className={`min-h-[44px] px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all shadow-md haptic-feedback touch-manipulation outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
             loading || (isPayingWithCredits && hasInsufficientCredits)
-              ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+              ? 'bg-gray-200 dark:bg-gray-800 text-gray-400 cursor-not-allowed shadow-none'
               : isPayingWithCredits
                 ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-600/20'
                 : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/20'

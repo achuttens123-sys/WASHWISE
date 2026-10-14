@@ -18,9 +18,9 @@ export const ReferralCard: React.FC<ReferralCardProps> = ({ variant = 'banner' }
   const referralConfig = settings?.referral || {
     enabled: true,
     referrerCredits: 20,
-    referrerWalletCash: 50,
+    referrerWalletCash: 0,
     refereeBonusCredits: 10,
-    refereeDiscountRupees: 50
+    refereeDiscountRupees: 0
   };
 
   const referralCode = user?.referralCode || 'WASHWISE';
@@ -105,11 +105,11 @@ export const ReferralCard: React.FC<ReferralCardProps> = ({ variant = 'banner' }
             </div>
             
             <h3 className="text-sm sm:text-2xl font-display font-black tracking-tight leading-snug">
-              Earn {referralConfig.referrerCredits} Credits for every referral (+ ₹{referralConfig.referrerWalletCash} Wallet Cash on your first 3 referrals)!
+              Earn {referralConfig.referrerCredits} Credits for every referral!
             </h3>
 
             <p className="text-[10px] sm:text-sm text-indigo-100 font-medium leading-relaxed">
-              Your friends get <span className="font-bold text-white">₹{referralConfig.refereeDiscountRupees} OFF + {referralConfig.refereeBonusCredits} Credits</span> on their first order.
+              Your friends get <span className="font-bold text-white">+{referralConfig.refereeBonusCredits} Free Credits</span> on their first order.
             </p>
           </div>
 
